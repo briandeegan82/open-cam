@@ -102,6 +102,8 @@ done
 echo "== 3-6/6 Post stages per Munsell render =="
 for scene in "${SCENES[@]}"; do
   hue="$(basename "$(dirname "${scene}")")"
+  scene_stem="$(basename "${scene}" .pbrt)"
+  munsell_manifest_abs="$(dirname "${scene}")/${scene_stem}_manifest.json"
   noisy_raw_rel="out/munsell_noise/${hue}/munsell_${hue}_noisy.raw16"
   noisy_png_rel="out/munsell_noise/${hue}/munsell_${hue}_noisy_png"
   exr_rel="out/munsell_${hue}_spectral.exr"
@@ -136,6 +138,7 @@ for scene in "${SCENES[@]}"; do
       "${PY}" "${REPO_DIR}/${PBRT_EXR_TO_ELECTRONS_TOOL_REL}" \
         --repo-root "${REPO_DIR}" \
         --exr "${exr_abs}" \
+        --scene-manifest-json "${munsell_manifest_abs}" \
         --camera-model-config "${REPO_DIR}/${CAMERA_MODEL_CONFIG_REL}" \
         --out "${munsell_npz_abs}"
     else

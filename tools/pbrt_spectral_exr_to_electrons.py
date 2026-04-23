@@ -79,6 +79,12 @@ def main() -> None:
     ap.add_argument("--camera-model-config", type=Path, default=None, help="Camera model YAML path (preferred).")
     ap.add_argument("--sensor-config", type=Path, default=None, help="sensor_forward.yaml")
     ap.add_argument("--noise-config", type=Path, default=None, help="noise_emva.yaml (sensor + QE paths).")
+    ap.add_argument(
+        "--scene-manifest-json",
+        type=Path,
+        default=None,
+        help="Optional scene manifest override for EXR resolution check.",
+    )
     ap.add_argument("--out", type=Path, default=None, help="Output NPZ (default: sensor_forward output path).")
     ap.add_argument(
         "--target-illuminance-lux",
@@ -155,7 +161,12 @@ def main() -> None:
     if not exr_path.is_file():
         raise FileNotFoundError(exr_path)
 
-    manifest_path = (repo / cfg.get("inputs", {}).get("scene_manifest_json", "scenes/generated/colorchecker_manifest.json")).resolve()
+    manifest_raw = args.scene_manifest_json or cfg.get("inputs", {}).get("scene_manifest_json", "scenes/generated/colorchecker_manifest.json")
+    manifest_path = (
+        manifest_raw.resolve()
+        if isinstance(manifest_raw, Path) and manifest_raw.is_absolute()
+        else (repo / manifest_raw).resolve()
+    )
     if not manifest_path.is_file():
         raise FileNotFoundError(f"need {manifest_path} for resolution check (run build_colorchecker_scene.py)")
     manifest = json.loads(manifest_path.read_text())

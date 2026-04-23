@@ -23,7 +23,7 @@ render:
   yres: 640
   # Keep Monte Carlo render noise sub-dominant to sensor/noise stages.
   # For quick iteration, lower this (e.g. 64-256). For final runs, keep >=1024.
-  pixelsamples: 64
+  pixelsamples: 1024
   film: spectral
   film_output: null
   spectral_nbuckets: 32
