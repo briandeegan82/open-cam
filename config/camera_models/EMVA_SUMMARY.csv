@@ -1,0 +1,62 @@
+file,name,display_name,sensor_class,pixel_pitch_um,fill_factor,bit_depth,full_well_e,K_e_per_DN,sigma_d_e,black_level_DN,prnu_std_fraction,dsnu_std_e,emva_param_method
+canon_eos_20d.yaml,canon_eos_20d,Canon EOS 20D,,6.4,0.45,12,45000,1.2,7.5,256,0.015,1.2,manual_or_default
+canon_eos_5dsr.yaml,canon_eos_5dsr,Canon EOS 5DsR,,4.14,0.5,14,65000,1.4,5.5,512,0.012,0.8,manual_or_default
+canon_eos_80d.yaml,canon_eos_80d,Canon EOS 80D,,3.75,0.55,14,50000,1.7,3.5,512,0.01,0.6,manual_or_default
+canon_eos_850d.yaml,canon_eos_850d,Canon EOS 850D,apsc,3.9,0.58,14,15210,0.928,3.0,512,0.01,0.3,heuristic_scaling_rules_v1
+canon_eos_90d.yaml,canon_eos_90d,Canon EOS 90D,apsc,3.9,0.58,14,15210,0.928,3.0,512,0.01,0.3,heuristic_scaling_rules_v1
+canon_eos_m200.yaml,canon_eos_m200,Canon EOS M200,apsc,3.9,0.58,14,15210,0.928,3.0,512,0.01,0.3,heuristic_scaling_rules_v1
+canon_eos_m6mii.yaml,canon_eos_m6mii,Canon EOS M6MII,apsc,3.9,0.58,14,15210,0.928,3.0,512,0.01,0.3,heuristic_scaling_rules_v1
+canon_eos_r.yaml,canon_eos_r,Canon EOS_R,,5.36,0.6,14,60000,1.8,3.2,512,0.009,0.5,manual_or_default
+canon_powershot_g5_x.yaml,canon_powershot_g5_x,Canon Powershot G5 X,compact,2.4,0.7,12,5760,1.406,2.2,256,0.015,0.22,heuristic_scaling_rules_v1
+default.yaml,default,,,1.4,0.95,10,4800,4.77,2.6,16,0.01,0.3,manual_or_default
+fujifilm_gfx_50r.yaml,fujifilm_gfx_50r,Fujifilm GFX 50R,,5.3,0.65,14,80000,2.0,2.5,512,0.008,0.4,manual_or_default
+fujifilm_x100v.yaml,fujifilm_x100v,Fujifilm X100V,apsc,3.9,0.58,14,15210,0.928,3.0,512,0.01,0.3,heuristic_scaling_rules_v1
+fujifilm_x_a7.yaml,fujifilm_x_a7,Fujifilm X-A7,apsc,3.9,0.58,14,15210,0.928,3.0,512,0.01,0.3,heuristic_scaling_rules_v1
+fujifilm_x_pro2.yaml,fujifilm_x_pro2,Fujifilm X-Pro2,apsc,3.9,0.58,14,15210,0.928,3.0,512,0.01,0.3,heuristic_scaling_rules_v1
+fujifilm_x_t3.yaml,fujifilm_x_t3,Fujifilm X-T3,apsc,3.9,0.58,14,15210,0.928,3.0,512,0.01,0.3,heuristic_scaling_rules_v1
+fujifilm_x_t4.yaml,fujifilm_x_t4,Fujifilm X-T4,,3.76,0.6,14,45000,1.8,2.5,512,0.009,0.5,manual_or_default
+google_pixel_3.yaml,google_pixel_3,Google Pixel 3,,1.4,0.78,12,12000,0.35,1.5,64,0.018,0.25,manual_or_default
+huawei_mate_20_pro.yaml,huawei_mate_20_pro,Huawei Mate 20 Pro,phone,1.4,0.76,12,1960,0.479,1.6,64,0.018,0.16,heuristic_scaling_rules_v1
+iphone_8.yaml,iphone_8,iPhone 8,phone,1.4,0.76,12,1960,0.479,1.6,64,0.018,0.16,heuristic_scaling_rules_v1
+iphone_x_tele.yaml,iphone_x_tele,iPhone X tele,phone,1.4,0.76,12,1960,0.479,1.6,64,0.018,0.16,heuristic_scaling_rules_v1
+iphone_x_wide.yaml,iphone_x_wide,iPhone X wide,,1.22,0.75,10,12000,0.3,1.5,64,0.02,0.3,manual_or_default
+iphone_xs_max.yaml,iphone_xs_max,iPhone XS Max,phone,1.4,0.76,12,1960,0.479,1.6,64,0.018,0.16,heuristic_scaling_rules_v1
+konica_minolta_a2.yaml,konica_minolta_a2,Konica Minolta A2,compact,2.4,0.7,12,5760,1.406,2.2,256,0.015,0.22,heuristic_scaling_rules_v1
+konica_minolta_dynax7d.yaml,konica_minolta_dynax7d,Konica_Minolta Dynax7D,old,6.0,0.45,12,36000,8.789,7.0,256,0.015,0.7,heuristic_scaling_rules_v1
+leica_cl.yaml,leica_cl,Leica CL,apsc,3.9,0.58,14,15210,0.928,3.0,512,0.01,0.3,heuristic_scaling_rules_v1
+leica_m_type_262.yaml,leica_m_type_262,Leica M Type 262,fullframe,5.4,0.63,14,29160,1.78,2.5,512,0.008,0.25,heuristic_scaling_rules_v1
+nikon_d3500.yaml,nikon_d3500,Nikon D3500,apsc,3.9,0.58,14,15210,0.928,3.0,512,0.01,0.3,heuristic_scaling_rules_v1
+nikon_d7100.yaml,nikon_d7100,Nikon D7100,apsc,3.9,0.58,14,15210,0.928,3.0,512,0.01,0.3,heuristic_scaling_rules_v1
+nikon_d7200.yaml,nikon_d7200,Nikon D7200,apsc,3.9,0.58,14,15210,0.928,3.0,512,0.01,0.3,heuristic_scaling_rules_v1
+nikon_d780.yaml,nikon_d780,Nikon D780,fullframe,5.4,0.63,14,29160,1.78,2.5,512,0.008,0.25,heuristic_scaling_rules_v1
+nikon_d800e.yaml,nikon_d800e,Nikon D800E,,4.88,0.6,14,45000,1.9,2.7,600,0.008,0.4,manual_or_default
+nikon_p1000.yaml,nikon_p1000,Nikon P1000,compact,2.4,0.7,12,5760,1.406,2.2,256,0.015,0.22,heuristic_scaling_rules_v1
+nikon_z50.yaml,nikon_z50,Nikon Z50,apsc,3.9,0.58,14,15210,0.928,3.0,512,0.01,0.3,heuristic_scaling_rules_v1
+nikon_z6.yaml,nikon_z6,Nikon Z6,,5.94,0.65,14,70000,2.1,2.2,512,0.007,0.3,manual_or_default
+nikon_z7.yaml,nikon_z7,Nikon Z7,fullframe,5.4,0.63,14,29160,1.78,2.5,512,0.008,0.25,heuristic_scaling_rules_v1
+nikon_z_7_2.yaml,nikon_z_7_2,Nikon Z_7_2,fullframe,5.4,0.63,14,29160,1.78,2.5,512,0.008,0.25,heuristic_scaling_rules_v1
+olympus_e_m5.yaml,olympus_e_m5,Olympus E-M5,mft,3.3,0.59,12,10890,2.659,2.7,512,0.011,0.27,heuristic_scaling_rules_v1
+olympus_om_d_e_m1mii.yaml,olympus_om_d_e_m1mii,Olympus OM-D E-M1MII,,3.34,0.58,12,38000,1.5,2.8,512,0.011,0.5,manual_or_default
+olympus_om_d_e_m5miii.yaml,olympus_om_d_e_m5miii,Olympus OM-D E-M5MIII,mft,3.3,0.59,12,10890,2.659,2.7,512,0.011,0.27,heuristic_scaling_rules_v1
+panasonic_g9.yaml,panasonic_g9,Panasonic G9,,3.3,0.6,12,40000,1.6,2.5,512,0.01,0.5,manual_or_default
+panasonic_g91.yaml,panasonic_g91,Panasonic G91,mft,3.3,0.59,12,10890,2.659,2.7,512,0.011,0.27,heuristic_scaling_rules_v1
+panasonic_gx8.yaml,panasonic_gx8,Panasonic GX8,mft,3.3,0.59,12,10890,2.659,2.7,512,0.011,0.27,heuristic_scaling_rules_v1
+panasonic_lx100m2.yaml,panasonic_lx100m2,Panasonic LX100M2,compact,2.4,0.7,12,5760,1.406,2.2,256,0.015,0.22,heuristic_scaling_rules_v1
+panasonic_tz202.yaml,panasonic_tz202,Panasonic TZ202,compact,2.4,0.7,12,5760,1.406,2.2,256,0.015,0.22,heuristic_scaling_rules_v1
+panasonic_tz96.yaml,panasonic_tz96,Panasonic TZ96,compact,2.4,0.7,12,5760,1.406,2.2,256,0.015,0.22,heuristic_scaling_rules_v1
+samsung_galaxy_note_9.yaml,samsung_galaxy_note_9,Samsung Galaxy Note 9,phone,1.4,0.76,12,1960,0.479,1.6,64,0.018,0.16,heuristic_scaling_rules_v1
+samsung_nx30.yaml,samsung_nx30,Samsung NX30,old,6.0,0.45,12,36000,8.789,7.0,256,0.015,0.7,heuristic_scaling_rules_v1
+sigma_fp.yaml,sigma_fp,Sigma fp,fullframe,5.4,0.63,14,29160,1.78,2.5,512,0.008,0.25,heuristic_scaling_rules_v1
+sony_alpha77.yaml,sony_alpha77,Sony Alpha77,old,6.0,0.45,12,36000,8.789,7.0,256,0.015,0.7,heuristic_scaling_rules_v1
+sony_alpha99.yaml,sony_alpha99,Sony Alpha99,fullframe,5.4,0.63,14,29160,1.78,2.5,512,0.008,0.25,heuristic_scaling_rules_v1
+sony_alpha_6100.yaml,sony_alpha_6100,Sony Alpha 6100,apsc,3.9,0.58,14,15210,0.928,3.0,512,0.01,0.3,heuristic_scaling_rules_v1
+sony_alpha_6300.yaml,sony_alpha_6300,Sony alpha 6300,apsc,3.9,0.58,14,15210,0.928,3.0,512,0.01,0.3,heuristic_scaling_rules_v1
+sony_alpha_6600.yaml,sony_alpha_6600,Sony Alpha 6600,apsc,3.9,0.58,14,15210,0.928,3.0,512,0.01,0.3,heuristic_scaling_rules_v1
+sony_alpha_7rm2.yaml,sony_alpha_7rm2,Sony Alpha 7RM2,,4.5,0.62,14,60000,2.0,2.5,512,0.008,0.4,manual_or_default
+sony_hx95.yaml,sony_hx95,Sony HX95,compact,2.4,0.7,12,5760,1.406,2.2,256,0.015,0.22,heuristic_scaling_rules_v1
+sony_hx99.yaml,sony_hx99,Sony HX99,compact,2.4,0.7,12,5760,1.406,2.2,256,0.015,0.22,heuristic_scaling_rules_v1
+sony_nex7.yaml,sony_nex7,Sony Nex7,apsc,3.9,0.58,14,15210,0.928,3.0,512,0.01,0.3,heuristic_scaling_rules_v1
+sony_rx100m3.yaml,sony_rx100m3,Sony RX100M3,,2.4,0.7,12,20000,0.6,2.2,256,0.015,0.5,manual_or_default
+sony_rx100m6.yaml,sony_rx100m6,Sony RX100M6,compact,2.4,0.7,12,5760,1.406,2.2,256,0.015,0.22,heuristic_scaling_rules_v1
+sony_zv_1.yaml,sony_zv_1,Sony ZV-1,apsc,3.9,0.58,14,15210,0.928,3.0,512,0.01,0.3,heuristic_scaling_rules_v1
+xiaomi_mi_8.yaml,xiaomi_mi_8,Xiaomi MI 8,phone,1.4,0.76,12,1960,0.479,1.6,64,0.018,0.16,heuristic_scaling_rules_v1

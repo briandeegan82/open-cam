@@ -1,0 +1,44 @@
+pbrt-v4 in this repo lives at third_party/pbrt-v4 (vendored clone, not a git submodule).
+
+CPU-only build (no NVIDIA OptiX SDK)
+------------------------------------
+If PBRT_OPTIX_PATH is set in your environment but OptiX headers are missing, the
+CMake step enables GPU targets and the build fails. Unset it for a CPU build:
+
+  cd third_party/pbrt-v4
+  git submodule update --init --recursive
+  env -u PBRT_OPTIX_PATH cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+  cmake --build build -j$(nproc)
+
+The pbrt executable is: third_party/pbrt-v4/build/pbrt
+
+GPU build
+---------
+Install the OptiX SDK and point CMake at it:
+
+  export PBRT_OPTIX_PATH=/path/to/optix
+  cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+  cmake --build build -j$(nproc)
+
+Spectral / color options (scene file)
+-------------------------------------
+- Piecewise-linear spectra use wavelengths in nanometers; pbrt clips to the
+  active spectral range (defaults: lambdamin 360, lambdamax 830; see Option
+  directive in the file format docs).
+- RGB parameters are interpreted in the current ColorSpace ("srgb" default);
+  use ColorSpace before Film if you need another working space for RGB textures.
+- Multispectral output: use Film "spectral" (OpenEXR only). The scene generator
+  supports `--film spectral` plus `--spectral-nbuckets` and lambda min/max;
+  see tools/build_colorchecker_scene.py and README.md.
+
+Project usage notes
+-------------------
+- Scene input to pbrt is scenes/generated/colorchecker.pbrt (not .exr).
+- Build scene files with:
+    venv/bin/python tools/build_colorchecker_scene.py
+- Render with:
+    third_party/pbrt-v4/build/pbrt scenes/generated/colorchecker.pbrt
+- Apply EMVA post-processing with:
+    venv/bin/python tools/apply_emva_noise.py
+
+Reference: https://pbrt.org/fileformat-v4.html

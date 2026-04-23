@@ -1,0 +1,7 @@
+{
+    "urls" : {
+        "http://cs.uef.fi/pub/color/spectra/mspec/munsell380_800_1.asc.gz" : "md5:0889e8b580c23589ae6cb89f9f4035e5",
+        "http://cs.uef.fi/pub/color/spectra/mspec/munsell380_800_1.mat.gz" : "md5:314e8a7fe59f76b18bbe72fe2c9dc8d1",
+        "http://cs.uef.fi/pub/color/spectra/mspec/README.txt" : "md5:003c7c010f7eeda50b7d2984405e3290"
+    }
+}

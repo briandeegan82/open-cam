@@ -1,0 +1,53 @@
+schema_version: 1
+paths:
+  scene_builder: tools/build_colorchecker_scene.py
+  pbrt: third_party/pbrt-v4/build/pbrt
+  noise_tool: tools/apply_emva_noise.py
+  sensor_forward_tool: tools/spectral_sensor_forward.py
+  pbrt_exr_to_electrons_tool: tools/pbrt_spectral_exr_to_electrons.py
+  validate_tool: tools/validate_colorchecker.py
+  validate_demosaic_tool: tools/validate_demosaic_linear.py
+  validate_emva_tool: tools/validate_emva_model.py
+  emva_validation_report: out/emva_validation_report.json
+  scene_file: scenes/generated/colorchecker.pbrt
+  exr_out: out/colorchecker_spectral.exr
+  camera_model_name: iphone_8
+  sensor_forward_electrons_npz: out/sensor_forward_electrons.npz
+  demosaic_metrics_json: out/demosaic_linear_metrics.json
+  out_dir: out
+  psf_tool: tools/apply_spectral_psf.py
+render:
+  light_scale: 1.0
+  cam_dist: 4.0
+  xres: 960
+  yres: 640
+  # Keep Monte Carlo render noise sub-dominant to sensor/noise stages.
+  # For quick iteration, lower this (e.g. 64-256). For final runs, keep >=1024.
+  pixelsamples: 64
+  film: spectral
+  film_output: null
+  spectral_nbuckets: 32
+  spectral_lambda_min: 360.0
+  spectral_lambda_max: 830.0
+  builder_extra_args: []
+validate:
+  enabled: true
+validate_emva:
+  enabled: true
+realistic_focus_distance_override: 4.0
+exposure_time_override_s: 0.02
+sensor_forward:
+  mode: pbrt_exr
+  enabled: true
+  # Optional global lux override for forward-model calibration.
+  # null means "use target_illuminance_lux from the selected camera model".
+  target_illuminance_lux: 600
+noise:
+  enabled: true
+  seed: 0
+  exposure_scale: null
+  preview_percentile: 99.5
+  preview_no_normalize: true
+validate_demosaic:
+  enabled: true
+  crop: 2

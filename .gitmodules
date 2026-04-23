@@ -1,0 +1,3 @@
+[submodule "third_party/pbrt-v4"]
+	path = third_party/pbrt-v4
+	url = https://github.com/mmp/pbrt-v4.git
