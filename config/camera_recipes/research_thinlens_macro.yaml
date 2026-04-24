@@ -1,0 +1,9 @@
+schema_version: 1
+model:
+  name: research_thinlens_macro
+  display_name: Research Thin Lens Macro
+lens_model: research_thinlens_macro
+sensor_model: research_thinlens_macro
+source:
+  calibration_tier: research
+  notes: Macro-like thin-lens baseline with shallow depth of field.

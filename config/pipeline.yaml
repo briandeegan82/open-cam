@@ -11,7 +11,7 @@ paths:
   emva_validation_report: out/emva_validation_report.json
   scene_file: scenes/generated/colorchecker.pbrt
   exr_out: out/colorchecker_spectral.exr
-  camera_model_name: iphone_8
+  camera_model_name: study_nikon_z6_minvar
   sensor_forward_electrons_npz: out/sensor_forward_electrons.npz
   demosaic_metrics_json: out/demosaic_linear_metrics.json
   out_dir: out
@@ -23,7 +23,7 @@ render:
   yres: 640
   # Keep Monte Carlo render noise sub-dominant to sensor/noise stages.
   # For quick iteration, lower this (e.g. 64-256). For final runs, keep >=1024.
-  pixelsamples: 1024
+  pixelsamples: 64
   film: spectral
   film_output: null
   spectral_nbuckets: 32
@@ -34,20 +34,39 @@ validate:
   enabled: true
 validate_emva:
   enabled: true
+# Optional run-level override for lens.camera from the selected camera model.
+# Set to null to use camera-model default; options: pinhole, thinlens, realistic.
+lens_type_override: realistic
+# Optional run-level lens parameter overrides (null = use camera-model value).
+lens_overrides:
+  pinhole_fov_deg: null
+  thinlens_fov_deg: null
+  thinlens_lens_radius: null
+  thinlens_focal_distance: null
+  realistic_lensfile: null
+  realistic_aperture_diameter_mm: null
+  realistic_focus_distance: null
+strict_physical_accuracy:
+  strict_qe_validation: false
+  strict_calibration_validation: false
+  calibration_tier_policy: semi_strict
 realistic_focus_distance_override: 4.0
-exposure_time_override_s: 0.02
+exposure_time_override_s: 0.05
 sensor_forward:
   mode: pbrt_exr
   enabled: true
   # Optional global lux override for forward-model calibration.
   # null means "use target_illuminance_lux from the selected camera model".
-  target_illuminance_lux: 600
+  target_illuminance_lux: 8000
 noise:
   enabled: true
   seed: 0
   exposure_scale: null
   preview_percentile: 99.5
   preview_no_normalize: true
+  # Optional preview overrides; null = use processing defaults from sensor model.
+  preview_white_balance_enabled: true
+  preview_color_correction_enabled: true
 validate_demosaic:
   enabled: true
   crop: 2

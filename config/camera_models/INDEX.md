@@ -66,3 +66,12 @@
 - Sony RX100M6: config/camera_models/sony_rx100m6.yaml (76 samples)
 - Sony ZV-1: config/camera_models/sony_zv_1.yaml (76 samples)
 - Xiaomi MI 8: config/camera_models/xiaomi_mi_8.yaml (76 samples)
+
+## Research baselines (manual)
+
+- Research Pinhole Baseline: config/camera_models/research_pinhole_baseline.yaml
+- Research Thin Lens Wide: config/camera_models/research_thinlens_wide.yaml
+- Research Thin Lens Normal: config/camera_models/research_thinlens_normal.yaml
+- Research Thin Lens Tele: config/camera_models/research_thinlens_tele.yaml
+- Research Thin Lens Macro: config/camera_models/research_thinlens_macro.yaml
+- Research Realistic Wide 22mm: config/camera_models/research_realistic_wide22.yaml

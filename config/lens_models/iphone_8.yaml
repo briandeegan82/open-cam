@@ -1,0 +1,15 @@
+schema_version: 1
+lens:
+  camera: realistic
+  realistic_lensfile: scenes/lenses/wide_22mm.dat
+  realistic_aperture_diameter_mm: 4.0
+  realistic_focus_distance: 1.0
+  post_psf:
+    enabled: false
+    mode: gaussian
+    sigma_pixels: 0.75
+    stray_light:
+      enabled: false
+      veiling_glare_fraction: 0.015
+      halo_sigma_pixels: 10.0
+      halo_strength: 0.06

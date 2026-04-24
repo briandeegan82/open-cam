@@ -1,0 +1,13 @@
+schema_version: 1
+model:
+  name: olympus_e_m5
+  display_name: Olympus E-M5
+lens_model: canon_eos_20d
+sensor_model: olympus_e_m5
+source:
+  qe_workbook: spectra/QE/Spectral_sensitivities_IE.xlsx
+  sheet: Data
+  emva_param_method: inferred_web_table_v1
+  sensor_class: mft
+  emva_gain_note: dual gain
+  calibration_tier: inferred

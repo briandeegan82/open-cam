@@ -13,7 +13,10 @@ from pathlib import Path
 
 import yaml
 
-from camera_model import load_camera_model
+try:
+    from camera_model import load_camera_model
+except ModuleNotFoundError:  # pragma: no cover - import path variant for tests
+    from tools.camera_model import load_camera_model
 
 
 def sha256_file(path: Path) -> str:
@@ -45,6 +48,11 @@ def p(repo: Path, v: str) -> Path:
     return (repo / v).resolve()
 
 
+def pick_override(overrides: dict, key: str, default):
+    v = overrides.get(key, None)
+    return default if v is None else v
+
+
 def resolve_camera_model_path(repo: Path, paths: dict, cli_path: Path | None) -> Path:
     if cli_path is not None:
         return cli_path.resolve()
@@ -53,8 +61,8 @@ def resolve_camera_model_path(repo: Path, paths: dict, cli_path: Path | None) ->
     if model_name and model_cfg:
         raise ValueError("set only one of paths.camera_model_name or paths.camera_model_config")
     if model_name:
-        return (repo / "config" / "camera_models" / f"{model_name}.yaml").resolve()
-    return p(repo, model_cfg or "config/camera_models/default.yaml")
+        return (repo / "config" / "camera_recipes" / f"{model_name}.yaml").resolve()
+    return p(repo, model_cfg or "config/camera_recipes/default.yaml")
 
 
 def main() -> None:
@@ -84,6 +92,21 @@ def main() -> None:
     validate = cfg.get("validate", {})
     validate_emva = cfg.get("validate_emva", {})
     validate_demosaic = cfg.get("validate_demosaic", {})
+    lens_type_override = cfg.get("lens_type_override", None)
+    if lens_type_override is not None:
+        lens_type_override = str(lens_type_override).strip().lower()
+        if lens_type_override in ("", "null", "none"):
+            lens_type_override = None
+    lens_overrides = cfg.get("lens_overrides", {}) or {}
+    strict_physical_accuracy = cfg.get("strict_physical_accuracy", {}) or {}
+    strict_qe_validation = bool(strict_physical_accuracy.get("strict_qe_validation", False))
+    strict_calibration_validation = bool(strict_physical_accuracy.get("strict_calibration_validation", False))
+    calibration_tier_policy = str(strict_physical_accuracy.get("calibration_tier_policy", "research")).strip().lower()
+    if calibration_tier_policy not in ("strict", "semi_strict", "research"):
+        raise ValueError(
+            "strict_physical_accuracy.calibration_tier_policy must be one of "
+            '"strict", "semi_strict", "research"'
+        )
     realistic_focus_distance_override = cfg.get("realistic_focus_distance_override", None)
     if realistic_focus_distance_override is not None:
         realistic_focus_distance_override = float(realistic_focus_distance_override)
@@ -159,24 +182,67 @@ def main() -> None:
             ]
         )
     build_cmd.extend(["--cam-dist", str(float(render.get("cam_dist", 4.25)))])
-    cam = str(lens_cfg.get("camera", "perspective")).lower()
-    if cam not in ("perspective", "realistic"):
-        raise ValueError(f'lens.camera must be "perspective" or "realistic", got {cam!r}')
+    cam = lens_type_override or str(lens_cfg.get("camera", "perspective")).lower()
+    if cam not in ("perspective", "pinhole", "thinlens", "realistic"):
+        raise ValueError(
+            'lens.camera must be one of "perspective", "pinhole", "thinlens", "realistic", '
+            f"got {cam!r}"
+        )
     build_cmd.extend(["--camera", cam])
-    if cam == "realistic":
+    if cam == "thinlens":
+        thin_fov = pick_override(
+            lens_overrides,
+            "thinlens_fov_deg",
+            lens_cfg.get("thinlens_fov_deg", render.get("fov", 35.0)),
+        )
+        thin_radius = pick_override(
+            lens_overrides,
+            "thinlens_lens_radius",
+            lens_cfg.get("thinlens_lens_radius", 0.03),
+        )
+        thin_focus = pick_override(
+            lens_overrides,
+            "thinlens_focal_distance",
+            lens_cfg.get("thinlens_focal_distance", render.get("cam_dist", 4.25)),
+        )
+        build_cmd.extend(["--fov", str(float(thin_fov))])
+        build_cmd.extend(["--thinlens-lens-radius", str(float(thin_radius))])
+        build_cmd.extend(["--thinlens-focal-distance", str(float(thin_focus))])
+    elif cam == "realistic":
+        realistic_lensfile = pick_override(
+            lens_overrides,
+            "realistic_lensfile",
+            lens_cfg.get("realistic_lensfile", "scenes/lenses/wide_22mm.dat"),
+        )
+        realistic_aperture_mm = pick_override(
+            lens_overrides,
+            "realistic_aperture_diameter_mm",
+            lens_cfg.get("realistic_aperture_diameter_mm", 4.0),
+        )
         build_cmd.extend(
             [
                 "--lensfile",
-                str(lens_cfg.get("realistic_lensfile", "scenes/lenses/wide_22mm.dat")),
+                str(realistic_lensfile),
                 "--aperture-diameter-mm",
-                str(float(lens_cfg.get("realistic_aperture_diameter_mm", 4.0))),
+                str(float(realistic_aperture_mm)),
             ]
         )
-        focus_dist = realistic_focus_distance_override
+        focus_dist = pick_override(
+            lens_overrides,
+            "realistic_focus_distance",
+            realistic_focus_distance_override,
+        )
         if focus_dist is None:
             focus_dist = lens_cfg.get("realistic_focus_distance", None)
         if focus_dist is not None:
             build_cmd.extend(["--focus-distance", str(float(focus_dist))])
+    else:
+        pinhole_fov = pick_override(
+            lens_overrides,
+            "pinhole_fov_deg",
+            lens_cfg.get("pinhole_fov_deg", render.get("fov", 35.0)),
+        )
+        build_cmd.extend(["--fov", str(float(pinhole_fov))])
     log.append(run_cmd(build_cmd, repo, args.dry_run))
 
     # 2) Render with pbrt
@@ -214,6 +280,9 @@ def main() -> None:
             "--json-out",
             str(emva_validation_report),
         ]
+        if strict_calibration_validation:
+            emva_cmd.append("--strict-calibration")
+        emva_cmd.extend(["--calibration-tier-policy", calibration_tier_policy])
         log.append(run_cmd(emva_cmd, repo, args.dry_run))
 
     sensor_forward = cfg.get("sensor_forward", {})
@@ -240,12 +309,16 @@ def main() -> None:
                 sf_cmd.extend(["--target-illuminance-lux", str(float(sf_target_lux))])
             if integration_time_override_s is not None:
                 sf_cmd.extend(["--integration-time-s", str(integration_time_override_s)])
+            if strict_qe_validation:
+                sf_cmd.append("--strict-qe-validation")
         elif sf_mode == "analytic":
             sf_cmd = [py, str(sensor_forward_tool), "--repo-root", str(repo), "--camera-model-config", str(camera_model_cfg)]
             if sf_target_lux is not None:
                 sf_cmd.extend(["--target-illuminance-lux", str(float(sf_target_lux))])
             if integration_time_override_s is not None:
                 sf_cmd.extend(["--integration-time-s", str(integration_time_override_s)])
+            if strict_qe_validation:
+                sf_cmd.append("--strict-qe-validation")
         else:
             raise ValueError(f'sensor_forward.mode must be "analytic" or "pbrt_exr", got {sf_mode!r}')
         log.append(run_cmd(sf_cmd, repo, args.dry_run))
@@ -271,8 +344,24 @@ def main() -> None:
             noise_cmd.extend(["--preview-percentile", str(noise["preview_percentile"])])
         if bool(noise.get("preview_no_normalize", False)):
             noise_cmd.append("--preview-no-normalize")
+        if noise.get("preview_white_balance_enabled", None) is not None:
+            noise_cmd.extend(
+                [
+                    "--preview-white-balance-enabled",
+                    "true" if bool(noise.get("preview_white_balance_enabled")) else "false",
+                ]
+            )
+        if noise.get("preview_color_correction_enabled", None) is not None:
+            noise_cmd.extend(
+                [
+                    "--preview-color-correction-enabled",
+                    "true" if bool(noise.get("preview_color_correction_enabled")) else "false",
+                ]
+            )
         if integration_time_override_s is not None:
             noise_cmd.extend(["--integration-time-s", str(integration_time_override_s)])
+        if strict_qe_validation:
+            noise_cmd.append("--strict-qe-validation")
         log.append(run_cmd(noise_cmd, repo, args.dry_run))
 
     # 5) Validate Bayer+demosaic linear fidelity (optional)
@@ -333,6 +422,9 @@ def main() -> None:
             "validate": validate,
             "validate_emva": validate_emva,
             "validate_demosaic": validate_demosaic,
+            "strict_physical_accuracy": strict_physical_accuracy,
+            "lens_type_override": lens_type_override,
+            "lens_overrides": lens_overrides,
             "lens": lens_cfg,
         },
     }

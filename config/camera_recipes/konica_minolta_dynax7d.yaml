@@ -1,0 +1,13 @@
+schema_version: 1
+model:
+  name: konica_minolta_dynax7d
+  display_name: Konica_Minolta Dynax7D
+lens_model: canon_eos_20d
+sensor_model: konica_minolta_dynax7d
+source:
+  qe_workbook: spectra/QE/Spectral_sensitivities_IE.xlsx
+  sheet: Data
+  emva_param_method: inferred_web_table_v1
+  sensor_class: old
+  emva_gain_note: CCD legacy
+  calibration_tier: inferred

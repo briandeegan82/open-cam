@@ -1,0 +1,13 @@
+schema_version: 1
+model:
+  name: panasonic_tz202
+  display_name: Panasonic TZ202
+lens_model: canon_eos_20d
+sensor_model: panasonic_tz202
+source:
+  qe_workbook: spectra/QE/Spectral_sensitivities_IE.xlsx
+  sheet: Data
+  emva_param_method: inferred_web_table_v1
+  sensor_class: compact
+  emva_gain_note: fixed gain
+  calibration_tier: inferred

@@ -5,7 +5,7 @@ Run from repository root::
 
     venv/bin/python tools/validate_emva_model.py
 
-Uses ``config/camera_models/default.yaml`` (``validation`` + noise sections).
+Uses ``config/camera_recipes/default.yaml`` (``validation`` + noise sections).
 Replace the ``validation.datasheet`` block with values from an EMVA1288 report or sensor
 datasheet when calibrating a real device.
 """
@@ -48,7 +48,7 @@ def main() -> None:
         "--camera-model-config",
         type=Path,
         default=None,
-        help="Default: config/camera_models/default.yaml",
+        help="Default: config/camera_recipes/default.yaml",
     )
     ap.add_argument(
         "--json-out",
@@ -56,10 +56,30 @@ def main() -> None:
         default=None,
         help="Write full report JSON (default: out/emva_validation_report.json).",
     )
+    ap.add_argument(
+        "--strict-calibration",
+        action="store_true",
+        help=(
+            "Fail validation when EMVA parameters are heuristic or when "
+            "validation.datasheet.source is missing."
+        ),
+    )
+    ap.add_argument(
+        "--calibration-tier-policy",
+        type=str,
+        default=None,
+        choices=("strict", "semi_strict", "research"),
+        help=(
+            "Calibration-tier gate policy. "
+            "strict: require measured tier + datasheet source; "
+            "semi_strict: allow measured or inferred + datasheet source; "
+            "research: informational only."
+        ),
+    )
     args = ap.parse_args()
 
     repo = args.repo_root.resolve()
-    val_path = (args.camera_model_config or (repo / "config" / "camera_models" / "default.yaml")).resolve()
+    val_path = (args.camera_model_config or (repo / "config" / "camera_recipes" / "default.yaml")).resolve()
     if not val_path.is_file():
         print(f"error: missing {val_path}", file=sys.stderr)
         sys.exit(2)
@@ -132,6 +152,31 @@ def main() -> None:
     source = camera_model.get("source", {}) or {}
     emva_method = str(source.get("emva_param_method", "")).strip().lower()
     ds_source = str(ds.get("source", "")).strip()
+    strict_calibration = bool(args.strict_calibration or val.get("strict_calibration", False))
+    tier_policy = str(
+        args.calibration_tier_policy
+        or val.get("calibration_tier_policy", "research")
+    ).strip().lower()
+    if tier_policy not in ("strict", "semi_strict", "research"):
+        raise ValueError(
+            "validation.calibration_tier_policy must be one of "
+            '"strict", "semi_strict", "research"'
+        )
+    calibration_tier = str(source.get("calibration_tier", "")).strip().lower()
+    if not calibration_tier:
+        calibration_tier = "unspecified"
+    calibration_quality = {
+        "emva_param_method": emva_method or None,
+        "calibration_tier": calibration_tier,
+        "calibration_tier_policy": tier_policy,
+        "datasheet_source_present": bool(ds_source),
+        "strict_calibration_enabled": strict_calibration,
+        "issues": [],
+    }
+    if emva_method.startswith("heuristic"):
+        calibration_quality["issues"].append("heuristic_emva_parameters")
+    if ds_enabled and not ds_source:
+        calibration_quality["issues"].append("missing_datasheet_source")
     if ds_enabled and emva_method.startswith("heuristic") and not ds_source:
         skip_ds_reason = (
             "skipped datasheet comparison: heuristic EMVA parameters detected and "
@@ -181,12 +226,36 @@ def main() -> None:
         "ptc_all_ok": bool(ptc_ok),
         "datasheet_comparison": param_cmp,
         "datasheet_comparison_skipped_reason": skip_ds_reason,
+        "calibration_quality": calibration_quality,
     }
+    calibration_ok = True
+    calibration_failure_reasons: list[str] = []
+    policy_failure_reasons: list[str] = []
+    if tier_policy == "strict":
+        if calibration_tier != "measured":
+            policy_failure_reasons.append("strict_policy_requires_measured_tier")
+        if ds_enabled and not ds_source:
+            policy_failure_reasons.append("strict_policy_requires_datasheet_source")
+    elif tier_policy == "semi_strict":
+        if calibration_tier not in ("measured", "inferred"):
+            policy_failure_reasons.append("semi_strict_policy_disallows_heuristic_or_unspecified_tier")
+        if ds_enabled and not ds_source:
+            policy_failure_reasons.append("semi_strict_policy_requires_datasheet_source")
+    calibration_quality["policy_issues"] = policy_failure_reasons
+    if strict_calibration and calibration_quality["issues"]:
+        calibration_ok = False
+        calibration_failure_reasons = list(calibration_quality["issues"])
+    if policy_failure_reasons:
+        calibration_ok = False
+        calibration_failure_reasons = calibration_failure_reasons + policy_failure_reasons
+    report["calibration_ok"] = calibration_ok
+    report["calibration_failure_reasons"] = calibration_failure_reasons
     report["all_ok"] = bool(
         ptc_ok
         and dark_var_ok
         and dark_mean_ok
         and (param_cmp is None or param_cmp["all_ok"])
+        and calibration_ok
     )
 
     json_out = args.json_out

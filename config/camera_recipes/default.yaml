@@ -1,0 +1,7 @@
+schema_version: 1
+model:
+  name: default
+lens_model: default
+sensor_model: default
+source:
+  migrated_from: config/camera_models/default.yaml

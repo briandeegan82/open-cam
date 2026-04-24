@@ -1,0 +1,13 @@
+schema_version: 1
+model:
+  name: samsung_galaxy_note_9
+  display_name: Samsung Galaxy Note 9
+lens_model: canon_eos_20d
+sensor_model: samsung_galaxy_note_9
+source:
+  qe_workbook: spectra/QE/Spectral_sensitivities_IE.xlsx
+  sheet: Data
+  emva_param_method: inferred_web_table_v1
+  sensor_class: phone
+  emva_gain_note: computational HDR
+  calibration_tier: inferred

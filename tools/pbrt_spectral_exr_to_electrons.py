@@ -25,6 +25,77 @@ from sensor_radiometry import photon_flux_density_from_irradiance
 from spectral_sensor_forward import illuminance_lux_from_irradiance, load_qe_curves_rgb, read_csv_curve
 
 
+def _radial_map(yres: int, xres: int, edge_factor: float, exponent: float) -> np.ndarray:
+    edge_factor = float(np.clip(edge_factor, 0.0, 1.0))
+    exponent = max(1e-6, float(exponent))
+    yy, xx = np.meshgrid(
+        np.arange(yres, dtype=np.float64),
+        np.arange(xres, dtype=np.float64),
+        indexing="ij",
+    )
+    cx = 0.5 * (xres - 1)
+    cy = 0.5 * (yres - 1)
+    rr = np.sqrt((xx - cx) ** 2 + (yy - cy) ** 2)
+    rmax = float(np.max(rr)) if rr.size else 1.0
+    rn = rr / max(1e-12, rmax)
+    m = edge_factor + (1.0 - edge_factor) * (1.0 - np.power(np.clip(rn, 0.0, 1.0), exponent))
+    return np.clip(m, 0.0, 1.0).astype(np.float32)
+
+
+def build_spatial_transmission_map(
+    yres: int,
+    xres: int,
+    cfg: dict,
+    *,
+    repo: Path,
+    wavelength_nm: np.ndarray,
+    qe_rgb: np.ndarray,
+) -> tuple[np.ndarray, dict]:
+    """Build per-channel center-to-edge radial transmission maps in [0,1]."""
+    enabled = bool(cfg.get("enabled", False))
+    if not enabled:
+        return np.ones((yres, xres, 3), dtype=np.float32), {
+            "enabled": False,
+            "mode": "off",
+            "edge_factor": 1.0,
+            "exponent": 2.0,
+        }
+    mode = str(cfg.get("mode", "radial_power")).lower().strip()
+    if mode != "radial_power":
+        raise ValueError('optics_transmittance_spatial.mode must be "radial_power"')
+    edge_factor = float(cfg.get("edge_factor", 0.9))
+    exponent = float(cfg.get("exponent", 2.0))
+    edge_rgb = np.full(3, float(np.clip(edge_factor, 0.0, 1.0)), dtype=np.float64)
+    spectral_csv = cfg.get("spectral_edge_factors_csv", None)
+    if spectral_csv:
+        s_wl, s_v = read_csv_curve((repo / str(spectral_csv)).resolve())
+        edge_lambda = np.clip(np.interp(wavelength_nm, s_wl, s_v, left=0.0, right=0.0), 0.0, 1.0)
+        qe = np.asarray(qe_rgb, dtype=np.float64)
+        if qe.shape[0] != 3:
+            raise ValueError(f"expected QE stack [3,K], got {qe.shape}")
+        for c in range(3):
+            w = np.clip(qe[c], 0.0, None)
+            sw = float(np.sum(w))
+            if sw > 0.0:
+                edge_rgb[c] = float(np.sum(w * edge_lambda) / sw)
+        edge_source = "spectral_edge_factors_csv"
+    else:
+        edge_source = "scalar_edge_factor"
+    maps = np.stack([_radial_map(yres, xres, float(edge_rgb[c]), exponent) for c in range(3)], axis=2)
+    return maps, {
+        "enabled": True,
+        "mode": mode,
+        "edge_factor": edge_factor,
+        "edge_factor_rgb": edge_rgb.tolist(),
+        "edge_source": edge_source,
+        "spectral_edge_factors_csv": str(spectral_csv) if spectral_csv else None,
+        "exponent": exponent,
+        "min": float(np.min(maps)),
+        "max": float(np.max(maps)),
+        "mean": float(np.mean(maps)),
+    }
+
+
 def photometry_calibration_scale(repo: Path, cal: dict) -> float:
     """Align EXR irradiance with analytic ``spectral_sensor_forward`` photometry.
 
@@ -56,6 +127,8 @@ def qe_stack_on_lambdas(
     repo: Path,
     qe_cfg: dict,
     lambdas_nm: np.ndarray,
+    *,
+    strict_qe_validation: bool = False,
 ) -> np.ndarray:
     """Shape [3, K] QE for R,G,B interpolated at bucket centers."""
     ircf_csv = qe_cfg.get("ircf_csv")
@@ -64,7 +137,11 @@ def qe_stack_on_lambdas(
         i_wl, i_v = read_csv_curve((repo / ircf_csv).resolve())
         ircf = np.interp(lambdas_nm, i_wl, i_v, left=0.0, right=0.0)
     out = []
-    q_r, q_g, q_b = load_qe_curves_rgb(repo, qe_cfg)
+    q_r, q_g, q_b = load_qe_curves_rgb(
+        repo,
+        qe_cfg,
+        strict_qe_validation=strict_qe_validation,
+    )
     for q_wl, q_v in (q_r, q_g, q_b):
         q = np.interp(lambdas_nm, q_wl, q_v, left=0.0, right=0.0)
         out.append(np.clip(q * ircf, 0.0, 1.0))
@@ -97,6 +174,11 @@ def main() -> None:
         type=float,
         default=None,
         help="Optional integration time override in seconds (replaces sensor.integration_time_s).",
+    )
+    ap.add_argument(
+        "--strict-qe-validation",
+        action="store_true",
+        help="Fail on QE wavelength-axis auto-remap or likely R/B swap detection.",
     )
     args = ap.parse_args()
 
@@ -153,6 +235,8 @@ def main() -> None:
     f_number = float(sensor.get("f_number", 2.8))
     pixel_pitch_um = float(sensor.get("pixel_pitch_um", 3.45))
     optics_t = float(cal.get("optics_transmittance", 1.0))
+    optics_t_csv = cal.get("optics_transmittance_csv", None)
+    spatial_cfg = cal.get("optics_transmittance_spatial", {}) or {}
 
     out_npz = (args.out or (repo / cfg.get("output", {}).get("electrons_npz", "out/sensor_forward_electrons.npz"))).resolve()
     out_npz.parent.mkdir(parents=True, exist_ok=True)
@@ -180,7 +264,8 @@ def main() -> None:
     if rad_scale_user is not None:
         rad_to_e = float(rad_scale_user)
     elif rad_mode in ("thin_lens", "pinhole"):
-        rad_to_e = (np.pi * optics_t) / (4.0 * max(1e-12, f_number**2))
+        # Geometric radiance->irradiance transfer; lens transmission is applied spectrally below.
+        rad_to_e = np.pi / (4.0 * max(1e-12, f_number**2))
     else:
         raise ValueError(
             'model.pbrt_spectral_exr.radiance_to_irradiance must be '
@@ -191,6 +276,15 @@ def main() -> None:
     E_raw = L.astype(np.float64) * (rad_to_e * extra_scale)
     lam = lambdas.astype(np.float64)
     w = trapezoid_weights_nm(lam).astype(np.float64)
+    if optics_t_csv:
+        t_wl, t_v = read_csv_curve((repo / str(optics_t_csv)).resolve())
+        tau_lambda = np.interp(lam, t_wl, t_v, left=0.0, right=0.0)
+        tau_lambda = np.clip(tau_lambda, 0.0, 1.0)
+        optics_mode = "spectral_csv"
+    else:
+        tau_lambda = np.full_like(lam, float(np.clip(optics_t, 0.0, 1.0)))
+        optics_mode = "scalar"
+    E_raw = E_raw * tau_lambda[np.newaxis, np.newaxis, :]
 
     exr_autocal_scale = 1.0
     if auto_cal_mode not in ("off", "none", "disabled", "false", "0"):
@@ -219,7 +313,12 @@ def main() -> None:
 
     E_e = E_raw * (photometry_scale * exr_autocal_scale)
 
-    qe = qe_stack_on_lambdas(repo, qe_cfg, lam)
+    qe = qe_stack_on_lambdas(
+        repo,
+        qe_cfg,
+        lam,
+        strict_qe_validation=bool(args.strict_qe_validation or qe_cfg.get("strict_validation", False)),
+    )
 
     phi = photon_flux_density_from_irradiance(E_e.astype(np.float64), lam)
 
@@ -231,6 +330,15 @@ def main() -> None:
         contrib[:, :, c] = np.sum(phi * (qe[c][np.newaxis, np.newaxis, :] * w[np.newaxis, np.newaxis, :]), axis=2)
 
     electrons = np.clip(contrib * float(geom), 0.0, None).astype(np.float32)
+    spatial_map, spatial_meta = build_spatial_transmission_map(
+        yres,
+        xres,
+        spatial_cfg,
+        repo=repo,
+        wavelength_nm=lam,
+        qe_rgb=qe,
+    )
+    electrons = np.clip(electrons * spatial_map, 0.0, None).astype(np.float32)
 
     preview = np.clip(electrons, 0.0, None)
     p99 = float(np.percentile(preview, 99.5))
@@ -252,7 +360,10 @@ def main() -> None:
         exr_radiometric_autocalibration_scale=np.float64(exr_autocal_scale),
         calibration_mode=np.array(cal_mode),
         geometry_factor=np.float64(geom),
-        optics_transmittance=np.float64(optics_t),
+        optics_transmittance_mode=np.array(optics_mode),
+        optics_transmittance_scalar=np.float64(optics_t),
+        optics_transmittance_mean=np.float64(float(np.mean(tau_lambda))),
+        optics_transmittance_spatial=np.array(json.dumps(spatial_meta)),
     )
     try:
         import imageio.v3 as iio

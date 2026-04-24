@@ -1,0 +1,13 @@
+schema_version: 1
+model:
+  name: sony_nex7
+  display_name: Sony Nex7
+lens_model: canon_eos_20d
+sensor_model: sony_nex7
+source:
+  qe_workbook: spectra/QE/Spectral_sensitivities_IE.xlsx
+  sheet: Data
+  emva_param_method: inferred_web_table_v1
+  sensor_class: apsc
+  emva_gain_note: ISO invariant
+  calibration_tier: inferred

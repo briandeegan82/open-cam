@@ -1,0 +1,9 @@
+schema_version: 1
+model:
+  name: research_realistic_wide22
+  display_name: Research Realistic Wide 22mm
+lens_model: research_realistic_wide22
+sensor_model: research_realistic_wide22
+source:
+  calibration_tier: research
+  notes: Realistic traced-lens baseline using the available wide_22mm lens file.

@@ -1,0 +1,9 @@
+schema_version: 1
+model:
+  name: research_thinlens_tele
+  display_name: Research Thin Lens Tele
+lens_model: research_thinlens_tele
+sensor_model: research_thinlens_tele
+source:
+  calibration_tier: research
+  notes: Tele-angle thin-lens baseline.

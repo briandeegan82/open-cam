@@ -1,0 +1,85 @@
+schema_version: 1
+sensor:
+  quantum_efficiency:
+    red_csv: spectra/QE/cameras/nikon_z6/QE_red.csv
+    green_csv: spectra/QE/cameras/nikon_z6/QE_green.csv
+    blue_csv: spectra/QE/cameras/nikon_z6/QE_blue.csv
+    ircf_csv: spectra/QE/interpolated/QE_IRCF.csv
+  pixel_pitch_um: 5.94
+  integration_time_s: 0.01
+  f_number: 2.0
+  fill_factor: 0.65
+noise:
+  emva:
+    overall_system_gain_K_e_per_DN: 1.1
+    sigma_d_e: 2.3
+    black_level_DN: 512
+    use_poisson_shot_noise: true
+    prnu_std_fraction: 0.007
+    dsnu_std_e: 0.3
+  adc:
+    bit_depth: 14
+    full_well_e: 65000
+    clipping: hard
+  processing:
+    auto_exposure: false
+    exposure_scale_e_per_unit: 1.0
+    linear_exr_mode: integrate_qe
+cfa:
+  enabled: true
+  pattern: GBRG
+  demosaic: bilinear
+  demosaic_srgb: true
+sensor_forward:
+  model:
+    electrons_scale: 25000.0
+    include_surround: true
+    surround_reflectance: 0.22
+    calibration:
+      mode: photon_counting
+      irradiance_scale_W_m2nm_per_unit: 0.001
+      illuminant_override_csv: spectra/illuminant/interpolated/D55.csv
+      target_illuminance_lux: 500.0
+      optics_transmittance: 1.0
+      use_aperture_factor: true
+    cosine_shading: true
+    chart_normal:
+    - 0.0
+    - 0.0
+    - 1.0
+    vignetting_cos4: false
+    pbrt_spectral_exr:
+      radiance_to_irradiance: thin_lens
+      radiance_to_irradiance_scale: null
+      extra_irradiance_scale: 1.0
+validation:
+  monte_carlo_trials: 20000
+  random_seed: 0
+  variance_rtol: 0.07
+  mean_abs_dn_atol: 0.22
+  ptc_mu_e_levels:
+  - 0.0
+  - 400.0
+  - 2000.0
+  - 3500.0
+  - 4700.0
+  datasheet:
+    enabled: true
+    overall_system_gain_K_e_per_DN: 1.1
+    temporal_dark_noise_sigma_d_e: 2.3
+    full_well_e: 65000
+    black_level_DN: 512
+    parameter_rtol: 0.02
+    bit_depth: 14
+    gain_convention: e_per_dn
+    source: scraped internet table provided by user on 2026-04-24; inferred/effective
+      values, not EMVA1288 ground truth
+source:
+  qe_workbook: spectra/QE/Spectral_sensitivities_IE.xlsx
+  sheet: Data
+  emva_param_method: inferred_web_table_v1
+  emva_gain_note: dual gain
+  calibration_tier: inferred
+model:
+  name: nikon_z6
+  display_name: Nikon Z6

@@ -23,15 +23,15 @@ sensor:
   fill_factor: 0.76
 noise:
   emva:
-    overall_system_gain_K_e_per_DN: 0.479
-    sigma_d_e: 1.6
+    overall_system_gain_K_e_per_DN: 0.22
+    sigma_d_e: 1.4
     black_level_DN: 64
     use_poisson_shot_noise: true
     prnu_std_fraction: 0.018
     dsnu_std_e: 0.16
   adc:
     bit_depth: 12
-    full_well_e: 1960
+    full_well_e: 10500
     clipping: hard
   processing:
     auto_exposure: false
@@ -77,13 +77,19 @@ validation:
   - 4700.0
   datasheet:
     enabled: true
-    overall_system_gain_K_e_per_DN: 4.77
-    temporal_dark_noise_sigma_d_e: 2.6
-    full_well_e: 4800
-    black_level_DN: 16
+    overall_system_gain_K_e_per_DN: 0.22
+    temporal_dark_noise_sigma_d_e: 1.4
+    full_well_e: 10500
+    black_level_DN: 64
     parameter_rtol: 0.02
+    bit_depth: 12
+    gain_convention: e_per_dn
+    source: scraped internet table provided by user on 2026-04-24; inferred/effective
+      values, not EMVA1288 ground truth
 source:
   qe_workbook: spectra/QE/Spectral_sensitivities_IE.xlsx
   sheet: Data
-  emva_param_method: heuristic_scaling_rules_v1
+  emva_param_method: inferred_web_table_v1
   sensor_class: phone
+  emva_gain_note: computational HDR
+  calibration_tier: inferred

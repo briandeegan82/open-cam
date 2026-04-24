@@ -1,0 +1,9 @@
+schema_version: 1
+model:
+  name: research_thinlens_normal
+  display_name: Research Thin Lens Normal
+lens_model: research_thinlens_normal
+sensor_model: research_thinlens_normal
+source:
+  calibration_tier: research
+  notes: Normal-angle thin-lens baseline.

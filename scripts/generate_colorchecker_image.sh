@@ -172,6 +172,12 @@ if [[ "${NOISE_ENABLED}" == 1 ]]; then
   if [[ "${NOISE_PREVIEW_NO_NORMALIZE:-0}" == 1 ]]; then
     NOISE_CMD+=(--preview-no-normalize)
   fi
+  if [[ -n "${NOISE_PREVIEW_WB_ENABLED:-}" ]]; then
+    NOISE_CMD+=(--preview-white-balance-enabled "${NOISE_PREVIEW_WB_ENABLED}")
+  fi
+  if [[ -n "${NOISE_PREVIEW_CC_ENABLED:-}" ]]; then
+    NOISE_CMD+=(--preview-color-correction-enabled "${NOISE_PREVIEW_CC_ENABLED}")
+  fi
   if [[ -n "${EXPOSURE_TIME_OVERRIDE_S:-}" ]]; then
     NOISE_CMD+=(--integration-time-s "${EXPOSURE_TIME_OVERRIDE_S}")
   fi

@@ -1,0 +1,12 @@
+schema_version: 1
+model:
+  name: canon_eos_5dsr
+  display_name: Canon EOS 5DsR
+lens_model: canon_eos_20d
+sensor_model: canon_eos_5dsr
+source:
+  qe_workbook: spectra/QE/Spectral_sensitivities_IE.xlsx
+  sheet: Data
+  emva_param_method: inferred_web_table_v1
+  emva_gain_note: unity ISO100
+  calibration_tier: inferred

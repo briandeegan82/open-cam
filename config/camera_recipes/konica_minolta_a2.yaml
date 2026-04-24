@@ -1,0 +1,13 @@
+schema_version: 1
+model:
+  name: konica_minolta_a2
+  display_name: Konica Minolta A2
+lens_model: canon_eos_20d
+sensor_model: konica_minolta_a2
+source:
+  qe_workbook: spectra/QE/Spectral_sensitivities_IE.xlsx
+  sheet: Data
+  emva_param_method: inferred_web_table_v1
+  sensor_class: compact
+  emva_gain_note: CCD legacy
+  calibration_tier: inferred

@@ -1,0 +1,12 @@
+schema_version: 1
+model:
+  name: google_pixel_3
+  display_name: Google Pixel 3
+lens_model: canon_eos_20d
+sensor_model: google_pixel_3
+source:
+  qe_workbook: spectra/QE/Spectral_sensitivities_IE.xlsx
+  sheet: Data
+  emva_param_method: inferred_web_table_v1
+  emva_gain_note: computational HDR
+  calibration_tier: inferred

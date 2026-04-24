@@ -1,0 +1,8 @@
+schema_version: 1
+lens:
+  camera: pinhole
+  pinhole_fov_deg: 35.0
+  post_psf:
+    enabled: false
+    mode: gaussian
+    sigma_pixels: 0.75

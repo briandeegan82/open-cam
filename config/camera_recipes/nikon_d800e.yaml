@@ -1,0 +1,12 @@
+schema_version: 1
+model:
+  name: nikon_d800e
+  display_name: Nikon D800E
+lens_model: canon_eos_20d
+sensor_model: nikon_d800e
+source:
+  qe_workbook: spectra/QE/Spectral_sensitivities_IE.xlsx
+  sheet: Data
+  emva_param_method: inferred_web_table_v1
+  emva_gain_note: ISO invariant
+  calibration_tier: inferred

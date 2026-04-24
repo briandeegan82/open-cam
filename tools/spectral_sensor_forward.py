@@ -119,7 +119,7 @@ _V_5NM = np.array(
 )
 
 
-def read_csv_curve(path: Path) -> tuple[np.ndarray, np.ndarray]:
+def read_csv_curve(path: Path, *, strict_wavelength_axis: bool = False) -> tuple[np.ndarray, np.ndarray]:
     wl: list[float] = []
     val: list[float] = []
     for line in path.read_text().splitlines():
@@ -149,6 +149,11 @@ def read_csv_curve(path: Path) -> tuple[np.ndarray, np.ndarray]:
         wmax = float(np.max(w))
         if wmax - wmin <= 1e-12:
             raise ValueError(f"invalid wavelength axis in {path}: near-constant normalized domain")
+        if strict_wavelength_axis:
+            raise ValueError(
+                "strict QE validation: normalized wavelength axis detected "
+                f"in {path}; provide explicit wavelength-in-nm CSV"
+            )
         w = 380.0 + (w - wmin) * (400.0 / (wmax - wmin))
         print(f"warning: mapped normalized wavelength axis to 380..780 nm for {path}", file=sys.stderr)
 
@@ -158,17 +163,27 @@ def read_csv_curve(path: Path) -> tuple[np.ndarray, np.ndarray]:
     return w, v
 
 
-def load_qe_curves_rgb(repo: Path, qe_cfg: dict) -> tuple[tuple[np.ndarray, np.ndarray], tuple[np.ndarray, np.ndarray], tuple[np.ndarray, np.ndarray]]:
+def load_qe_curves_rgb(
+    repo: Path,
+    qe_cfg: dict,
+    *,
+    strict_qe_validation: bool = False,
+) -> tuple[tuple[np.ndarray, np.ndarray], tuple[np.ndarray, np.ndarray], tuple[np.ndarray, np.ndarray]]:
     """Load QE curves and auto-correct known import artifact (R/B swapped)."""
-    r = read_csv_curve((repo / qe_cfg["red_csv"]).resolve())
-    g = read_csv_curve((repo / qe_cfg["green_csv"]).resolve())
-    b = read_csv_curve((repo / qe_cfg["blue_csv"]).resolve())
+    r = read_csv_curve((repo / qe_cfg["red_csv"]).resolve(), strict_wavelength_axis=strict_qe_validation)
+    g = read_csv_curve((repo / qe_cfg["green_csv"]).resolve(), strict_wavelength_axis=strict_qe_validation)
+    b = read_csv_curve((repo / qe_cfg["blue_csv"]).resolve(), strict_wavelength_axis=strict_qe_validation)
     r_peak = float(r[0][int(np.argmax(r[1]))])
     g_peak = float(g[0][int(np.argmax(g[1]))])
     b_peak = float(b[0][int(np.argmax(b[1]))])
     # Expected Bayer-like ordering: blue peak < green peak < red peak.
     # Some imported model CSVs are inverted between R/B.
     if r_peak < g_peak and b_peak > g_peak:
+        if strict_qe_validation:
+            raise ValueError(
+                "strict QE validation: detected likely QE red/blue inversion; "
+                "fix channel assignments in QE CSVs"
+            )
         print(
             "warning: detected likely QE red/blue inversion; swapping channels "
             f"(red_peak={r_peak:.1f}nm, green_peak={g_peak:.1f}nm, blue_peak={b_peak:.1f}nm)",
@@ -206,6 +221,78 @@ def project_world_to_pixel(
     return u, v
 
 
+def _radial_map(yres: int, xres: int, edge_factor: float, exponent: float) -> np.ndarray:
+    """Build one radial center-to-edge map in [0,1]."""
+    edge_factor = float(np.clip(edge_factor, 0.0, 1.0))
+    exponent = max(1e-6, float(exponent))
+    yy, xx = np.meshgrid(
+        np.arange(yres, dtype=np.float64),
+        np.arange(xres, dtype=np.float64),
+        indexing="ij",
+    )
+    cx = 0.5 * (xres - 1)
+    cy = 0.5 * (yres - 1)
+    rr = np.sqrt((xx - cx) ** 2 + (yy - cy) ** 2)
+    rmax = float(np.max(rr)) if rr.size else 1.0
+    rn = rr / max(1e-12, rmax)
+    m = edge_factor + (1.0 - edge_factor) * (1.0 - np.power(np.clip(rn, 0.0, 1.0), exponent))
+    return np.clip(m, 0.0, 1.0).astype(np.float32)
+
+
+def build_spatial_transmission_map(
+    yres: int,
+    xres: int,
+    cfg: dict,
+    *,
+    repo: Path,
+    wavelength_nm: np.ndarray,
+    qe_rgb: np.ndarray,
+) -> tuple[np.ndarray, dict]:
+    """Build per-channel center-to-edge radial transmission maps in [0,1]."""
+    enabled = bool(cfg.get("enabled", False))
+    if not enabled:
+        return np.ones((yres, xres, 3), dtype=np.float32), {
+            "enabled": False,
+            "mode": "off",
+            "edge_factor": 1.0,
+            "exponent": 2.0,
+        }
+    mode = str(cfg.get("mode", "radial_power")).lower().strip()
+    if mode != "radial_power":
+        raise ValueError('optics_transmittance_spatial.mode must be "radial_power"')
+    edge_factor = float(cfg.get("edge_factor", 0.9))
+    exponent = float(cfg.get("exponent", 2.0))
+    edge_rgb = np.full(3, float(np.clip(edge_factor, 0.0, 1.0)), dtype=np.float64)
+    spectral_csv = cfg.get("spectral_edge_factors_csv", None)
+    if spectral_csv:
+        s_wl, s_v = read_csv_curve((repo / str(spectral_csv)).resolve())
+        edge_lambda = np.clip(np.interp(wavelength_nm, s_wl, s_v, left=0.0, right=0.0), 0.0, 1.0)
+        qe = np.asarray(qe_rgb, dtype=np.float64)
+        if qe.shape[0] != 3:
+            raise ValueError(f"expected QE stack [3,K], got {qe.shape}")
+        for c in range(3):
+            w = np.clip(qe[c], 0.0, None)
+            sw = float(np.sum(w))
+            if sw > 0.0:
+                edge_rgb[c] = float(np.sum(w * edge_lambda) / sw)
+        edge_source = "spectral_edge_factors_csv"
+    else:
+        edge_source = "scalar_edge_factor"
+    maps = np.stack([_radial_map(yres, xres, float(edge_rgb[c]), exponent) for c in range(3)], axis=2)
+    return maps, {
+        "enabled": True,
+        "mode": mode,
+        "edge_factor": edge_factor,
+        "edge_factor_rgb": edge_rgb.tolist(),
+        "edge_source": edge_source,
+        "spectral_edge_factors_csv": str(spectral_csv) if spectral_csv else None,
+        "exponent": exponent,
+        "min": float(np.min(maps)),
+        "max": float(np.max(maps)),
+        "mean": float(np.mean(maps)),
+    }
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     repo_default = Path(__file__).resolve().parent.parent
@@ -223,6 +310,11 @@ def main() -> None:
         type=float,
         default=None,
         help="Optional integration time override in seconds (replaces sensor.integration_time_s).",
+    )
+    ap.add_argument(
+        "--strict-qe-validation",
+        action="store_true",
+        help="Fail on QE wavelength-axis auto-remap or likely R/B swap detection.",
     )
     args = ap.parse_args()
 
@@ -289,7 +381,11 @@ def main() -> None:
         i_wl, i_v = read_csv_curve((repo / ircf_csv).resolve())
         ircf = np.interp(wl, i_wl, i_v, left=0.0, right=0.0)
 
-    q_r, q_g, q_b = load_qe_curves_rgb(repo, qe_cfg)
+    q_r, q_g, q_b = load_qe_curves_rgb(
+        repo,
+        qe_cfg,
+        strict_qe_validation=bool(args.strict_qe_validation or qe_cfg.get("strict_validation", False)),
+    )
     qes = []
     for q_wl, q_v in (q_r, q_g, q_b):
         q = np.interp(wl, q_wl, q_v, left=0.0, right=0.0)
@@ -304,6 +400,16 @@ def main() -> None:
     aperture_factor = (1.0 / max(1e-9, f_number**2)) if use_aperture else 1.0
     pixel_area = (pixel_pitch_um * 1e-6) ** 2
     optics_t = float(cal.get("optics_transmittance", 1.0))
+    optics_t_csv = cal.get("optics_transmittance_csv", None)
+    if optics_t_csv:
+        t_wl, t_v = read_csv_curve((repo / str(optics_t_csv)).resolve())
+        tau_lambda = np.interp(wl, t_wl, t_v, left=0.0, right=0.0)
+        tau_lambda = np.clip(tau_lambda, 0.0, 1.0)
+        optics_mode = "spectral_csv"
+    else:
+        tau_lambda = np.full_like(wl, float(np.clip(optics_t, 0.0, 1.0)))
+        optics_mode = "scalar"
+    spatial_cfg = cal.get("optics_transmittance_spatial", {}) or {}
 
     lighting = (manifest.get("lighting") or {}).get("distant") or {}
     from_pt = np.asarray(lighting.get("from", [0.12, 0.55, 2.9]), dtype=np.float64)
@@ -349,17 +455,17 @@ def main() -> None:
                 raise RuntimeError("input illuminance <= 0; cannot normalize to target lux")
             illuminance_scale = float(target_lux) / illuminance_input_lux
         irr_scale_eff = irr_scale * illuminance_scale
-        base = E[None, :] * R * (irr_scale_eff * cos_theta)
+        base = E[None, :] * R * (irr_scale_eff * cos_theta) * tau_lambda[None, :]
         patch_resp = np.zeros((24, 3), dtype=np.float64)
         for i in range(24):
             phi = photon_flux_density_from_irradiance(base[i], wl)
             for c in range(3):
                 patch_resp[i, c] = _trapz(phi * qe[c], wl)
-        geom = t_int * fill_factor * pixel_area * aperture_factor * optics_t
+        geom = t_int * fill_factor * pixel_area * aperture_factor
         scalar = float(geom)
         patch_e = np.clip(patch_resp * geom, 0.0, None)
     else:
-        base = E[None, :] * R
+        base = E[None, :] * R * tau_lambda[None, :]
         patch_resp = np.zeros((24, 3), dtype=np.float64)
         for i in range(24):
             for c in range(3):
@@ -382,15 +488,15 @@ def main() -> None:
         surround_resp = np.zeros(3, dtype=np.float64)
         if cal_mode == "photon_counting":
             irr_scale = float(cal.get("irradiance_scale_W_m2nm_per_unit", 1.0e-3)) * illuminance_scale
-            s_irr = E * surround_reflectance * irr_scale * cos_theta
+            s_irr = E * surround_reflectance * irr_scale * cos_theta * tau_lambda
             phi_s = photon_flux_density_from_irradiance(s_irr, wl)
-            geom = t_int * fill_factor * pixel_area * aperture_factor * optics_t
+            geom = t_int * fill_factor * pixel_area * aperture_factor
             for c in range(3):
                 surround_resp[c] = _trapz(phi_s * qe[c], wl)
             surround_vec = np.clip(surround_resp * geom, 0.0, None).astype(np.float32)
         else:
             for c in range(3):
-                surround_resp[c] = _trapz(E * surround_reflectance * qe[c], wl)
+                surround_resp[c] = _trapz(E * surround_reflectance * tau_lambda * qe[c], wl)
             surround_vec = np.clip(surround_resp * scalar, 0.0, None).astype(np.float32)
         electrons[in_board] = surround_vec * vig_map[in_board][:, None]
 
@@ -408,6 +514,16 @@ def main() -> None:
             m = (xw >= px0) & (xw <= px1) & (yw >= py0) & (yw <= py1)
             electrons[m] = (patch_e[idx] * vig_map[m, None]).astype(np.float32)
 
+    spatial_map, spatial_meta = build_spatial_transmission_map(
+        yres,
+        xres,
+        spatial_cfg,
+        repo=repo,
+        wavelength_nm=wl,
+        qe_rgb=qe,
+    )
+    electrons = np.clip(electrons * spatial_map, 0.0, None).astype(np.float32)
+
     # Also export a simple linear preview image from electrons.
     # This is only for quick visual checks and not physically authoritative.
     preview = np.clip(electrons, 0.0, None)
@@ -423,6 +539,10 @@ def main() -> None:
         patch_electrons_rgb=patch_e.astype(np.float32),
         scalar=float(scalar),
         calibration_mode=np.array(cal_mode),
+        optics_transmittance_mode=np.array(optics_mode),
+        optics_transmittance_scalar=np.float64(optics_t),
+        optics_transmittance_mean=np.float64(float(np.mean(tau_lambda))),
+        optics_transmittance_spatial=np.array(json.dumps(spatial_meta)),
         cos_theta=np.float64(cos_theta),
         vignetting_cos4=np.bool_(use_vig),
         illuminance_target_lux=np.float64(float(target_lux) if target_lux is not None else np.nan),

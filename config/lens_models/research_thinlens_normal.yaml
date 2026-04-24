@@ -1,0 +1,10 @@
+schema_version: 1
+lens:
+  camera: thinlens
+  thinlens_fov_deg: 47.0
+  thinlens_lens_radius: 0.03
+  thinlens_focal_distance: 4.0
+  post_psf:
+    enabled: false
+    mode: gaussian
+    sigma_pixels: 0.75

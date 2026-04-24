@@ -1,0 +1,12 @@
+schema_version: 1
+model:
+  name: nikon_z6
+  display_name: Nikon Z6
+lens_model: research_realistic_wide22
+sensor_model: nikon_z6
+source:
+  qe_workbook: spectra/QE/Spectral_sensitivities_IE.xlsx
+  sheet: Data
+  emva_param_method: inferred_web_table_v1
+  emva_gain_note: dual gain
+  calibration_tier: inferred

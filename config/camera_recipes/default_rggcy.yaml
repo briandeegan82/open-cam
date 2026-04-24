@@ -1,0 +1,9 @@
+schema_version: 1
+model:
+  name: default_rggcy
+  display_name: Default RGGCy (RGB-proxy)
+lens_model: canon_eos_20d
+sensor_model: default_rggcy
+source:
+  qe_variant: default_rggcy
+  qe_variant_note: 'RGGCy approximated as RGB channels: R, G, Cy->B'

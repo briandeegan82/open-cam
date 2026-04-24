@@ -1,0 +1,13 @@
+schema_version: 1
+model:
+  name: leica_m_type_262
+  display_name: Leica M Type 262
+lens_model: canon_eos_20d
+sensor_model: leica_m_type_262
+source:
+  qe_workbook: spectra/QE/Spectral_sensitivities_IE.xlsx
+  sheet: Data
+  emva_param_method: inferred_web_table_v1
+  sensor_class: fullframe
+  emva_gain_note: CCD-like response
+  calibration_tier: inferred

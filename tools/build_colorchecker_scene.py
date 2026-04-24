@@ -112,9 +112,13 @@ def main() -> None:
     ap.add_argument("--cam-dist", type=float, default=4.25)
     ap.add_argument(
         "--camera",
-        choices=("perspective", "realistic"),
+        choices=("perspective", "pinhole", "thinlens", "realistic"),
         default="perspective",
-        help='PBRT camera: "perspective" (pinhole+fov) or "realistic" (traced lens; needs --lensfile).',
+        help=(
+            'PBRT camera: "pinhole"/"perspective" (lensradius=0), '
+            '"thinlens" (perspective + lensradius/focaldistance), '
+            'or "realistic" (traced lens; needs --lensfile).'
+        ),
     )
     ap.add_argument(
         "--lensfile",
@@ -135,6 +139,18 @@ def main() -> None:
         help="RealisticCamera focus distance in scene units (default: same as --cam-dist).",
     )
     ap.add_argument("--fov", type=float, default=35.0)
+    ap.add_argument(
+        "--thinlens-lens-radius",
+        type=float,
+        default=0.0,
+        help="Thin-lens lens radius in scene units (PerspectiveCamera lensradius).",
+    )
+    ap.add_argument(
+        "--thinlens-focal-distance",
+        type=float,
+        default=None,
+        help="Thin-lens focal distance in scene units (default: --cam-dist).",
+    )
     ap.add_argument("--xres", type=int, default=960)
     ap.add_argument("--yres", type=int, default=640)
     ap.add_argument("--pixelsamples", type=int, default=64)
@@ -270,8 +286,23 @@ def main() -> None:
     ]
 
     focus_d = float(args.focus_distance) if args.focus_distance is not None else float(args.cam_dist)
-    if args.camera == "perspective":
+    camera_kind = "pinhole" if args.camera == "perspective" else args.camera
+    if camera_kind == "pinhole":
         pbrt_lines.append('Camera "perspective" "float fov" [%s]' % args.fov)
+    elif camera_kind == "thinlens":
+        thin_focal_d = (
+            float(args.thinlens_focal_distance)
+            if args.thinlens_focal_distance is not None
+            else float(args.cam_dist)
+        )
+        pbrt_lines.extend(
+            [
+                'Camera "perspective"',
+                f'    "float fov" [{float(args.fov):.6g}]',
+                f'    "float lensradius" [{float(args.thinlens_lens_radius):.6g}]',
+                f'    "float focaldistance" [{thin_focal_d:.6g}]',
+            ]
+        )
     else:
         lens_repo = (repo / args.lensfile).resolve()
         if not lens_repo.is_file():
@@ -360,17 +391,29 @@ def main() -> None:
             "board_size": [board_w, board_h],
         },
         "camera": {
-            "type": args.camera,
+            "type": camera_kind,
             "cam_dist": args.cam_dist,
             "fov_deg": args.fov,
             "lookat": {"eye": [0.0, 0.0, args.cam_dist], "target": [0.0, 0.0, 0.0], "up": [0.0, 1.0, 0.0]},
+            **(
+                {
+                    "lens_radius": float(args.thinlens_lens_radius),
+                    "focal_distance": (
+                        float(args.thinlens_focal_distance)
+                        if args.thinlens_focal_distance is not None
+                        else float(args.cam_dist)
+                    ),
+                }
+                if camera_kind == "thinlens"
+                else {}
+            ),
             **(
                 {
                     "lensfile": _rel(repo, (repo / args.lensfile).resolve()),
                     "aperture_diameter_mm": float(args.aperture_diameter_mm),
                     "focus_distance": focus_d,
                 }
-                if args.camera == "realistic"
+                if camera_kind == "realistic"
                 else {}
             ),
         },

@@ -1,0 +1,9 @@
+schema_version: 1
+model:
+  name: default_ryycy
+  display_name: Default RYYCy (RGB-proxy)
+lens_model: canon_eos_20d
+sensor_model: default_ryycy
+source:
+  qe_variant: default_ryycy
+  qe_variant_note: 'RYYCy approximated as RGB channels: R, Y->G, Cy->B'

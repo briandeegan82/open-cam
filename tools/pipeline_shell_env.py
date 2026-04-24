@@ -9,7 +9,10 @@ import sys
 from pathlib import Path
 
 import yaml
-from camera_model import load_camera_model
+try:
+    from camera_model import load_camera_model
+except ModuleNotFoundError:  # pragma: no cover - import path variant for tests
+    from tools.camera_model import load_camera_model
 
 
 def resolve_camera_model_path(repo: Path, paths: dict) -> tuple[str, Path]:
@@ -18,9 +21,9 @@ def resolve_camera_model_path(repo: Path, paths: dict) -> tuple[str, Path]:
     if model_name and model_cfg:
         raise ValueError("set only one of paths.camera_model_name or paths.camera_model_config")
     if model_name:
-        rel = f"config/camera_models/{model_name}.yaml"
+        rel = f"config/camera_recipes/{model_name}.yaml"
         return rel, (repo / rel).resolve()
-    rel = str(model_cfg or "config/camera_models/default.yaml")
+    rel = str(model_cfg or "config/camera_recipes/default.yaml")
     abs_path = Path(rel).resolve() if Path(rel).is_absolute() else (repo / rel).resolve()
     return rel, abs_path
 
@@ -137,6 +140,16 @@ def main() -> None:
     pe = noise.get("preview_percentile", None)
     export("NOISE_PREVIEW_PERCENTILE", pe if pe is not None else "99.5")
     export("NOISE_PREVIEW_NO_NORMALIZE", "1" if bool(noise.get("preview_no_normalize", False)) else "0")
+    wb_override = noise.get("preview_white_balance_enabled", None)
+    cc_override = noise.get("preview_color_correction_enabled", None)
+    if wb_override is None:
+        export("NOISE_PREVIEW_WB_ENABLED", "")
+    else:
+        export("NOISE_PREVIEW_WB_ENABLED", "true" if bool(wb_override) else "false")
+    if cc_override is None:
+        export("NOISE_PREVIEW_CC_ENABLED", "")
+    else:
+        export("NOISE_PREVIEW_CC_ENABLED", "true" if bool(cc_override) else "false")
     es = noise.get("exposure_scale", None)
     export("NOISE_EXPOSURE_SCALE", es if es is not None else "")
 

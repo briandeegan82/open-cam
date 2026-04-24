@@ -20,7 +20,7 @@ from exr_multispectral import (
 )
 
 
-def read_csv_curve(path: Path) -> tuple[np.ndarray, np.ndarray]:
+def read_csv_curve(path: Path, *, strict_wavelength_axis: bool = False) -> tuple[np.ndarray, np.ndarray]:
     wl: list[float] = []
     val: list[float] = []
     for line in path.read_text().splitlines():
@@ -50,6 +50,11 @@ def read_csv_curve(path: Path) -> tuple[np.ndarray, np.ndarray]:
         wmax = float(np.max(w))
         if wmax - wmin <= 1e-12:
             raise ValueError(f"invalid wavelength axis in CSV curve: {path}")
+        if strict_wavelength_axis:
+            raise ValueError(
+                "strict QE validation: normalized wavelength axis detected "
+                f"in {path}; provide explicit wavelength-in-nm CSV"
+            )
         w = 380.0 + (w - wmin) * (400.0 / (wmax - wmin))
         print(f"warning: mapped normalized wavelength axis to 380..780 nm for {path}", file=sys.stderr)
 
@@ -57,15 +62,25 @@ def read_csv_curve(path: Path) -> tuple[np.ndarray, np.ndarray]:
     return w[idx], v[idx]
 
 
-def load_qe_curves_rgb(repo: Path, qe_cfg: dict) -> tuple[tuple[np.ndarray, np.ndarray], tuple[np.ndarray, np.ndarray], tuple[np.ndarray, np.ndarray]]:
+def load_qe_curves_rgb(
+    repo: Path,
+    qe_cfg: dict,
+    *,
+    strict_qe_validation: bool = False,
+) -> tuple[tuple[np.ndarray, np.ndarray], tuple[np.ndarray, np.ndarray], tuple[np.ndarray, np.ndarray]]:
     """Load QE curves and auto-correct likely imported red/blue inversion."""
-    r = read_csv_curve((repo / qe_cfg["red_csv"]).resolve())
-    g = read_csv_curve((repo / qe_cfg["green_csv"]).resolve())
-    b = read_csv_curve((repo / qe_cfg["blue_csv"]).resolve())
+    r = read_csv_curve((repo / qe_cfg["red_csv"]).resolve(), strict_wavelength_axis=strict_qe_validation)
+    g = read_csv_curve((repo / qe_cfg["green_csv"]).resolve(), strict_wavelength_axis=strict_qe_validation)
+    b = read_csv_curve((repo / qe_cfg["blue_csv"]).resolve(), strict_wavelength_axis=strict_qe_validation)
     r_peak = float(r[0][int(np.argmax(r[1]))])
     g_peak = float(g[0][int(np.argmax(g[1]))])
     b_peak = float(b[0][int(np.argmax(b[1]))])
     if r_peak < g_peak and b_peak > g_peak:
+        if strict_qe_validation:
+            raise ValueError(
+                "strict QE validation: detected likely QE red/blue inversion; "
+                "fix channel assignments in QE CSVs"
+            )
         print(
             "warning: detected likely QE red/blue inversion; swapping channels "
             f"(red_peak={r_peak:.1f}nm, green_peak={g_peak:.1f}nm, blue_peak={b_peak:.1f}nm)",
@@ -178,6 +193,11 @@ def sanitize_ccm(ccm: np.ndarray) -> np.ndarray:
     m = np.asarray(ccm, dtype=np.float32)
     if not np.all(np.isfinite(m)):
         return np.eye(3, dtype=np.float32)
+    # Enforce unit-sum rows so each output channel preserves neutral energy.
+    row_sums = np.sum(m, axis=1, keepdims=True)
+    if np.any(np.abs(row_sums) < 1e-6):
+        return np.eye(3, dtype=np.float32)
+    m = m / row_sums
     # Keep average channel gain in a sane range for preview mapping.
     tr = float(np.trace(m) / 3.0)
     if tr < 0.2 or tr > 5.0:
@@ -363,6 +383,20 @@ def bayer_sample_rgb(rgb: np.ndarray, pattern: str) -> np.ndarray:
     return rgb[jj, ii, ch]
 
 
+def apply_channel_crosstalk(rgb: np.ndarray, m33: np.ndarray) -> np.ndarray:
+    """Apply a 3x3 channel mixing matrix to HxWx3 signal."""
+    if rgb.ndim != 3 or rgb.shape[2] < 3:
+        raise ValueError(f"apply_channel_crosstalk expects HxWx3, got {rgb.shape}")
+    m = np.asarray(m33, dtype=np.float64)
+    if m.shape != (3, 3):
+        raise ValueError(f"crosstalk matrix must be 3x3, got {m.shape}")
+    if not np.all(np.isfinite(m)):
+        raise ValueError("crosstalk matrix contains non-finite values")
+    x = np.asarray(rgb[:, :, :3], dtype=np.float64).reshape(-1, 3)
+    y = x @ m.T
+    return np.clip(y.reshape(rgb.shape[0], rgb.shape[1], 3), 0.0, None).astype(np.float32)
+
+
 def to_png8_preview_gray(
     mono_dn: np.ndarray,
     bit_depth: int,
@@ -380,6 +414,117 @@ def mono_dn_to_u16(mono_dn: np.ndarray, bit_depth: int) -> np.ndarray:
     max_dn = float((1 << bit_depth) - 1)
     scaled = np.clip(mono_dn / max_dn, 0.0, 1.0)
     return np.rint(scaled * 65535.0).astype(np.uint16)
+
+
+def _spatial_shape(arr: np.ndarray) -> tuple[int, int]:
+    if arr.ndim == 2:
+        return int(arr.shape[0]), int(arr.shape[1])
+    if arr.ndim == 3 and arr.shape[2] >= 3:
+        return int(arr.shape[0]), int(arr.shape[1])
+    raise ValueError(f"unsupported signal shape for defect model: {arr.shape}")
+
+
+def apply_hot_stuck_pixel_model(
+    signal_e: np.ndarray,
+    rng: np.random.Generator,
+    cfg: dict,
+    full_well_e: float,
+    persistent_map_npz: Path | None = None,
+    regenerate_persistent_map: bool = False,
+) -> tuple[np.ndarray, dict]:
+    """Apply optional hot/stuck defect pixels in electron domain."""
+    enabled = bool(cfg.get("enabled", False))
+    if not enabled:
+        return signal_e.astype(np.float32, copy=False), {
+            "enabled": False,
+            "hot_pixel_count": 0,
+            "stuck_high_count": 0,
+            "stuck_low_count": 0,
+        }
+
+    out = np.asarray(signal_e, dtype=np.float32).copy()
+    h, w = _spatial_shape(out)
+    hot_rate = float(cfg.get("hot_pixel_rate", 0.0))
+    stuck_high_rate = float(cfg.get("stuck_high_rate", 0.0))
+    stuck_low_rate = float(cfg.get("stuck_low_rate", 0.0))
+    hot_min_e = float(cfg.get("hot_dark_e_min", 50.0))
+    hot_max_e = float(cfg.get("hot_dark_e_max", 5000.0))
+    stuck_high_value_e = float(cfg.get("stuck_high_value_e", full_well_e))
+    stuck_low_value_e = float(cfg.get("stuck_low_value_e", 0.0))
+
+    hot_rate = float(np.clip(hot_rate, 0.0, 1.0))
+    stuck_high_rate = float(np.clip(stuck_high_rate, 0.0, 1.0))
+    stuck_low_rate = float(np.clip(stuck_low_rate, 0.0, 1.0))
+    hot_min_e = max(0.0, hot_min_e)
+    hot_max_e = max(hot_min_e, hot_max_e)
+    stuck_high_value_e = float(np.clip(stuck_high_value_e, 0.0, full_well_e))
+    stuck_low_value_e = max(0.0, stuck_low_value_e)
+
+    map_source = "random_per_run"
+    hot_add = np.zeros((h, w), dtype=np.float32)
+    if persistent_map_npz is not None and persistent_map_npz.is_file() and not regenerate_persistent_map:
+        data = np.load(persistent_map_npz)
+        hot_mask = np.asarray(data["hot_mask"], dtype=bool)
+        stuck_high_mask = np.asarray(data["stuck_high_mask"], dtype=bool)
+        stuck_low_mask = np.asarray(data["stuck_low_mask"], dtype=bool)
+        hot_add = np.asarray(data["hot_add_e"], dtype=np.float32)
+        if hot_mask.shape != (h, w) or stuck_high_mask.shape != (h, w) or stuck_low_mask.shape != (h, w) or hot_add.shape != (h, w):
+            raise ValueError(
+                f"persistent defect map shape mismatch: expected {(h, w)}, "
+                f"got hot={hot_mask.shape}, high={stuck_high_mask.shape}, low={stuck_low_mask.shape}, add={hot_add.shape}"
+            )
+        map_source = "loaded_persistent_map"
+    else:
+        base = rng.random((h, w))
+        hot_mask = base < hot_rate
+        stuck_high_mask = (~hot_mask) & (rng.random((h, w)) < stuck_high_rate)
+        stuck_low_mask = (~hot_mask) & (~stuck_high_mask) & (rng.random((h, w)) < stuck_low_rate)
+        if np.any(hot_mask):
+            hot_add = rng.uniform(hot_min_e, hot_max_e, size=(h, w)).astype(np.float32)
+        if persistent_map_npz is not None:
+            persistent_map_npz.parent.mkdir(parents=True, exist_ok=True)
+            np.savez_compressed(
+                persistent_map_npz,
+                hot_mask=hot_mask.astype(np.uint8),
+                stuck_high_mask=stuck_high_mask.astype(np.uint8),
+                stuck_low_mask=stuck_low_mask.astype(np.uint8),
+                hot_add_e=hot_add.astype(np.float32),
+            )
+            map_source = "saved_persistent_map"
+
+    if np.any(hot_mask):
+        if out.ndim == 2:
+            out[hot_mask] += hot_add[hot_mask]
+        else:
+            out[hot_mask, :] += hot_add[hot_mask, None]
+
+    if np.any(stuck_high_mask):
+        if out.ndim == 2:
+            out[stuck_high_mask] = stuck_high_value_e
+        else:
+            out[stuck_high_mask, :] = stuck_high_value_e
+    if np.any(stuck_low_mask):
+        if out.ndim == 2:
+            out[stuck_low_mask] = stuck_low_value_e
+        else:
+            out[stuck_low_mask, :] = stuck_low_value_e
+
+    out = np.clip(out, 0.0, None).astype(np.float32)
+    return out, {
+        "enabled": True,
+        "hot_pixel_count": int(np.count_nonzero(hot_mask)),
+        "stuck_high_count": int(np.count_nonzero(stuck_high_mask)),
+        "stuck_low_count": int(np.count_nonzero(stuck_low_mask)),
+        "hot_pixel_rate": hot_rate,
+        "stuck_high_rate": stuck_high_rate,
+        "stuck_low_rate": stuck_low_rate,
+        "hot_dark_e_min": hot_min_e,
+        "hot_dark_e_max": hot_max_e,
+        "stuck_high_value_e": stuck_high_value_e,
+        "stuck_low_value_e": stuck_low_value_e,
+        "persistent_map_path": str(persistent_map_npz) if persistent_map_npz is not None else None,
+        "persistent_map_source": map_source,
+    }
 
 
 def _require_positive(name: str, value: float) -> float:
@@ -406,13 +551,19 @@ def integrate_exr_spectral_qe(
     exr_path: Path,
     repo: Path,
     qe_cfg: dict,
+    *,
+    strict_qe_validation: bool = False,
 ) -> np.ndarray:
     """HxWx3 proxy signal: Σ_k L(λ_k) QE_c(λ_k) w_k (trapezoid weights in nm)."""
     spec, lam = spectral_buckets_from_exr(exr_path.resolve())
     w = trapezoid_weights_nm(lam).astype(np.float32)
     ircf = qe_cfg.get("ircf_csv")
     ircf_path = (repo / ircf).resolve() if ircf else None
-    q_r_src, q_g_src, q_b_src = load_qe_curves_rgb(repo, qe_cfg)
+    q_r_src, q_g_src, q_b_src = load_qe_curves_rgb(
+        repo,
+        qe_cfg,
+        strict_qe_validation=strict_qe_validation,
+    )
     q_r = np.interp(lam, q_r_src[0], np.clip(q_r_src[1], 0.0, 1.0), left=0.0, right=0.0).astype(np.float32)
     q_g = np.interp(lam, q_g_src[0], np.clip(q_g_src[1], 0.0, 1.0), left=0.0, right=0.0).astype(np.float32)
     q_b = np.interp(lam, q_b_src[0], np.clip(q_b_src[1], 0.0, 1.0), left=0.0, right=0.0).astype(np.float32)
@@ -482,10 +633,34 @@ def main() -> None:
         help="Disable preview percentile normalization; map PNGs against full ADC range.",
     )
     ap.add_argument(
+        "--preview-white-balance-enabled",
+        type=str,
+        choices=("true", "false"),
+        default=None,
+        help="Optional override for processing.preview_white_balance.enabled.",
+    )
+    ap.add_argument(
+        "--preview-color-correction-enabled",
+        type=str,
+        choices=("true", "false"),
+        default=None,
+        help="Optional override for processing.preview_color_correction.enabled.",
+    )
+    ap.add_argument(
         "--integration-time-s",
         type=float,
         default=None,
         help="Optional integration time override in seconds (replaces sensor.integration_time_s).",
+    )
+    ap.add_argument(
+        "--strict-qe-validation",
+        action="store_true",
+        help="Fail on QE wavelength-axis auto-remap or likely R/B swap detection.",
+    )
+    ap.add_argument(
+        "--regenerate-defect-map",
+        action="store_true",
+        help="Regenerate and overwrite persistent defect-pixel map when configured.",
     )
     args = ap.parse_args()
 
@@ -508,6 +683,8 @@ def main() -> None:
         cfg = yaml.safe_load(cfg_path.read_text())
     sensor = cfg.get("sensor", {})
     qe_cfg = sensor.get("quantum_efficiency", {})
+    crosstalk_cfg = sensor.get("crosstalk", {}) or {}
+    strict_qe_validation = bool(args.strict_qe_validation or qe_cfg.get("strict_validation", False))
     emva = cfg.get("emva", {})
     adc = cfg.get("adc", {})
     out_cfg = cfg.get("output", {})
@@ -524,7 +701,11 @@ def main() -> None:
 
     ircf = qe_cfg.get("ircf_csv")
     ircf_path = (repo / ircf).resolve() if ircf else None
-    q_r_src, q_g_src, q_b_src = load_qe_curves_rgb(repo, qe_cfg)
+    q_r_src, q_g_src, q_b_src = load_qe_curves_rgb(
+        repo,
+        qe_cfg,
+        strict_qe_validation=strict_qe_validation,
+    )
     qe_r = 0.0
     qe_g = 0.0
     qe_b = 0.0
@@ -574,6 +755,9 @@ def main() -> None:
     adc_inl_quad_fraction = float(adc.get("inl_quadratic_fraction", 0.0))
     adc_dnl_std_lsb = float(adc.get("dnl_std_lsb", 0.0))
     adc_clipping = bool(adc.get("clipping", True))
+    defect_cfg = emva.get("defect_pixels", {}) or {}
+    persistent_map_npz = defect_cfg.get("persistent_map_npz", None)
+    persistent_map_path = (repo / str(persistent_map_npz)).resolve() if persistent_map_npz else None
 
     exr_mode = str(proc_cfg.get("linear_exr_mode", "rgb")).lower()
     if exr_mode not in ("rgb", "integrate_qe"):
@@ -586,21 +770,38 @@ def main() -> None:
         exposure_scale = float(args.exposure_scale)
     wb_cfg = proc_cfg.get("preview_white_balance", {}) or {}
     wb_enabled = bool(wb_cfg.get("enabled", True))
+    if args.preview_white_balance_enabled is not None:
+        wb_enabled = args.preview_white_balance_enabled == "true"
     wb_method = str(wb_cfg.get("method", "gray_world")).lower().strip()
     if wb_enabled and wb_method != "gray_world":
         raise ValueError('processing.preview_white_balance.method must be "gray_world"')
     ccm_cfg = proc_cfg.get("preview_color_correction", {}) or {}
     ccm_enabled = bool(ccm_cfg.get("enabled", True))
+    if args.preview_color_correction_enabled is not None:
+        ccm_enabled = args.preview_color_correction_enabled == "true"
     ccm_method = str(ccm_cfg.get("method", "diag_exr_reference")).lower().strip()
     if ccm_enabled and ccm_method not in ("diag_exr_reference", "lstsq_exr_reference"):
         raise ValueError(
             'processing.preview_color_correction.method must be "diag_exr_reference" or "lstsq_exr_reference"'
         )
 
+    crosstalk_enabled = bool(crosstalk_cfg.get("enabled", False))
+    crosstalk_matrix = np.eye(3, dtype=np.float32)
+    if crosstalk_enabled:
+        crosstalk_matrix = np.asarray(crosstalk_cfg.get("matrix_3x3", np.eye(3)), dtype=np.float32)
+        if crosstalk_matrix.shape != (3, 3):
+            raise ValueError("sensor.crosstalk.matrix_3x3 must be a 3x3 matrix")
+        if bool(crosstalk_cfg.get("normalize_rows", True)):
+            row_sum = np.sum(crosstalk_matrix, axis=1, keepdims=True)
+            row_sum = np.where(np.abs(row_sum) < 1e-12, 1.0, row_sum)
+            crosstalk_matrix = (crosstalk_matrix / row_sum).astype(np.float32)
+
     signal_source = "linear_exr"
     if electrons_npz is not None:
         signal_e = load_electrons_npz(electrons_npz)
         signal_source = "electrons_npz"
+        if crosstalk_enabled:
+            signal_e = apply_channel_crosstalk(signal_e, crosstalk_matrix)
         if auto_exposure:
             pctl = float(np.percentile(signal_e, args.target_fullwell_percentile))
             if pctl <= 0:
@@ -611,7 +812,12 @@ def main() -> None:
         if exr_mode == "integrate_qe":
             signal_source = "linear_exr_integrate_qe"
             try:
-                rgb = integrate_exr_spectral_qe(exr_in, repo, qe_cfg)
+                rgb = integrate_exr_spectral_qe(
+                    exr_in,
+                    repo,
+                    qe_cfg,
+                    strict_qe_validation=strict_qe_validation,
+                )
                 rgb = np.clip(rgb, 0.0, None)
                 e_nominal = rgb
             except ValueError as exc:
@@ -632,6 +838,8 @@ def main() -> None:
             rgb = np.clip(rgb, 0.0, None)
             e_nominal = rgb * qe_vec[None, None, :]
 
+        if crosstalk_enabled:
+            e_nominal = apply_channel_crosstalk(e_nominal, crosstalk_matrix)
         if auto_exposure:
             pctl = float(np.percentile(e_nominal, args.target_fullwell_percentile))
             if pctl <= 0:
@@ -640,6 +848,14 @@ def main() -> None:
         signal_e = e_nominal * exposure_scale
 
     rng = np.random.default_rng(args.seed)
+    signal_e, defect_stats = apply_hot_stuck_pixel_model(
+        signal_e,
+        rng,
+        defect_cfg,
+        full_well_e,
+        persistent_map_npz=persistent_map_path,
+        regenerate_persistent_map=bool(args.regenerate_defect_map),
+    )
 
     bayer_on = bool(bayer_cfg.get("enabled", False))
     bayer_pat = str(bayer_cfg.get("pattern", "RGGB"))
@@ -832,7 +1048,10 @@ def main() -> None:
         "adc_inl_quadratic_fraction": adc_inl_quad_fraction,
         "adc_dnl_std_lsb": adc_dnl_std_lsb,
         "adc_clipping": adc_clipping,
+        "defect_pixels": defect_stats,
         "preview_no_normalize": preview_no_normalize,
+        "crosstalk_enabled": crosstalk_enabled,
+        "crosstalk_matrix_3x3": crosstalk_matrix.tolist(),
         "preview_white_dn_percentile": args.preview_percentile,
         "preview_white_dn_value_clean": preview_white_clean,
         "preview_white_dn_value_noisy": preview_white_noisy,

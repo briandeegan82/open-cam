@@ -1,0 +1,8 @@
+schema_version: 1
+model:
+  name: study_nikon_z6_minvar
+  display_name: Study Nikon Z6 Minimal Spatial Variation
+lens_model: study_realistic_minvar
+sensor_model: nikon_z6_study_minvar
+source:
+  notes: Dedicated study recipe minimizing spatially varying lens/sensor-forward effects.

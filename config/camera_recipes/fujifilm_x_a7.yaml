@@ -1,0 +1,13 @@
+schema_version: 1
+model:
+  name: fujifilm_x_a7
+  display_name: Fujifilm X-A7
+lens_model: canon_eos_20d
+sensor_model: fujifilm_x_a7
+source:
+  qe_workbook: spectra/QE/Spectral_sensitivities_IE.xlsx
+  sheet: Data
+  emva_param_method: inferred_web_table_v1
+  sensor_class: apsc
+  emva_gain_note: dual gain
+  calibration_tier: inferred

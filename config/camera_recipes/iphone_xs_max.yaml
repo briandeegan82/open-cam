@@ -1,0 +1,13 @@
+schema_version: 1
+model:
+  name: iphone_xs_max
+  display_name: iPhone XS Max
+lens_model: canon_eos_20d
+sensor_model: iphone_xs_max
+source:
+  qe_workbook: spectra/QE/Spectral_sensitivities_IE.xlsx
+  sheet: Data
+  emva_param_method: inferred_web_table_v1
+  sensor_class: phone
+  emva_gain_note: computational HDR
+  calibration_tier: inferred

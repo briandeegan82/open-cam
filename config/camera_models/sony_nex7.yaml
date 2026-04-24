@@ -23,15 +23,15 @@ sensor:
   fill_factor: 0.58
 noise:
   emva:
-    overall_system_gain_K_e_per_DN: 0.928
-    sigma_d_e: 3.0
+    overall_system_gain_K_e_per_DN: 0.6
+    sigma_d_e: 2.8
     black_level_DN: 512
     use_poisson_shot_noise: true
     prnu_std_fraction: 0.01
     dsnu_std_e: 0.3
   adc:
     bit_depth: 14
-    full_well_e: 15210
+    full_well_e: 24000
     clipping: hard
   processing:
     auto_exposure: false
@@ -77,13 +77,19 @@ validation:
   - 4700.0
   datasheet:
     enabled: true
-    overall_system_gain_K_e_per_DN: 4.77
-    temporal_dark_noise_sigma_d_e: 2.6
-    full_well_e: 4800
-    black_level_DN: 16
+    overall_system_gain_K_e_per_DN: 0.6
+    temporal_dark_noise_sigma_d_e: 2.8
+    full_well_e: 24000
+    black_level_DN: 512
     parameter_rtol: 0.02
+    bit_depth: 14
+    gain_convention: e_per_dn
+    source: scraped internet table provided by user on 2026-04-24; inferred/effective
+      values, not EMVA1288 ground truth
 source:
   qe_workbook: spectra/QE/Spectral_sensitivities_IE.xlsx
   sheet: Data
-  emva_param_method: heuristic_scaling_rules_v1
+  emva_param_method: inferred_web_table_v1
   sensor_class: apsc
+  emva_gain_note: ISO invariant
+  calibration_tier: inferred

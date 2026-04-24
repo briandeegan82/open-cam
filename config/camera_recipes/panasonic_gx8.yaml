@@ -1,0 +1,13 @@
+schema_version: 1
+model:
+  name: panasonic_gx8
+  display_name: Panasonic GX8
+lens_model: canon_eos_20d
+sensor_model: panasonic_gx8
+source:
+  qe_workbook: spectra/QE/Spectral_sensitivities_IE.xlsx
+  sheet: Data
+  emva_param_method: inferred_web_table_v1
+  sensor_class: mft
+  emva_gain_note: dual gain
+  calibration_tier: inferred

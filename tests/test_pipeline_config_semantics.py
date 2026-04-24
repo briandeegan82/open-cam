@@ -22,6 +22,10 @@ def _minimal_camera_model_yaml() -> dict:
     }
 
 
+def _minimal_recipe_yaml() -> dict:
+    return {"schema_version": 1, "lens_model": "default", "sensor_model": "default"}
+
+
 class TestPipelineConfigSemantics(unittest.TestCase):
     def test_camera_model_fields_conflict_rejected_in_python_runner(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -40,9 +44,27 @@ class TestPipelineConfigSemantics(unittest.TestCase):
     def test_shell_export_defaults_match_python_runner(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)
-            (repo / "config" / "camera_models").mkdir(parents=True, exist_ok=True)
-            (repo / "config" / "camera_models" / "default.yaml").write_text(
-                yaml.safe_dump(_minimal_camera_model_yaml(), sort_keys=False)
+            (repo / "config" / "camera_recipes").mkdir(parents=True, exist_ok=True)
+            (repo / "config" / "lens_models").mkdir(parents=True, exist_ok=True)
+            (repo / "config" / "sensor_models").mkdir(parents=True, exist_ok=True)
+            (repo / "config" / "camera_recipes" / "default.yaml").write_text(
+                yaml.safe_dump(_minimal_recipe_yaml(), sort_keys=False)
+            )
+            minimal = _minimal_camera_model_yaml()
+            (repo / "config" / "lens_models" / "default.yaml").write_text(
+                yaml.safe_dump({"schema_version": 1, "lens": minimal["lens"]}, sort_keys=False)
+            )
+            (repo / "config" / "sensor_models" / "default.yaml").write_text(
+                yaml.safe_dump(
+                    {
+                        "schema_version": 1,
+                        "sensor": minimal["sensor"],
+                        "noise": minimal["noise"],
+                        "cfa": minimal["cfa"],
+                        "sensor_forward": minimal["sensor_forward"],
+                    },
+                    sort_keys=False,
+                )
             )
             cfg_path = repo / "config" / "pipeline.yaml"
             cfg_path.parent.mkdir(parents=True, exist_ok=True)

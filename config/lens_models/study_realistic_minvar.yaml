@@ -1,0 +1,11 @@
+schema_version: 1
+lens:
+  camera: realistic
+  realistic_lensfile: scenes/lenses/wide_22mm.dat
+  # f/8-equivalent on 22mm reduces edge aberrations and field variation.
+  realistic_aperture_diameter_mm: 2.75
+  realistic_focus_distance: 4.0
+  post_psf:
+    enabled: false
+    mode: gaussian
+    sigma_pixels: 0.0
