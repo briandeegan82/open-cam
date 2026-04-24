@@ -4,7 +4,7 @@ model:
   display_name: iPhone X tele
 lens:
   camera: realistic
-  realistic_lensfile: scenes/lenses/wide_22mm.dat
+  realistic_lensfile: config/lenses/wide_22mm.dat
   realistic_aperture_diameter_mm: 4.0
   realistic_focus_distance: 1.0
   post_psf:

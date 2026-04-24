@@ -13,13 +13,27 @@ import argparse
 import os
 from pathlib import Path
 
+LEGACY_REALISTIC_LENSFILE = "scenes/lenses/wide_22mm.dat"
+DEFAULT_REALISTIC_LENSFILE = "config/lenses/wide_22mm.dat"
+
+
+def resolve_lensfile(repo: Path, lensfile_rel: str) -> Path:
+    lens_path = (repo / lensfile_rel).resolve()
+    if lens_path.is_file():
+        return lens_path
+    if lensfile_rel == LEGACY_REALISTIC_LENSFILE:
+        migrated = (repo / DEFAULT_REALISTIC_LENSFILE).resolve()
+        if migrated.is_file():
+            return migrated
+    return lens_path
+
 
 def _camera_block(args: argparse.Namespace, scene_dir: Path, repo: Path) -> list[str]:
     focus_d = float(args.focus_distance) if args.focus_distance is not None else float(args.cam_dist)
     if args.camera == "perspective":
         return [f'Camera "perspective" "float fov" [{float(args.fov):.6g}]']
 
-    lens_repo = (repo / args.lensfile).resolve()
+    lens_repo = resolve_lensfile(repo, args.lensfile)
     if not lens_repo.is_file():
         raise FileNotFoundError(f"realistic camera: lens file not found: {lens_repo}")
     lens_for_scene = os.path.relpath(str(lens_repo), str(scene_dir.resolve()))
@@ -89,7 +103,7 @@ def main() -> None:
         default="realistic",
     )
     ap.add_argument("--fov", type=float, default=35.0)
-    ap.add_argument("--lensfile", type=str, default="scenes/lenses/wide_22mm.dat")
+    ap.add_argument("--lensfile", type=str, default=DEFAULT_REALISTIC_LENSFILE)
     ap.add_argument("--aperture-diameter-mm", type=float, default=4.0)
     ap.add_argument("--focus-distance", type=float, default=None)
     ap.add_argument("--bg-reflectance", type=float, default=0.02, help="Dark field reflectance (0..1)")

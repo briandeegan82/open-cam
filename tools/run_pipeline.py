@@ -18,6 +18,10 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - import path variant for tests
     from tools.camera_model import load_camera_model
 
+LEGACY_REALISTIC_LENSFILE = "scenes/lenses/wide_22mm.dat"
+DEFAULT_REALISTIC_LENSFILE = "config/lenses/wide_22mm.dat"
+DEFAULT_ILLUMINANT_CSV = "spectra/illuminant/interpolated/D55.csv"
+
 
 def sha256_file(path: Path) -> str:
     h = hashlib.sha256()
@@ -51,6 +55,34 @@ def p(repo: Path, v: str) -> Path:
 def pick_override(overrides: dict, key: str, default):
     v = overrides.get(key, None)
     return default if v is None else v
+
+
+def parse_render_pbrt_args(render: dict) -> list[str]:
+    gpu_enabled = bool(render.get("gpu_enabled", False))
+    pbrt_args = render.get("pbrt_args", []) or []
+    if not isinstance(pbrt_args, list):
+        raise TypeError("render.pbrt_args must be a YAML list of CLI tokens")
+    args = [str(tok) for tok in pbrt_args]
+    if gpu_enabled and "--wavefront" not in args:
+        args = ["--wavefront", *args]
+    return args
+
+
+def resolve_illuminant_rel(render: dict) -> str:
+    illuminant = render.get("illuminant", None)
+    if illuminant is None:
+        return DEFAULT_ILLUMINANT_CSV
+    illum_s = str(illuminant).strip()
+    if not illum_s or illum_s.lower() in ("null", "none"):
+        return DEFAULT_ILLUMINANT_CSV
+    return illum_s
+
+
+def canonicalize_lensfile_rel(path_value: object) -> str:
+    lensfile = str(path_value)
+    if lensfile == LEGACY_REALISTIC_LENSFILE:
+        return DEFAULT_REALISTIC_LENSFILE
+    return lensfile
 
 
 def resolve_camera_model_path(repo: Path, paths: dict, cli_path: Path | None) -> Path:
@@ -167,6 +199,8 @@ def main() -> None:
     if not isinstance(builder_extra_args, list):
         raise TypeError("render.builder_extra_args must be a YAML list of CLI tokens")
     build_cmd.extend([str(tok) for tok in builder_extra_args])
+    illuminant_rel = resolve_illuminant_rel(render)
+    build_cmd.extend(["--illuminant", illuminant_rel])
     fo = render.get("film_output", None)
     if fo:
         build_cmd.extend(["--film-output", str(fo)])
@@ -212,8 +246,9 @@ def main() -> None:
         realistic_lensfile = pick_override(
             lens_overrides,
             "realistic_lensfile",
-            lens_cfg.get("realistic_lensfile", "scenes/lenses/wide_22mm.dat"),
+            lens_cfg.get("realistic_lensfile", DEFAULT_REALISTIC_LENSFILE),
         )
+        realistic_lensfile = canonicalize_lensfile_rel(realistic_lensfile)
         realistic_aperture_mm = pick_override(
             lens_overrides,
             "realistic_aperture_diameter_mm",
@@ -246,7 +281,7 @@ def main() -> None:
     log.append(run_cmd(build_cmd, repo, args.dry_run))
 
     # 2) Render with pbrt
-    pbrt_cmd = [str(pbrt_bin), str(scene_file)]
+    pbrt_cmd = [str(pbrt_bin), *parse_render_pbrt_args(render), str(scene_file)]
     log.append(run_cmd(pbrt_cmd, repo, args.dry_run))
 
     # 2b) Optional post-render PSF / MTF blur
@@ -417,6 +452,8 @@ def main() -> None:
         },
         "params": {
             "render": render,
+            "illuminant_csv": illuminant_rel,
+            "illuminant_csv_abs": str((repo / illuminant_rel).resolve()),
             "sensor_forward": sensor_forward,
             "noise": noise,
             "validate": validate,

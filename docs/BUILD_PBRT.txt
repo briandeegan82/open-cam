@@ -41,4 +41,15 @@ Project usage notes
 - Apply EMVA post-processing with:
     venv/bin/python tools/apply_emva_noise.py
 
+Pipeline GPU toggle
+-------------------
+`tools/run_pipeline.py` can add wavefront mode automatically from pipeline YAML:
+
+  render:
+    gpu_enabled: true
+    pbrt_args: ["--stats"]
+
+When `gpu_enabled` is true, the pipeline injects `--wavefront` into the pbrt
+command unless it is already present in `render.pbrt_args`.
+
 Reference: https://pbrt.org/fileformat-v4.html

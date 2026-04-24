@@ -14,6 +14,10 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - import path variant for tests
     from tools.camera_model import load_camera_model
 
+LEGACY_REALISTIC_LENSFILE = "scenes/lenses/wide_22mm.dat"
+DEFAULT_REALISTIC_LENSFILE = "config/lenses/wide_22mm.dat"
+DEFAULT_ILLUMINANT_CSV = "spectra/illuminant/interpolated/D55.csv"
+
 
 def resolve_camera_model_path(repo: Path, paths: dict) -> tuple[str, Path]:
     model_name = paths.get("camera_model_name")
@@ -38,6 +42,13 @@ def _emit_env0(name: str, val: object) -> str:
     if val is None:
         return f"{name}=\0"
     return f"{name}={val}\0"
+
+
+def canonicalize_lensfile_rel(path_value: object) -> str:
+    lensfile = str(path_value)
+    if lensfile == LEGACY_REALISTIC_LENSFILE:
+        return DEFAULT_REALISTIC_LENSFILE
+    return lensfile
 
 
 def main() -> None:
@@ -106,6 +117,10 @@ def main() -> None:
     export("SPECTRAL_NBUCKETS", int(render.get("spectral_nbuckets", 16)))
     export("SPECTRAL_LAMBDA_MIN", float(render.get("spectral_lambda_min", 360.0)))
     export("SPECTRAL_LAMBDA_MAX", float(render.get("spectral_lambda_max", 830.0)))
+    illum = render.get("illuminant", None)
+    if illum is None or not str(illum).strip() or str(illum).strip().lower() in ("null", "none"):
+        illum = DEFAULT_ILLUMINANT_CSV
+    export("RENDER_ILLUMINANT_REL", str(illum).strip())
     bea = render.get("builder_extra_args", [])
     if bea is None:
         bea = []
@@ -115,7 +130,10 @@ def main() -> None:
 
     export("CAM_DIST", float(render.get("cam_dist", 4.25)))
     export("CAMERA", str(lens.get("camera", "perspective")).lower())
-    export("REALISTIC_LENSFILE_REL", str(lens.get("realistic_lensfile", "scenes/lenses/wide_22mm.dat")))
+    export(
+        "REALISTIC_LENSFILE_REL",
+        canonicalize_lensfile_rel(lens.get("realistic_lensfile", DEFAULT_REALISTIC_LENSFILE)),
+    )
     export("REALISTIC_APERTURE_MM", float(lens.get("realistic_aperture_diameter_mm", 4.0)))
     rfd = lens.get("realistic_focus_distance", None)
     if realistic_focus_distance_override is not None:

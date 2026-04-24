@@ -76,6 +76,26 @@ venv/bin/python tools/run_pipeline.py --config config/pipeline.yaml
 venv/bin/python tools/run_pipeline.py --config config/pipeline.yaml
 ```
 
+### GPU render (PBRT stage)
+
+Enable GPU for the PBRT render stage via `render.gpu_enabled`:
+
+```yaml
+render:
+  gpu_enabled: true
+  pbrt_args: ["--stats"]
+```
+
+This causes `tools/run_pipeline.py` to invoke PBRT with `--wavefront` (unless already present in `render.pbrt_args`).
+
+Use `--dry-run` to confirm command wiring before launching a full run:
+
+```bash
+venv/bin/python tools/run_pipeline.py --config config/pipeline.yaml --dry-run
+```
+
+See `docs/BUILD_PBRT.txt` for GPU build prerequisites (CUDA + OptiX).
+
 ### Dry run (show commands only)
 
 ```bash
@@ -167,6 +187,14 @@ In `config/pipeline.yaml`:
 - `render.film: rgb`
 - `sensor_forward.mode: analytic`
 - set `paths.exr_out` accordingly (for example `out/colorchecker.exr`)
+
+### Override the scene illuminant spectrum
+
+In `config/pipeline.yaml`:
+
+- `render.illuminant: spectra/illuminant/interpolated/D65.csv`
+
+This is passed to scene generation as `build_colorchecker_scene.py --illuminant ...`.
 
 ## Validation and Tests
 

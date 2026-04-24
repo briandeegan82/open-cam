@@ -21,6 +21,8 @@ from munsell_mat import load_joensuu_mat, parse_munsell_label, sanitize_filename
 
 HUE_FAMILY_ORDER = ("R", "YR", "Y", "GY", "G", "BG", "B", "PB", "P", "RP", "N")
 HUE_STEP_ORDER = (2.5, 5.0, 7.5, 10.0)
+LEGACY_REALISTIC_LENSFILE = "scenes/lenses/wide_22mm.dat"
+DEFAULT_REALISTIC_LENSFILE = "config/lenses/wide_22mm.dat"
 
 
 @dataclass(frozen=True)
@@ -199,6 +201,17 @@ def _board_geometry(n: int, columns: int, patch_width: float, patch_height: floa
     return rows, board_w, board_h
 
 
+def resolve_lensfile(repo: Path, lensfile_rel: str) -> Path:
+    lens_path = (repo / lensfile_rel).resolve()
+    if lens_path.is_file():
+        return lens_path
+    if lensfile_rel == LEGACY_REALISTIC_LENSFILE:
+        migrated = (repo / DEFAULT_REALISTIC_LENSFILE).resolve()
+        if migrated.is_file():
+            return migrated
+    return lens_path
+
+
 def emit_hue_scene(
     repo: Path,
     group: HueGroup,
@@ -316,7 +329,7 @@ def emit_hue_scene(
     if args.camera == "perspective":
         pbrt_lines.append('Camera "perspective" "float fov" [%s]' % args.fov)
     else:
-        lens_repo = (repo / args.lensfile).resolve()
+        lens_repo = resolve_lensfile(repo, args.lensfile)
         if not lens_repo.is_file():
             raise FileNotFoundError(f"realistic camera: lens file not found: {lens_repo}")
         lens_for_scene = os.path.relpath(str(lens_repo), str(scene_dir.resolve()))
@@ -470,7 +483,7 @@ def main() -> None:
     ap.add_argument("--light-scale", type=float, default=2.0)
     ap.add_argument("--cam-dist", type=float, default=6.0)
     ap.add_argument("--camera", choices=("perspective", "realistic"), default="perspective")
-    ap.add_argument("--lensfile", type=str, default="scenes/lenses/wide_22mm.dat")
+    ap.add_argument("--lensfile", type=str, default=DEFAULT_REALISTIC_LENSFILE)
     ap.add_argument("--aperture-diameter-mm", type=float, default=4.0)
     ap.add_argument("--focus-distance", type=float, default=None)
     ap.add_argument("--fov", type=float, default=35.0)

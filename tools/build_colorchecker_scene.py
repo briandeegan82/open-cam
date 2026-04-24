@@ -15,6 +15,9 @@ from pathlib import Path
 
 import numpy as np
 
+LEGACY_REALISTIC_LENSFILE = "scenes/lenses/wide_22mm.dat"
+DEFAULT_REALISTIC_LENSFILE = "config/lenses/wide_22mm.dat"
+
 
 def _rel(repo: Path, p: Path) -> str:
     try:
@@ -86,6 +89,17 @@ def patch_paths(xrite_dir: Path) -> list[Path]:
     return paths
 
 
+def resolve_lensfile(repo: Path, lensfile_rel: str) -> Path:
+    lens_path = (repo / lensfile_rel).resolve()
+    if lens_path.is_file():
+        return lens_path
+    if lensfile_rel == LEGACY_REALISTIC_LENSFILE:
+        migrated = (repo / DEFAULT_REALISTIC_LENSFILE).resolve()
+        if migrated.is_file():
+            return migrated
+    return lens_path
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     root = Path(__file__).resolve().parent.parent
@@ -123,7 +137,7 @@ def main() -> None:
     ap.add_argument(
         "--lensfile",
         type=str,
-        default="scenes/lenses/wide_22mm.dat",
+        default=DEFAULT_REALISTIC_LENSFILE,
         help="Repo-relative lens description for RealisticCamera (pbrt ReadFloatFile format).",
     )
     ap.add_argument(
@@ -304,7 +318,7 @@ def main() -> None:
             ]
         )
     else:
-        lens_repo = (repo / args.lensfile).resolve()
+        lens_repo = resolve_lensfile(repo, args.lensfile)
         if not lens_repo.is_file():
             raise FileNotFoundError(f'realistic camera: lens file not found: {lens_repo} (from --lensfile {args.lensfile!r})')
         lens_for_scene = os.path.relpath(str(lens_repo), str(out_dir.resolve()))

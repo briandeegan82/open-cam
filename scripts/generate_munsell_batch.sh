@@ -59,6 +59,7 @@ BUILD_CMD=(
   "${PY}" tools/build_munsell_scenes.py
   --repo-root "${REPO_DIR}"
   --out-dir "${MUNSELL_OUT_DIR}"
+  --illuminant "${RENDER_ILLUMINANT_REL}"
 )
 if [[ -n "${MUNSELL_BUILD_ARGS}" ]]; then
   read -r -a EXTRA_ARGS <<< "${MUNSELL_BUILD_ARGS}"
