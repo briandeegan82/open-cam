@@ -51,9 +51,11 @@ if [[ ! -x "${PBRT}" ]]; then
 fi
 
 echo "== 1/7 Build scene (config: ${PIPELINE_CONFIG_RESOLVED}, film: ${FILM}) =="
+echo "   render illuminant: ${RENDER_ILLUMINANT_REL}"
 BUILD_ARGS=(
   "${REPO_DIR}/${SCENE_BUILDER_REL}"
   --repo-root "${REPO_DIR}"
+  --illuminant "${RENDER_ILLUMINANT_REL}"
   --light-scale "${LIGHT_SCALE}"
   --xres "${XRES}"
   --yres "${YRES}"

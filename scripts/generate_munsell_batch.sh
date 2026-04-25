@@ -10,13 +10,14 @@ set -euo pipefail
 # 6) optional demosaic linear validation
 #
 # Usage:
-#   scripts/generate_munsell_batch.sh [seed]
+#   scripts/generate_munsell_batch.sh [seed] [hue]
 #
 # Optional environment overrides:
 #   PIPELINE_CONFIG=config/pipeline.yaml
 #   EMVA_FROM_EXR=1
 #   MUNSELL_OUT_DIR=scenes/generated/munsell
 #   MUNSELL_BUILD_ARGS="--hues R,YR,Y --columns 10"
+#   MUNSELL_SINGLE_HUE=<hue>
 #   PBRT_BIN=third_party/pbrt-v4/build/pbrt
 #   PREVIEW_PERCENTILE=99.5
 #   EXPOSURE_SCALE=<float>
@@ -37,6 +38,7 @@ while IFS= read -r -d '' kv; do
 done < <("${PY}" "${REPO_DIR}/tools/pipeline_shell_env.py" "${REPO_DIR}" "${PIPELINE_CONFIG}" --format env0)
 
 SEED="${1:-0}"
+MUNSELL_SINGLE_HUE="${2:-${MUNSELL_SINGLE_HUE:-}}"
 MUNSELL_OUT_DIR="${MUNSELL_OUT_DIR:-scenes/generated/munsell}"
 PBRT_BIN_REL="${PBRT_BIN:-${PBRT_REL}}"
 PBRT_BIN_ABS="${REPO_DIR}/${PBRT_BIN_REL}"
@@ -54,24 +56,8 @@ if [[ ! -f "${REPO_DIR}/${CAMERA_MODEL_CONFIG_REL}" ]]; then
   exit 2
 fi
 
-echo "== 1/6 Build Munsell scenes into ${MUNSELL_OUT_DIR} =="
-BUILD_CMD=(
-  "${PY}" tools/build_munsell_scenes.py
-  --repo-root "${REPO_DIR}"
-  --out-dir "${MUNSELL_OUT_DIR}"
-  --illuminant "${RENDER_ILLUMINANT_REL}"
-)
-if [[ -n "${MUNSELL_BUILD_ARGS}" ]]; then
-  read -r -a EXTRA_ARGS <<< "${MUNSELL_BUILD_ARGS}"
-  BUILD_CMD+=( "${EXTRA_ARGS[@]}" )
-fi
-# Force spectral film so EXRs include S0.*nm channels for integrate_qe.
-# Keep this flag last so any accidental --film in MUNSELL_BUILD_ARGS is overridden.
-BUILD_CMD+=( --film spectral )
-"${BUILD_CMD[@]}"
-
-echo "== 2/6 Render generated Munsell scenes =="
-mapfile -t SCENES < <("${PY}" - <<'PY' "${REPO_DIR}" "${MUNSELL_OUT_DIR}"
+build_scene_index() {
+  "${PY}" - <<'PY' "${REPO_DIR}" "${MUNSELL_OUT_DIR}"
 from pathlib import Path
 import json
 import sys
@@ -88,7 +74,52 @@ else:
     for p in sorted(out_dir.glob("*/munsell_*.pbrt")):
         print(str(p))
 PY
+}
+
+select_scenes_by_hue_set() {
+  local hue_raw="$1"
+  local hue_norm scene key
+  hue_norm="$(printf '%s' "${hue_raw}" | tr '[:lower:]' '[:upper:]')"
+  while IFS= read -r scene; do
+    [[ -z "${scene}" ]] && continue
+    key="$(basename "$(dirname "${scene}")")"
+    key="$(printf '%s' "${key}" | tr '[:lower:]' '[:upper:]')"
+    if [[ "${key}" == "${hue_norm}" || "${key}" == "${hue_norm}_"* ]]; then
+      printf '%s\n' "${scene}"
+    fi
+  done < <(build_scene_index)
+}
+
+echo "== 1/6 Build Munsell scenes into ${MUNSELL_OUT_DIR} =="
+BUILD_CMD=(
+  "${PY}" tools/build_munsell_scenes.py
+  --repo-root "${REPO_DIR}"
+  --out-dir "${MUNSELL_OUT_DIR}"
+  --illuminant "${RENDER_ILLUMINANT_REL}"
 )
+if [[ -n "${MUNSELL_BUILD_ARGS}" ]]; then
+  read -r -a EXTRA_ARGS <<< "${MUNSELL_BUILD_ARGS}"
+  BUILD_CMD+=( "${EXTRA_ARGS[@]}" )
+fi
+if [[ -n "${MUNSELL_SINGLE_HUE}" ]]; then
+  echo "Single hue mode: ${MUNSELL_SINGLE_HUE}"
+  BUILD_CMD+=( --hues "${MUNSELL_SINGLE_HUE}" )
+fi
+# Force spectral film so EXRs include S0.*nm channels for integrate_qe.
+# Keep this flag last so any accidental --film in MUNSELL_BUILD_ARGS is overridden.
+BUILD_CMD+=( --film spectral )
+"${BUILD_CMD[@]}"
+
+echo "== 2/6 Render generated Munsell scenes =="
+if [[ -n "${MUNSELL_SINGLE_HUE}" ]]; then
+  mapfile -t SCENES < <(select_scenes_by_hue_set "${MUNSELL_SINGLE_HUE}")
+  if [[ "${#SCENES[@]}" -eq 0 ]]; then
+    echo "Requested hue '${MUNSELL_SINGLE_HUE}' was not generated under ${MUNSELL_OUT_DIR}"
+    exit 2
+  fi
+else
+  mapfile -t SCENES < <(build_scene_index)
+fi
 
 if [[ "${#SCENES[@]}" -eq 0 ]]; then
   echo "No Munsell scenes found under ${MUNSELL_OUT_DIR}"

@@ -23,7 +23,7 @@ render:
   yres: 640
   # Keep Monte Carlo render noise sub-dominant to sensor/noise stages.
   # For quick iteration, lower this (e.g. 64-256). For final runs, keep >=1024.
-  pixelsamples: 1024
+  pixelsamples: 64
   film: spectral
   film_output: null
   spectral_nbuckets: 32
@@ -31,7 +31,7 @@ render:
   spectral_lambda_max: 830.0
   # Optional repo-relative CSV override for scene illuminant spectrum.
   # Example: spectra/illuminant/interpolated/D65.csv
-  illuminant: spectra/illuminant/interpolated/D55.csv
+  illuminant: spectra/illuminant/interpolated/D65.csv
   builder_extra_args: []
   # GPU render path (PBRT wavefront). Requires a GPU-enabled PBRT build.
   gpu_enabled: true
@@ -73,8 +73,8 @@ noise:
   preview_percentile: 99.5
   preview_no_normalize: true
   # Optional preview overrides; null = use processing defaults from sensor model.
-  preview_white_balance_enabled: true
-  preview_color_correction_enabled: true
+  preview_white_balance_enabled: false
+  preview_color_correction_enabled: false
 validate_demosaic:
   enabled: true
   crop: 2

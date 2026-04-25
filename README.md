@@ -110,6 +110,46 @@ scripts/generate_colorchecker_image.sh 0
 
 Use `PIPELINE_CONFIG=<path>` to point to a custom pipeline YAML.
 
+### Build image-quality targets
+
+Generate and render additional targets (slanted edge, ISO-style grayscale patches, Siemens star):
+
+```bash
+scripts/generate_iq_targets.sh all
+```
+
+Run one target through the full camera pipeline (render + optional post-PSF + optional sensor-forward + EMVA noise), using the same config flow as `generate_colorchecker_image.sh`:
+
+```bash
+scripts/generate_slanted_edge_image.sh 0
+scripts/generate_iso_noise_image.sh 0
+scripts/generate_siemens_star_image.sh 0
+```
+
+Equivalent generic entrypoint:
+
+```bash
+scripts/generate_iq_target_image.sh slanted_edge 0
+```
+
+Generate only one target:
+
+```bash
+scripts/generate_iq_targets.sh slanted_edge
+```
+
+If you only want scene files (no render), call the builder directly:
+
+```bash
+venv/bin/python tools/build_image_quality_targets.py --target all
+```
+
+Notes:
+
+- Full per-target outputs are stored under `out/iq_targets/`.
+- The full per-target pipeline uses `sensor_forward.mode: pbrt_exr` for scene-specific electrons generation.
+- `EMVA_FROM_EXR=1` forces `tools/apply_emva_noise.py` to run without `--electrons-npz`.
+
 ### Standalone tools (explicit camera model)
 
 When running stage tools directly, always pass `--camera-model-config` so behavior is deterministic.
@@ -161,6 +201,7 @@ Camera selection rules:
 - EMVA validation report: `out/emva_validation_report.json`
 - Demosaic metrics: `out/demosaic_linear_metrics.json`
 - Run manifest: `out/run_pipeline_<timestamp>.json`
+- IQ-target outputs (per target): `out/iq_targets/<target>_noisy.raw16`, `out/iq_targets/<target>_noisy_png/`, `out/iq_targets/<target>_electrons.npz`
 
 ## Typical Workflows
 
