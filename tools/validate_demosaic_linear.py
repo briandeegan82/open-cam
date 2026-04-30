@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -21,7 +22,14 @@ def chart_interior_mask(
     inset_frac: float,
 ) -> np.ndarray:
     cam_dist = float(manifest["camera"]["cam_dist"])
-    fov_deg = float(manifest["camera"]["fov_deg"])
+    _fov_raw = manifest["camera"].get("fov_deg")
+    if _fov_raw is None:
+        raise RuntimeError(
+            "chart_interior_mask requires fov_deg in the scene manifest. "
+            "Realistic camera scenes do not record an authoritative fov_deg; "
+            "patch-interior masking is unavailable for this scene."
+        )
+    fov_deg = float(_fov_raw)
     pw = float(manifest["geometry"]["patch_width"])
     ph = float(manifest["geometry"]["patch_height"])
     gap = float(manifest["geometry"]["gap"])
@@ -107,7 +115,12 @@ def main() -> None:
     signal_e = load_electrons_npz(npz_path).astype(np.float64)
 
     bit_depth = int(adc.get("bit_depth", 12))
-    full_well_e = float(adc.get("full_well_e", 13500.0))
+    if "full_well_e" not in adc:
+        raise KeyError(
+            "adc.full_well_e is required but not set in the sensor config. "
+            "This value determines the ADC clipping point; there is no safe generic default."
+        )
+    full_well_e = float(adc["full_well_e"])
     K_e_per_DN = float(emva.get("overall_system_gain_K_e_per_DN", 0.08))
     black_dn = float(emva.get("black_level_DN", 64.0))
     max_dn = float((1 << bit_depth) - 1)
@@ -150,23 +163,28 @@ def main() -> None:
     inset = float(args.patch_inset_frac)
     if inset > 0 and manifest_path.is_file():
         manifest = json.loads(manifest_path.read_text())
-        mask_full = chart_interior_mask(manifest, yres=h, xres=w, inset_frac=inset)
-        if c * 2 < h and c * 2 < w:
-            mask_eval = mask_full[c : h - c, c : w - c]
-        else:
-            mask_eval = mask_full
-        if np.any(mask_eval):
-            e2 = err[mask_eval]
-            metrics["masked"] = {
-                "manifest": str(manifest_path),
-                "patch_inset_frac": inset,
-                "pixel_count": int(mask_eval.sum()),
-                "mae_dn": float(np.mean(np.abs(e2))),
-                "rmse_dn": float(np.sqrt(np.mean(e2**2))),
-                "max_abs_dn": float(np.max(np.abs(e2))),
-                "mae_dn_rgb": np.mean(np.abs(e2), axis=0).tolist(),
-                "rmse_dn_rgb": np.sqrt(np.mean(e2**2, axis=0)).tolist(),
-            }
+        try:
+            mask_full = chart_interior_mask(manifest, yres=h, xres=w, inset_frac=inset)
+        except RuntimeError as exc:
+            print(f"[validate_demosaic] patch-interior masking skipped: {exc}", file=sys.stderr)
+            mask_full = None
+        if mask_full is not None:
+            if c * 2 < h and c * 2 < w:
+                mask_eval = mask_full[c : h - c, c : w - c]
+            else:
+                mask_eval = mask_full
+            if np.any(mask_eval):
+                e2 = err[mask_eval]
+                metrics["masked"] = {
+                    "manifest": str(manifest_path),
+                    "patch_inset_frac": inset,
+                    "pixel_count": int(mask_eval.sum()),
+                    "mae_dn": float(np.mean(np.abs(e2))),
+                    "rmse_dn": float(np.sqrt(np.mean(e2**2))),
+                    "max_abs_dn": float(np.max(np.abs(e2))),
+                    "mae_dn_rgb": np.mean(np.abs(e2), axis=0).tolist(),
+                    "rmse_dn_rgb": np.sqrt(np.mean(e2**2, axis=0)).tolist(),
+                }
 
     print(json.dumps(metrics, indent=2))
     if args.json_out is not None:

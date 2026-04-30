@@ -11,7 +11,7 @@ paths:
   emva_validation_report: out/emva_validation_report.json
   scene_file: scenes/generated/colorchecker.pbrt
   exr_out: out/colorchecker_spectral.exr
-  camera_model_name: study_nikon_z6_minvar
+  camera_model_name: iphone_8
   sensor_forward_electrons_npz: out/sensor_forward_electrons.npz
   demosaic_metrics_json: out/demosaic_linear_metrics.json
   out_dir: out
@@ -59,13 +59,13 @@ strict_physical_accuracy:
   strict_calibration_validation: false
   calibration_tier_policy: semi_strict
 realistic_focus_distance_override: 4.0
-exposure_time_override_s: 0.05
+exposure_time_override_s: 0.01
 sensor_forward:
   mode: pbrt_exr
   enabled: true
   # Optional global lux override for forward-model calibration.
   # null means "use target_illuminance_lux from the selected camera model".
-  target_illuminance_lux: 8000
+  target_illuminance_lux: 200
 noise:
   enabled: true
   seed: 0

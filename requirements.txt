@@ -4,3 +4,5 @@ PyYAML>=6.0
 imageio>=2.31
 OpenEXR>=3.3
 openpyxl>=3.1
+Pillow>=10.0
+matplotlib>=3.8

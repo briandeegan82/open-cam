@@ -216,7 +216,8 @@ def main() -> None:
     ill_hi = np.interp(grid_hi, ill_wl, ill_val, left=ill_val[0], right=ill_val[-1])
 
     ill_spd_wl, ill_spd_val = subsample_for_spd(*resample_clip(ill_wl, ill_val, wl_lo, wl_hi, 1.0), args.step_nm)
-    write_spd(spd_dir / "illuminant_D55.spd", ill_spd_wl, ill_spd_val)
+    ill_spd_name = f"illuminant_{ill_path.stem}.spd"
+    write_spd(spd_dir / ill_spd_name, ill_spd_wl, ill_spd_val)
 
     patches_meta: list[dict] = []
     patch_files = patch_paths(xrite_dir)
@@ -336,9 +337,9 @@ def main() -> None:
             "",
             "WorldBegin",
             "",
-            "# D55 distant light (spectrum scaled for exposure)",
+            f"# {ill_path.stem} distant light (spectrum scaled for exposure)",
             'LightSource "distant"',
-            '    "spectrum L" "spd/illuminant_D55.spd"',
+            f'    "spectrum L" "spd/{ill_spd_name}"',
             '    "float scale" [%s]' % args.light_scale,
             '    "point3 from" [0.12 0.55 2.9]',
             '    "point3 to" [0 0 0]',
@@ -407,7 +408,10 @@ def main() -> None:
         "camera": {
             "type": camera_kind,
             "cam_dist": args.cam_dist,
-            "fov_deg": args.fov,
+            # fov_deg is the CLI --fov value for pinhole/perspective/thinlens cameras.
+            # For realistic cameras the effective FOV is determined by the lens prescription
+            # and is NOT authoritative here; set to null so consumers can detect this.
+            "fov_deg": None if camera_kind == "realistic" else float(args.fov),
             "lookat": {"eye": [0.0, 0.0, args.cam_dist], "target": [0.0, 0.0, 0.0], "up": [0.0, 1.0, 0.0]},
             **(
                 {

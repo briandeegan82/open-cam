@@ -16,3 +16,4 @@ scenes/generated/
 *.log
 *.tmp
 .ipynb_checkpoints/
+src/

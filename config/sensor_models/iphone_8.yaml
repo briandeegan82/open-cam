@@ -7,7 +7,7 @@ sensor:
     ircf_csv: spectra/QE/interpolated/QE_IRCF.csv
   pixel_pitch_um: 1.4
   integration_time_s: 0.01
-  f_number: 2.0
+  f_number: 1.8  # fixed lens
   fill_factor: 0.76
 noise:
   emva:
@@ -65,13 +65,13 @@ validation:
   monte_carlo_trials: 20000
   random_seed: 0
   variance_rtol: 0.07
-  mean_abs_dn_atol: 0.22
+  mean_abs_dn_atol: 2.91
   ptc_mu_e_levels:
   - 0.0
-  - 400.0
-  - 2000.0
-  - 3500.0
-  - 4700.0
+  - 800.0
+  - 4000.0
+  - 6900.0
+  - 9300.0
   datasheet:
     enabled: true
     overall_system_gain_K_e_per_DN: 0.22

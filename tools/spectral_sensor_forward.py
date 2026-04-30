@@ -353,7 +353,16 @@ def main() -> None:
     xres = int(manifest["film"]["xresolution"])
     yres = int(manifest["film"]["yresolution"])
     cam_dist = float(manifest["camera"]["cam_dist"])
-    fov_deg = float(manifest["camera"]["fov_deg"])
+    cam_type = str(manifest["camera"].get("type", "pinhole")).lower()
+    _fov_raw = manifest["camera"].get("fov_deg")
+    if cam_type == "realistic" or _fov_raw is None:
+        raise RuntimeError(
+            "spectral_sensor_forward (analytic mode) cannot be used with a realistic camera: "
+            "the effective field of view is determined by the lens prescription and is not "
+            "recorded in the scene manifest. Use sensor_forward.mode: pbrt_exr instead, "
+            "which derives electron counts directly from the rendered spectral EXR."
+        )
+    fov_deg = float(_fov_raw)
     pw = float(manifest["geometry"]["patch_width"])
     ph = float(manifest["geometry"]["patch_height"])
     gap = float(manifest["geometry"]["gap"])
@@ -397,7 +406,7 @@ def main() -> None:
         cal["target_illuminance_lux"] = float(args.target_illuminance_lux)
     cal_mode = str(cal.get("mode", "legacy")).lower()
     use_aperture = bool(cal.get("use_aperture_factor", True))
-    aperture_factor = (1.0 / max(1e-9, f_number**2)) if use_aperture else 1.0
+    aperture_factor = (np.pi / (4.0 * max(1e-9, f_number**2))) if use_aperture else 1.0
     pixel_area = (pixel_pitch_um * 1e-6) ** 2
     optics_t = float(cal.get("optics_transmittance", 1.0))
     optics_t_csv = cal.get("optics_transmittance_csv", None)

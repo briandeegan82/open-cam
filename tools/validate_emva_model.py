@@ -98,7 +98,12 @@ def main() -> None:
     sigma_d = float(emva.get("sigma_d_e", 2.0))
     black = float(emva.get("black_level_DN", 64.0))
     use_poisson = bool(emva.get("use_poisson_shot_noise", True))
-    full_well = float(adc.get("full_well_e", 13500.0))
+    if "full_well_e" not in adc:
+        raise KeyError(
+            "adc.full_well_e is required but not set in the sensor config. "
+            "This value determines the ADC clipping point; there is no safe generic default."
+        )
+    full_well = float(adc["full_well_e"])
     bit_depth_cfg = int(adc.get("bit_depth", 12))
 
     mc_trials = int(val.get("monte_carlo_trials", 20_000))

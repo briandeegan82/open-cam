@@ -182,23 +182,39 @@ def fit_ccm_lstsq(
 
 
 def apply_ccm(rgb: np.ndarray, ccm: np.ndarray) -> np.ndarray:
-    """Apply a 3x3 color correction matrix to HxWx3 image."""
+    """Apply a 3x3 color correction matrix to HxWx3 image.
+
+    Convention: ``ccm[in_ch, out_ch]`` — equivalently ``y = x @ ccm`` for row-vector
+    pixels.  For a neutral gray input ``x = [g, g, g]`` the output is
+    ``y[j] = g * sum_i(ccm[i, j])`` (column j sum), so **column sums** control neutral
+    gray preservation, not row sums.
+
+    See also :func:`apply_channel_crosstalk`, which uses the transpose convention
+    ``m[out_ch, in_ch]`` and applies ``y = x @ m.T`` — pass ``m.T`` to this function
+    to achieve the same result.
+    """
     x = np.asarray(rgb, dtype=np.float32)
     y = np.tensordot(x, np.asarray(ccm, dtype=np.float32), axes=([2], [0]))
     return np.clip(y, 0.0, None).astype(np.float32)
 
 
 def sanitize_ccm(ccm: np.ndarray) -> np.ndarray:
-    """Reject pathological CCMs that collapse preview intensity."""
+    """Reject pathological CCMs; normalize so neutral gray is preserved.
+
+    Because ``apply_ccm`` uses the convention ``y = x @ M`` (column-index = output
+    channel), a neutral input ``[g, g, g]`` maps to ``y[j] = g * col_sum(j)``.
+    Neutral preservation therefore requires **equal column sums**.  This function
+    rescales each column to sum to 1, then guards against a degenerate overall gain.
+    """
     m = np.asarray(ccm, dtype=np.float32)
     if not np.all(np.isfinite(m)):
         return np.eye(3, dtype=np.float32)
-    # Enforce unit-sum rows so each output channel preserves neutral energy.
-    row_sums = np.sum(m, axis=1, keepdims=True)
-    if np.any(np.abs(row_sums) < 1e-6):
+    # Normalize columns so neutral gray [g,g,g] maps to [g,g,g].
+    col_sums = np.sum(m, axis=0, keepdims=True)  # shape (1, 3)
+    if np.any(np.abs(col_sums) < 1e-6):
         return np.eye(3, dtype=np.float32)
-    m = m / row_sums
-    # Keep average channel gain in a sane range for preview mapping.
+    m = m / col_sums
+    # Keep average diagonal gain in a sane range for preview mapping.
     tr = float(np.trace(m) / 3.0)
     if tr < 0.2 or tr > 5.0:
         return np.eye(3, dtype=np.float32)
@@ -384,7 +400,19 @@ def bayer_sample_rgb(rgb: np.ndarray, pattern: str) -> np.ndarray:
 
 
 def apply_channel_crosstalk(rgb: np.ndarray, m33: np.ndarray) -> np.ndarray:
-    """Apply a 3x3 channel mixing matrix to HxWx3 signal."""
+    """Apply a 3x3 channel mixing matrix to HxWx3 signal.
+
+    Convention: ``m33[out_ch, in_ch]`` — row *j* of the matrix holds the input weights
+    that sum into output channel *j*.  Internally this computes ``y = x @ m33.T``.
+
+    **Important:** this is the **transpose** of the ``apply_ccm`` convention
+    (``ccm[in_ch, out_ch]``).  If you have a matrix written in the CCM convention,
+    pass its transpose here, or use :func:`apply_ccm` directly.
+
+    When ``normalize_rows: true`` (default in config), each row of ``m33`` sums to 1,
+    meaning no net gain or loss of photons per output channel — the correct semantic
+    for energy-preserving optical/electrical crosstalk.
+    """
     if rgb.ndim != 3 or rgb.shape[2] < 3:
         raise ValueError(f"apply_channel_crosstalk expects HxWx3, got {rgb.shape}")
     m = np.asarray(m33, dtype=np.float64)
@@ -730,7 +758,12 @@ def main() -> None:
         )
     qe_vec /= qe_max
 
-    full_well_e = float(adc.get("full_well_e", 13500.0))
+    if "full_well_e" not in adc:
+        raise KeyError(
+            "adc.full_well_e is required but not set in the sensor config. "
+            "This value determines the ADC clipping point; there is no safe generic default."
+        )
+    full_well_e = float(adc["full_well_e"])
     K_e_per_DN = float(emva.get("overall_system_gain_K_e_per_DN", 0.08))
     sigma_d_e = float(emva.get("sigma_d_e", 2.0))
     dsnu_std_e = float(emva.get("dsnu_std_e", 0.3))
@@ -754,7 +787,21 @@ def main() -> None:
     col_fpn_std_e = float(emva.get("column_fpn_std_e", 0.0))
     adc_inl_quad_fraction = float(adc.get("inl_quadratic_fraction", 0.0))
     adc_dnl_std_lsb = float(adc.get("dnl_std_lsb", 0.0))
-    adc_clipping = bool(adc.get("clipping", True))
+    _clipping_raw = adc.get("clipping", True)
+    if isinstance(_clipping_raw, bool):
+        adc_clipping = _clipping_raw
+    elif isinstance(_clipping_raw, str):
+        _cs = _clipping_raw.strip().lower()
+        if _cs in ("hard", "true", "yes", "on", "1"):
+            adc_clipping = True
+        elif _cs in ("soft", "false", "no", "off", "0", "none", "disabled"):
+            adc_clipping = False
+        else:
+            raise ValueError(
+                f"adc.clipping must be a boolean or one of 'hard'/'soft', got {_clipping_raw!r}"
+            )
+    else:
+        adc_clipping = bool(_clipping_raw)
     defect_cfg = emva.get("defect_pixels", {}) or {}
     persistent_map_npz = defect_cfg.get("persistent_map_npz", None)
     persistent_map_path = (repo / str(persistent_map_npz)).resolve() if persistent_map_npz else None
@@ -788,6 +835,13 @@ def main() -> None:
     crosstalk_enabled = bool(crosstalk_cfg.get("enabled", False))
     crosstalk_matrix = np.eye(3, dtype=np.float32)
     if crosstalk_enabled:
+        if "matrix_3x3" not in crosstalk_cfg:
+            print(
+                "warning: sensor.crosstalk.enabled is true but matrix_3x3 is absent; "
+                "falling back to identity (no crosstalk applied). "
+                "Set sensor.crosstalk.matrix_3x3 or disable crosstalk.",
+                file=sys.stderr,
+            )
         crosstalk_matrix = np.asarray(crosstalk_cfg.get("matrix_3x3", np.eye(3)), dtype=np.float32)
         if crosstalk_matrix.shape != (3, 3):
             raise ValueError("sensor.crosstalk.matrix_3x3 must be a 3x3 matrix")

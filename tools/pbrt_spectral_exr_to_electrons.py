@@ -96,12 +96,23 @@ def build_spatial_transmission_map(
     }
 
 
-def photometry_calibration_scale(repo: Path, cal: dict) -> float:
+def photometry_calibration_scale(
+    repo: Path,
+    cal: dict,
+    *,
+    auto_cal_mode: str = "off",
+) -> float:
     """Align EXR irradiance with analytic ``spectral_sensor_forward`` photometry.
 
     Analytic mode scales chart spectral irradiance by ``irradiance_scale_W_m2nm_per_unit``
     and optionally ``target_illuminance_lux`` (via the illuminant CSV). The renderer uses
     the same relative SPD but arbitrary absolute units unless we apply the same scale here.
+
+    When ``auto_cal_mode`` is ``"mean_photopic_lux"`` the lux normalisation is handled
+    downstream from the rendered EXR; ``illuminant_override_csv`` is not required in
+    that case.  In all other modes, omitting ``illuminant_override_csv`` while
+    ``target_illuminance_lux`` is set is an error because the lux normalisation would be
+    silently skipped.
     """
     irr_scale = float(cal.get("irradiance_scale_W_m2nm_per_unit", 1.0e-3))
     target_lux = cal.get("target_illuminance_lux", None)
@@ -115,11 +126,17 @@ def photometry_calibration_scale(repo: Path, cal: dict) -> float:
         else:
             print("warning: photopic illuminance <= 0; illuminance_scale left at 1", file=sys.stderr)
     elif target_lux is not None and not illum_csv:
-        print(
-            "warning: target_illuminance_lux set but illuminant_override_csv missing; "
-            "using irradiance_scale only",
-            file=sys.stderr,
-        )
+        _autocal_active = auto_cal_mode.lower() not in ("off", "none", "disabled", "false", "0")
+        if not _autocal_active:
+            raise RuntimeError(
+                "calibration.target_illuminance_lux is set but "
+                "calibration.illuminant_override_csv is missing. "
+                "Without it the lux normalisation is skipped and electron counts will be wrong. "
+                "Either add calibration.illuminant_override_csv, remove target_illuminance_lux, "
+                "or enable model.pbrt_spectral_exr.radiometric_autocalibration: mean_photopic_lux "
+                "for automatic lux calibration from the rendered EXR."
+            )
+        # autocal active: lux normalisation handled downstream from the EXR; nothing to do here.
     return irr_scale * illuminance_scale
 
 
@@ -272,7 +289,7 @@ def main() -> None:
             '"thin_lens" or "pinhole" when radiance_to_irradiance_scale is unset'
         )
 
-    photometry_scale = photometry_calibration_scale(repo, cal)
+    photometry_scale = photometry_calibration_scale(repo, cal, auto_cal_mode=auto_cal_mode)
     E_raw = L.astype(np.float64) * (rad_to_e * extra_scale)
     lam = lambdas.astype(np.float64)
     w = trapezoid_weights_nm(lam).astype(np.float64)

@@ -45,9 +45,14 @@ def read_separate_exr_channels(path: Path) -> dict[str, np.ndarray]:
 
 
 def write_separate_channels_exr(path: Path, channels: dict[str, np.ndarray]) -> None:
-    """Write float32 separate-channel EXR (SpectralFilm–compatible: R,G,B + S0.<lambda>nm)."""
+    """Write float32 separate-channel EXR (SpectralFilm-compatible: R,G,B + S0.<lambda>nm).
+
+    Supports both the new OpenEXR >= 3.x Python API (``pip install OpenEXR``) and the
+    legacy Imath-based API used by older distributions.  The new ``OpenEXR.Channel`` /
+    ``OpenEXR.File`` path is tried first; the Imath path is used only as a fallback when
+    the new API raises ``TypeError`` or ``AttributeError`` (i.e. old-style bindings).
+    """
     _require_openexr()
-    import Imath
     import OpenEXR
 
     if not channels:
@@ -60,6 +65,27 @@ def write_separate_channels_exr(path: Path, channels: dict[str, np.ndarray]) -> 
         if arr.shape != (h0, w0):
             raise ValueError(f'channel "{name}" shape {arr.shape} != {(h0, w0)}')
 
+    # New OpenEXR >= 3.x API: Channel objects accept pixel arrays directly.
+    try:
+        ch = {
+            name: OpenEXR.Channel(pixels=np.ascontiguousarray(arr, dtype=np.float32))
+            for name, arr in channels.items()
+        }
+        with OpenEXR.File(channels=ch) as f:
+            f.write(str(Path(path)))
+        return
+    except (TypeError, AttributeError):
+        pass
+
+    # Legacy Imath-based fallback (OpenEXR < 3.x distributions that ship Imath).
+    try:
+        import Imath
+    except ImportError as exc:
+        raise RuntimeError(
+            "write_separate_channels_exr requires either OpenEXR >= 3.x "
+            "(new Channel/File API) or the legacy Imath package. "
+            "Install with: pip install OpenEXR"
+        ) from exc
     width, height = int(w0), int(h0)
     header = OpenEXR.Header(width, height)
     pt = Imath.PixelType(Imath.PixelType.FLOAT)
