@@ -1292,7 +1292,9 @@ def main() -> None:
     #   signal × PRNU (per-pixel gain)  +  dark_mean (temp-scaled)  +  DSNU (per-pixel dark offset)
     # PRNU and DSNU are spatially fixed; they shift the Poisson mean but do not add temporal variance.
     # dark_mean contributes both a mean shift AND Poisson (shot) variance — included here correctly.
-    # rc_fpn and read_e are Gaussian readout noise processes, NOT Poisson — added after the draw.
+    # rc_fpn and read_e are Gaussian readout noise processes added by the source-follower
+    # and column amp DOWNSTREAM of the sense node.  The sense node saturates at full_well_e
+    # before readout, so the clip must be applied to shot_e alone, not to (shot_e + readout).
     mean_e = signal_e * prnu_map + dark_mean_e + dsnu_map
     if use_poisson:
         shot_e = rng.poisson(np.maximum(mean_e, 0.0)).astype(np.float32)
@@ -1322,7 +1324,7 @@ def main() -> None:
     if sigma_ktc_e > 0.0:
         read_e = read_e + rng.normal(0.0, sigma_ktc_e, size=signal_e.shape).astype(np.float32)
     if adc_clipping:
-        total_e = np.clip(shot_e + rc_fpn + read_e, 0.0, full_well_e)
+        total_e = np.clip(shot_e, 0.0, full_well_e) + rc_fpn + read_e
     else:
         total_e = np.clip(shot_e + rc_fpn + read_e, 0.0, None)
 

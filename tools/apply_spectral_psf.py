@@ -334,7 +334,7 @@ def apply_stray_light(arr: np.ndarray, cfg: dict) -> np.ndarray:
     halo_strength = float(np.clip(cfg.get("halo_strength", 0.0), 0.0, 1.0))
     if halo_sigma > 0.0 and halo_strength > 0.0:
         halo = separable_gaussian_blur_2d(out, halo_sigma)
-        out = (out + halo_strength * halo) / (1.0 + halo_strength)
+        out = out + halo_strength * halo  # additive: scatter adds light, doesn't steal from primary
 
     # ---- Ghost reflections ----
     ghost_cfg = cfg.get("ghost_reflections", {}) or {}
@@ -342,9 +342,11 @@ def apply_stray_light(arr: np.ndarray, cfg: dict) -> np.ndarray:
         ghost_strength = float(np.clip(ghost_cfg.get("ghost_strength", 0.02), 0.0, 1.0))
         # The dominant first-order ghost is a 180°-rotated (both axes flipped) copy of
         # the image — the light path is sensor → rear element → sensor, inverting the
-        # image through the optical axis.
+        # image through the optical axis.  Ghosts are additive: the reflected energy
+        # reaches the sensor in addition to the primary image (the reflective loss is
+        # already captured by optics_transmittance, not duplicated here).
         ghost = np.rot90(out, k=2)
-        out = (1.0 - ghost_strength) * out + ghost_strength * ghost
+        out = out + ghost_strength * ghost
 
     # ---- Aperture blade diffraction ----
     diff_cfg = cfg.get("aperture_diffraction", {}) or {}

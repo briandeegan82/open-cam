@@ -5,6 +5,11 @@ sensor:
     red_csv: spectra/QE/cameras/iphone_8/QE_red.csv
     green_csv: spectra/QE/cameras/iphone_8/QE_green.csv
     blue_csv: spectra/QE/cameras/iphone_8/QE_blue.csv
+    # ircf_csv: null — iPhone 8 QE curves are full-system spectral sensitivities
+    # (Image Engineering database, measured on device) that already include the IRCF.
+    # Applying the default IRCF on top double-counts the NIR cutoff at ~655 nm,
+    # severely attenuating the red channel in the 645–680 nm range.
+    ircf_csv: null
   f_number: 1.8
   fill_factor: 0.76
 noise:
