@@ -154,6 +154,34 @@ def gray_world_gains(rgb: np.ndarray) -> np.ndarray:
     return gains.astype(np.float32)
 
 
+def white_patch_gains(rgb: np.ndarray, top_pct: float = 1.0) -> np.ndarray:
+    """Compute WB gains using the brightest pixels as the white reference.
+
+    Uses the top ``top_pct`` percent of pixels ranked by green-channel
+    luminance to estimate the illuminant white point.  More accurate than
+    gray-world for scenes with distinct neutral patches (e.g. ColorChecker)
+    because it is not biased by the chromatic distribution of the chart.
+
+    Parameters
+    ----------
+    rgb:
+        HxWx3 float array (linear, black-level subtracted).
+    top_pct:
+        Fraction of pixels (by green channel) used as the white reference.
+    """
+    if rgb.ndim != 3 or rgb.shape[2] < 3:
+        raise ValueError(f"white_patch_gains expects HxWx3, got {rgb.shape}")
+    arr = np.asarray(rgb[:, :, :3], dtype=np.float64)
+    luma = arr[:, :, 1]  # green channel as luminance proxy
+    thresh = np.percentile(luma, 100.0 - top_pct)
+    mask = luma >= thresh
+    m = arr[mask].mean(axis=0)
+    target = m[1]  # normalise to green
+    eps = 1e-9
+    gains = target / np.maximum(m, eps)
+    return gains.astype(np.float32)
+
+
 def apply_rgb_gains(rgb: np.ndarray, gains: np.ndarray) -> np.ndarray:
     """Apply RGB channel gains to HxWx3 array."""
     if rgb.ndim != 3 or rgb.shape[2] < 3:
@@ -381,9 +409,9 @@ def demosaic_requested(bayer_cfg: dict) -> bool:
     s = str(d).lower().strip()
     if s in ("0", "false", "none", "off", "no"):
         return False
-    if s in ("1", "true", "yes", "on", "bilinear"):
+    if s in ("1", "true", "yes", "on", "bilinear", "malvar"):
         return True
-    raise ValueError(f'unsupported cfa.demosaic value {d!r}; use true/false or "bilinear"')
+    raise ValueError(f'unsupported cfa.demosaic value {d!r}; use true/false, "bilinear", or "malvar"')
 
 
 def bilinear_demosaic(mono: np.ndarray, pattern: str) -> np.ndarray:
@@ -396,6 +424,103 @@ def bilinear_demosaic(mono: np.ndarray, pattern: str) -> np.ndarray:
     if nr != 0 or nc != 0:
         r = np.roll(np.roll(mono, -nr, axis=0), -nc, axis=1)
     rgb = _demosaic_rggb_bilinear(r)
+    if nr != 0 or nc != 0:
+        rgb = np.roll(np.roll(rgb, nr, axis=0), nc, axis=1)
+    return rgb.astype(np.float32)
+
+
+def _demosaic_rggb_malvar(raw: np.ndarray) -> np.ndarray:
+    """Malvar-He-Cutler gradient-corrected demosaic (RGGB layout).
+
+    Applies the 5×5 fixed-coefficient kernels from:
+      Malvar, He, Cutler — "High-Quality Linear Interpolation for Demosaicing
+      of Bayer-Patterned Color Images", ICASSP 2004.
+
+    Significantly reduces zipper artefacts and false colour at luminance edges
+    compared to bilinear interpolation.
+    """
+    from scipy.signal import convolve2d  # noqa: PLC0415
+
+    raw = np.asarray(raw, dtype=np.float64)
+    h0, w0 = raw.shape
+    ph, pw = h0 % 2, w0 % 2
+    if ph or pw:
+        raw = np.pad(raw, ((0, ph), (0, pw)), mode="edge")
+
+    def _conv(img: np.ndarray, k: np.ndarray) -> np.ndarray:
+        return convolve2d(img, k, mode="same", boundary="symm")
+
+    # G interpolation at R and B sites (same kernel for both).
+    K_G = np.array([[0,  0, -1,  0,  0],
+                    [0,  0,  2,  0,  0],
+                    [-1, 2,  4,  2, -1],
+                    [0,  0,  2,  0,  0],
+                    [0,  0, -1,  0,  0]], dtype=np.float64) / 8.0
+    G_interp = _conv(raw, K_G)
+
+    # R interpolation — three site types.
+    K_R_at_Gr = np.array([[0,   0,  0.5,  0,  0],
+                           [0,  -1,  0,   -1,  0],
+                           [-1,  4,  5,    4, -1],
+                           [0,  -1,  0,   -1,  0],
+                           [0,   0,  0.5,  0,  0]], dtype=np.float64) / 8.0
+    K_R_at_Gb = np.array([[0,   0, -1,   0,  0],
+                           [0,  -1,  4,  -1,  0],
+                           [0.5, 0,  5,   0, 0.5],
+                           [0,  -1,  4,  -1,  0],
+                           [0,   0, -1,   0,  0]], dtype=np.float64) / 8.0
+    K_R_at_B  = np.array([[0,   0, -1.5,  0,  0],
+                           [0,   2,  0,    2,  0],
+                           [-1.5, 0,  6,   0, -1.5],
+                           [0,   2,  0,    2,  0],
+                           [0,   0, -1.5,  0,  0]], dtype=np.float64) / 8.0
+    R_at_Gr = _conv(raw, K_R_at_Gr)
+    R_at_Gb = _conv(raw, K_R_at_Gb)
+    R_at_B  = _conv(raw, K_R_at_B)
+
+    # B interpolation (mirrors R kernels by 90° symmetry).
+    K_B_at_Gb = K_R_at_Gr.T   # Gr↔Gb swap
+    K_B_at_Gr = K_R_at_Gb.T
+    K_B_at_R  = K_R_at_B
+    B_at_Gb = _conv(raw, K_B_at_Gb)
+    B_at_Gr = _conv(raw, K_B_at_Gr)
+    B_at_R  = _conv(raw, K_B_at_R)
+
+    h, w = raw.shape
+    R = np.empty((h, w), dtype=np.float64)
+    G = np.empty((h, w), dtype=np.float64)
+    B = np.empty((h, w), dtype=np.float64)
+
+    # RGGB: R at (even,even), Gr at (even,odd), Gb at (odd,even), B at (odd,odd)
+    R[0::2, 0::2] = raw[0::2, 0::2]          # R pixels: identity
+    R[0::2, 1::2] = R_at_Gr[0::2, 1::2]      # Gr sites
+    R[1::2, 0::2] = R_at_Gb[1::2, 0::2]      # Gb sites
+    R[1::2, 1::2] = R_at_B[1::2, 1::2]       # B sites
+
+    G[0::2, 0::2] = G_interp[0::2, 0::2]     # R sites
+    G[0::2, 1::2] = raw[0::2, 1::2]           # Gr pixels: identity
+    G[1::2, 0::2] = raw[1::2, 0::2]           # Gb pixels: identity
+    G[1::2, 1::2] = G_interp[1::2, 1::2]     # B sites
+
+    B[0::2, 0::2] = B_at_R[0::2, 0::2]       # R sites
+    B[0::2, 1::2] = B_at_Gr[0::2, 1::2]      # Gr sites
+    B[1::2, 0::2] = B_at_Gb[1::2, 0::2]      # Gb sites
+    B[1::2, 1::2] = raw[1::2, 1::2]           # B pixels: identity
+
+    out = np.stack([R, G, B], axis=2)
+    return out[:h0, :w0, :].astype(np.float32)
+
+
+def malvar_demosaic(mono: np.ndarray, pattern: str) -> np.ndarray:
+    """CFA HxW -> full RGB HxWx3 using Malvar-He-Cutler gradient-corrected interpolation."""
+    p = pattern.upper()
+    if p not in _BAYER_NEG_ROLL_TO_RGGB:
+        raise ValueError(f"unknown Bayer pattern {pattern!r}")
+    nr, nc = _BAYER_NEG_ROLL_TO_RGGB[p]
+    r = mono
+    if nr != 0 or nc != 0:
+        r = np.roll(np.roll(mono, -nr, axis=0), -nc, axis=1)
+    rgb = _demosaic_rggb_malvar(r)
     if nr != 0 or nc != 0:
         rgb = np.roll(np.roll(rgb, nr, axis=0), nc, axis=1)
     return rgb.astype(np.float32)
@@ -1061,9 +1186,9 @@ def main() -> None:
     wb_enabled = bool(wb_cfg.get("enabled", True))
     if args.preview_white_balance_enabled is not None:
         wb_enabled = args.preview_white_balance_enabled == "true"
-    wb_method = str(wb_cfg.get("method", "gray_world")).lower().strip()
-    if wb_enabled and wb_method != "gray_world":
-        raise ValueError('processing.preview_white_balance.method must be "gray_world"')
+    wb_method = str(wb_cfg.get("method", "white_patch")).lower().strip()
+    if wb_enabled and wb_method not in ("gray_world", "white_patch"):
+        raise ValueError('processing.preview_white_balance.method must be "gray_world" or "white_patch"')
     ccm_cfg = proc_cfg.get("preview_color_correction", {}) or {}
     ccm_enabled = bool(ccm_cfg.get("enabled", True))
     if args.preview_color_correction_enabled is not None:
@@ -1177,6 +1302,10 @@ def main() -> None:
     bayer_on = bool(bayer_cfg.get("enabled", False))
     bayer_pat = str(bayer_cfg.get("pattern", "RGGB"))
     demosaic_on = bayer_on and demosaic_requested(bayer_cfg)
+    demosaic_alg = str(bayer_cfg.get("demosaic", "bilinear")).lower().strip()
+    if demosaic_alg not in ("bilinear", "malvar", "true", "1", "yes", "on"):
+        demosaic_alg = "bilinear"
+    demosaic_alg = "malvar" if demosaic_alg == "malvar" else "bilinear"
     demosaic_srgb = bool(bayer_cfg.get("demosaic_srgb", False))
     spatial_xtalk_cfg = bayer_cfg.get("spatial_crosstalk", {}) or {}
 
@@ -1360,7 +1489,9 @@ def main() -> None:
             ccm_source = "reference_unavailable"
             print(f"warning: preview CCM reference unavailable from {exr_in}: {exc}", file=sys.stderr)
     if wb_enabled and not bayer_on:
-        wb_gains = gray_world_gains(np.clip(dn_clean - black_dn, 0.0, None))
+        _wb_src = np.clip(dn_clean - black_dn, 0.0, None)
+        wb_gains = (white_patch_gains(_wb_src) if wb_method == "white_patch"
+                    else gray_world_gains(_wb_src))
         dn_clean = apply_preview_wb_dn(dn_clean, black_dn, wb_gains)
         dn_noisy = apply_preview_wb_dn(dn_noisy, black_dn, wb_gains)
     if ccm_enabled and not bayer_on and ref_linear is not None and ref_linear.shape == dn_clean.shape:
@@ -1399,10 +1530,13 @@ def main() -> None:
             write_png(png_dir / f"noisy_{name}_16.png", ch)
 
     if demosaic_on:
-        dn_clean_rgb = bilinear_demosaic(dn_clean, bayer_pat)
-        dn_noisy_rgb = bilinear_demosaic(dn_noisy, bayer_pat)
+        _demosaic_fn = malvar_demosaic if demosaic_alg == "malvar" else bilinear_demosaic
+        dn_clean_rgb = _demosaic_fn(dn_clean, bayer_pat)
+        dn_noisy_rgb = _demosaic_fn(dn_noisy, bayer_pat)
         if wb_enabled:
-            wb_gains = gray_world_gains(np.clip(dn_clean_rgb - black_dn, 0.0, None))
+            _wb_src = np.clip(dn_clean_rgb - black_dn, 0.0, None)
+            wb_gains = (white_patch_gains(_wb_src) if wb_method == "white_patch"
+                        else gray_world_gains(_wb_src))
             dn_clean_rgb = apply_preview_wb_dn(dn_clean_rgb, black_dn, wb_gains)
             dn_noisy_rgb = apply_preview_wb_dn(dn_noisy_rgb, black_dn, wb_gains)
         if ccm_enabled and ref_linear is not None and ref_linear.shape == dn_clean_rgb.shape:

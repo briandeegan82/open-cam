@@ -62,7 +62,7 @@ noise:
 cfa:
   enabled: true
   pattern: GBRG
-  demosaic: bilinear
+  demosaic: malvar    # bilinear | malvar (Malvar-He-Cutler gradient-corrected)
   demosaic_srgb: true
   spatial_crosstalk:
     # Spatial inter-pixel diffusion: convolve the CFA RAW with a normalised Gaussian

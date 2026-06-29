@@ -459,6 +459,28 @@ def main() -> None:
     y_ndc = 1.0 - 2.0 * ((jj + 0.5) / yres)
     aspect = xres / yres
     tan_half = np.tan(np.deg2rad(fov_deg) * 0.5)
+
+    # Radial/tangential distortion undistortion (Brown-Conrady model).
+    # Converts distorted pixel coordinates to undistorted ray directions so that
+    # each pixel samples the correct chart position.  No effect when all k/p = 0.
+    k1 = float(lens_cfg.get("distortion_k1", 0.0))
+    k2 = float(lens_cfg.get("distortion_k2", 0.0))
+    p1 = float(lens_cfg.get("distortion_p1", 0.0))
+    p2 = float(lens_cfg.get("distortion_p2", 0.0))
+    if k1 != 0.0 or k2 != 0.0 or p1 != 0.0 or p2 != 0.0:
+        # Normalised image coordinates (aspect-corrected NDC).
+        xn = x_ndc * aspect
+        yn = y_ndc
+        # Iterative Brown-Conrady inversion (10 iterations, converges to < 1e-7 px).
+        xu, yu = xn.copy(), yn.copy()
+        for _ in range(10):
+            r2 = xu ** 2 + yu ** 2
+            rad = 1.0 + k1 * r2 + k2 * r2 ** 2
+            xu = (xn - (2.0 * p1 * xu * yu + p2 * (r2 + 2.0 * xu ** 2))) / rad
+            yu = (yn - (p1 * (r2 + 2.0 * yu ** 2) + 2.0 * p2 * xu * yu)) / rad
+        x_ndc = xu / aspect
+        y_ndc = yu
+
     # Match pbrt-v4 LookAt (camera +X along world -X): increasing image column -> decreasing world X.
     xw = -x_ndc * cam_dist * tan_half * aspect
     yw = y_ndc * cam_dist * tan_half
