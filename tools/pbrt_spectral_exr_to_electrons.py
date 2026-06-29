@@ -305,11 +305,24 @@ def main() -> None:
     if L.shape[:2] != (yres, xres):
         raise ValueError(f"EXR size {L.shape[:2]} does not match manifest {yres}x{xres}")
 
+    # (1+m)² close-focus magnification correction: E = π L τ / [4 N² (1+m)²].
+    # m = f/(u−f) is the transverse magnification at focus distance u.
+    # At typical photographic distances (u >> f) this factor is negligible,
+    # but for macro (u ≈ 2f, m ≈ 1) it reduces sensor irradiance by 4×.
+    _magnification_factor = 1.0
+    if args.camera_model_config is not None:
+        _lens = camera_model.get("lens", {})
+        _fl_mm = _lens.get("focal_length_mm", None)
+        _focus_m = float(_lens.get("realistic_focus_distance", None) or cal.get("focus_distance_m", 1e6))
+        if _fl_mm is not None and float(_fl_mm) > 0.0 and _focus_m > 0.0:
+            _m = float(_fl_mm) / (_focus_m * 1000.0 - float(_fl_mm))
+            _magnification_factor = (1.0 + abs(_m)) ** 2
+
     if rad_scale_user is not None:
         rad_to_e = float(rad_scale_user)
     elif rad_mode in ("thin_lens", "pinhole"):
         # Geometric radiance->irradiance transfer; lens transmission is applied spectrally below.
-        rad_to_e = np.pi / (4.0 * max(1e-12, f_number**2))
+        rad_to_e = np.pi / (4.0 * max(1e-12, f_number**2) * _magnification_factor)
     else:
         raise ValueError(
             'model.pbrt_spectral_exr.radiance_to_irradiance must be '

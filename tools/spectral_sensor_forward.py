@@ -430,7 +430,19 @@ def main() -> None:
         cal["target_illuminance_lux"] = float(args.target_illuminance_lux)
     cal_mode = str(cal.get("mode", "legacy")).lower()
     use_aperture = bool(cal.get("use_aperture_factor", True))
-    aperture_factor = (np.pi / (4.0 * max(1e-9, f_number**2))) if use_aperture else 1.0
+    # (1+m)² close-focus correction: E = π L τ / [4 N² (1+m)²].
+    # m = f/(u−f) where u = focus distance and f = focal length.
+    # Negligible for typical scenes (m ≈ 0.001 at 4 m with f=4 mm) but correct for macro.
+    _fl_mm = None
+    if args.camera_model_config is not None:
+        _fl_mm = camera_model.get("lens", {}).get("focal_length_mm")
+    _focus_dist_m = float(cal.get("focus_distance_m", cam_dist))
+    if _fl_mm is not None and float(_fl_mm) > 0.0:
+        _m = float(_fl_mm) / (float(_focus_dist_m) * 1000.0 - float(_fl_mm))
+        _magnification_factor = (1.0 + abs(_m)) ** 2
+    else:
+        _magnification_factor = 1.0
+    aperture_factor = (np.pi / (4.0 * max(1e-9, f_number**2) * _magnification_factor)) if use_aperture else 1.0
     pixel_area = (pixel_pitch_um * 1e-6) ** 2
     optics_t = float(cal.get("optics_transmittance", 1.0))
     optics_t_csv = cal.get("optics_transmittance_csv", None)

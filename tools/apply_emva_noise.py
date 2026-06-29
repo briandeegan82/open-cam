@@ -671,6 +671,40 @@ def _spatial_shape(arr: np.ndarray) -> tuple[int, int]:
     raise ValueError(f"unsupported signal shape for defect model: {arr.shape}")
 
 
+def apply_blooming(shot_e: np.ndarray, full_well_e: float,
+                   spread_fraction: float = 0.5, max_iters: int = 20) -> np.ndarray:
+    """Simulate charge blooming: excess electrons overflow to adjacent pixels.
+
+    When a photodiode's electron count exceeds ``full_well_e``, the surplus
+    charge spills laterally to its four cardinal neighbours (N/S/E/W) with
+    fractional weight ``spread_fraction/4`` each.  The remainder (1 − spread)
+    is lost (recombines or drains to substrate).  Iteration continues until
+    no pixel overflows or ``max_iters`` is reached.
+
+    Works on a 2-D mono array (Bayer-sampled frame).  Multi-channel input
+    is NOT supported; call only after Bayer sampling.
+    """
+    from scipy.ndimage import convolve  # noqa: PLC0415
+
+    if shot_e.ndim != 2:
+        raise ValueError("apply_blooming requires a 2-D mono electron array (post-Bayer sampling)")
+
+    result = shot_e.astype(np.float64)
+    _kernel = np.array([[0.0, 0.25, 0.0],
+                         [0.25, 0.0, 0.25],
+                         [0.0, 0.25, 0.0]], dtype=np.float64)
+
+    for _ in range(max_iters):
+        overflow = np.maximum(result - full_well_e, 0.0)
+        total_overflow = overflow.sum()
+        if total_overflow < 0.5:  # < 1 electron total overflow — converged
+            break
+        result = np.minimum(result, full_well_e)
+        result += convolve(overflow * spread_fraction, _kernel, mode="reflect")
+
+    return np.minimum(result, full_well_e).astype(np.float32)
+
+
 def apply_hot_stuck_pixel_model(
     signal_e: np.ndarray,
     rng: np.random.Generator,
@@ -1138,10 +1172,19 @@ def main() -> None:
     col_fpn_std_e = float(emva.get("column_fpn_std_e", 0.0))
     row_fpn_fixed_std_e = float(emva.get("row_fpn_fixed_std_e", 0.0))
     col_fpn_fixed_std_e = float(emva.get("column_fpn_fixed_std_e", 0.0))
+    # 1/f (flicker) noise: low-frequency row-correlated noise in the readout amplifier.
+    # Temporal (varies per frame) and row-directional (rolling-shutter readout order).
+    # Power spectrum ∝ 1/f — generates smooth row offsets rather than white row FPN.
+    # Typical BSI CMOS: 0.2–1.0 e; set to 0 when CDS is effective.
+    flicker_noise_std_e = float(emva.get("flicker_noise_std_e", 0.0))
     prnu_lf_std = float(emva.get("prnu_lf_std_fraction", 0.0))
     prnu_lf_sigma_px = float(emva.get("prnu_lf_sigma_pixels", 100.0))
     ktc_cfg = emva.get("ktc_noise", {}) or {}
     ktc_enabled = bool(ktc_cfg.get("enabled", False))
+    bloom_cfg = emva.get("blooming", {}) or {}
+    bloom_enabled = bool(bloom_cfg.get("enabled", False))
+    bloom_spread = float(bloom_cfg.get("spread_fraction", 0.5))
+    bloom_max_iters = int(bloom_cfg.get("max_iters", 20))
 
     # Stable per-camera seed for fixed spatial patterns (PRNU, DSNU).
     # These represent physical properties of the sensor silicon that are the same
@@ -1445,7 +1488,28 @@ def main() -> None:
     else:
         row_fpn = rng.normal(0.0, row_fpn_std_e, size=(signal_e.shape[0], 1, 1)).astype(np.float32)
         col_fpn = rng.normal(0.0, col_fpn_std_e, size=(1, signal_e.shape[1], 1)).astype(np.float32)
-    rc_fpn = row_fpn_fixed + col_fpn_fixed + row_fpn + col_fpn
+    # ---- 1/f (flicker) noise: pink-spectrum row offsets ----
+    # Models slow drift in the rolling-shutter readout amplifier.  Power spectrum ∝ 1/f
+    # in temporal frequency → pink noise across rows (temporal-to-spatial mapping in
+    # rolling-shutter readout).  Generated from temporal rng (different every frame).
+    flicker_row_e = np.zeros(1, dtype=np.float32)
+    if flicker_noise_std_e > 0.0:
+        _n_rows = signal_e.shape[0]
+        _fft_len = 1 << int(np.ceil(np.log2(max(_n_rows, 2))))  # next power of 2
+        _freqs = np.fft.rfftfreq(_fft_len)
+        _freqs[0] = _freqs[1]  # avoid DC singularity; DC offset cancels in CDS
+        _pink_weights = (1.0 / np.sqrt(_freqs)).astype(np.float64)
+        _white = rng.normal(0.0, 1.0, size=_fft_len // 2 + 1) + 1j * rng.normal(0.0, 1.0, size=_fft_len // 2 + 1)
+        _pink_fft = _white * _pink_weights
+        _pink = np.fft.irfft(_pink_fft)[:_n_rows]
+        _std = float(np.std(_pink)) + 1e-12
+        _pink = (_pink * (flicker_noise_std_e / _std)).astype(np.float32)
+        if signal_e.ndim == 2:
+            flicker_row_e = _pink[:, np.newaxis]
+        else:
+            flicker_row_e = _pink[:, np.newaxis, np.newaxis]
+
+    rc_fpn = row_fpn_fixed + col_fpn_fixed + row_fpn + col_fpn + flicker_row_e
 
     # ---- Poisson shot noise on the true mean ----
     # mean_e is the expected electron count per pixel:
@@ -1460,6 +1524,15 @@ def main() -> None:
         shot_e = rng.poisson(np.maximum(mean_e, 0.0)).astype(np.float32)
     else:
         shot_e = np.maximum(mean_e, 0.0).astype(np.float32)
+
+    # ---- Blooming: lateral charge overflow when a pixel saturates ----
+    # Excess electrons overflow to N/S/E/W neighbours before the sense node clips.
+    # Only modelled for the mono Bayer path (2-D shot_e); the multi-channel
+    # analytic path treats each channel independently and has no inter-pixel overflow.
+    if bloom_enabled and shot_e.ndim == 2:
+        shot_e = apply_blooming(shot_e, full_well_e,
+                                spread_fraction=bloom_spread,
+                                max_iters=bloom_max_iters)
 
     # ---- kTC reset noise (sense-node sampling uncertainty) ----
     # Only relevant for sensors without correlated double sampling (CDS).
@@ -1660,6 +1733,9 @@ def main() -> None:
         "dsnu_rate_std_fraction": dsnu_rate_std_fraction if dsnu_rate_std_fraction > 0.0 else None,
         "row_fpn_std_e": row_fpn_std_e,
         "column_fpn_std_e": col_fpn_std_e,
+        "flicker_noise_std_e": flicker_noise_std_e,
+        "blooming_enabled": bloom_enabled,
+        "blooming_spread_fraction": bloom_spread if bloom_enabled else None,
         "ktc_noise_enabled": ktc_enabled,
         "sigma_ktc_e": sigma_ktc_e if ktc_enabled else None,
         "adc_inl_quadratic_fraction": adc_inl_quad_fraction,

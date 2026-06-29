@@ -59,6 +59,18 @@ noise:
     column_fpn_std_e: 0.0       # temporal column FPN σ (electrons) — changes every frame
     row_fpn_fixed_std_e: 0.0    # fixed row FPN σ (electrons) — same every frame per camera
     column_fpn_fixed_std_e: 0.0 # fixed column FPN σ (electrons) — same every frame per camera
+    # 1/f (flicker) noise: pink-spectrum row offsets from readout amplifier drift.
+    # Temporal (frame-to-frame random), row-directional (rolling-shutter readout).
+    # Models the 1/f characteristic of MOS transistor flicker noise that survives CDS.
+    # Typical BSI CMOS with partial CDS: 0.2–1.0 e.  Set 0 when full CDS is effective.
+    flicker_noise_std_e: 0.0
+    # Charge blooming: lateral overflow to adjacent pixels when full well is exceeded.
+    # Only active in the Bayer (mono-CFA) path.  Disabled by default since most modern
+    # BSI sensors have overflow drain structures that suppress lateral blooming.
+    blooming:
+      enabled: false
+      spread_fraction: 0.5   # fraction of overflow charge sent to neighbours (rest recombines)
+      max_iters: 20          # max propagation steps (converges in < 5 for typical scenes)
     # PRNU low-frequency spatial trend (lens shading / die-level process gradient).
     # A smoothed random field is added on top of the per-pixel white-noise PRNU above.
     # 0.0 disables the component; typical values 0.003–0.010 with sigma 50–200 pixels.
