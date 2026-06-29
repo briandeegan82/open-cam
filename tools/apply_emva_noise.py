@@ -57,8 +57,8 @@ def read_csv_curve(path: Path, *, strict_wavelength_axis: bool = False) -> tuple
                 "strict QE validation: normalized wavelength axis detected "
                 f"in {path}; provide explicit wavelength-in-nm CSV"
             )
-        w = 380.0 + (w - wmin) * (400.0 / (wmax - wmin))
-        print(f"warning: mapped normalized wavelength axis to 380..780 nm for {path}", file=sys.stderr)
+        w = 380.0 + (w - wmin) * (450.0 / (wmax - wmin))
+        print(f"warning: mapped normalized wavelength axis to 380..830 nm for {path}", file=sys.stderr)
 
     idx = np.argsort(w)
     return w[idx], v[idx]
@@ -89,6 +89,21 @@ def load_qe_curves_rgb(
             file=sys.stderr,
         )
         r, b = b, r
+    # Warn if any QE curve's measured range ends below 780 nm with non-negligible signal.
+    # Above the curve's max wavelength, np.interp returns right=0.0, silently dropping
+    # any spectral energy in that band.  If the last non-zero sample is before 780 nm and
+    # the IRCF is not responsible for cutting it (IRCF check is left to the caller), the
+    # channel response is likely truncated.
+    _COVERAGE_WARN_NM = 780.0
+    for _ch, (_wl, _v) in (("red", r), ("green", g), ("blue", b)):
+        _last_nonzero = float(_wl[_v > 1e-4][-1]) if np.any(_v > 1e-4) else 0.0
+        if _last_nonzero > 0 and _last_nonzero < _COVERAGE_WARN_NM:
+            print(
+                f"warning: {_ch} QE curve last non-zero value at {_last_nonzero:.0f} nm "
+                f"(< {_COVERAGE_WARN_NM:.0f} nm); spectral energy above this wavelength "
+                "is set to zero by extrapolation — verify IRCF covers the gap or extend the QE CSV.",
+                file=sys.stderr,
+            )
     return r, g, b
 
 
@@ -667,6 +682,7 @@ def integrate_exr_spectral_qe(
     cal_cfg: dict,
     *,
     strict_qe_validation: bool = False,
+    lens_cfg: dict | None = None,
 ) -> np.ndarray:
     """HxWx3 electrons via full photon-counting physics on a PBRT spectral EXR.
 
@@ -694,8 +710,22 @@ def integrate_exr_spectral_qe(
     lam = lam.astype(np.float64)
     w = trapezoid_weights_nm(lam).astype(np.float64)
 
-    # ---- Radiance → sensor-plane irradiance (thin-lens) ----
+    # ---- Radiance → sensor-plane irradiance ----
+    # For realistic cameras use the effective f-number derived from the lens prescription
+    # (focal_length_mm / aperture_diameter_mm).  Falls back to sensor.f_number with a
+    # warning when focal_length_mm is absent from the lens model.
     f_number = float(sensor_cfg.get("f_number", 2.8))
+    if lens_cfg is not None and str(lens_cfg.get("camera", "pinhole")).lower() == "realistic":
+        _fl = lens_cfg.get("focal_length_mm", None)
+        _ap = lens_cfg.get("realistic_aperture_diameter_mm", None)
+        if _fl is not None and _ap is not None and float(_ap) > 0:
+            f_number = float(_fl) / float(_ap)
+        else:
+            print(
+                "warning [integrate_qe]: realistic camera lens model missing focal_length_mm — "
+                f"falling back to sensor.f_number={f_number}.",
+                file=sys.stderr,
+            )
     rad_to_irr = np.pi / (4.0 * max(1e-12, f_number**2))
 
     # ---- Scalar optics transmittance ----
@@ -935,8 +965,8 @@ def main() -> None:
     full_well_e = float(adc["full_well_e"])
     K_e_per_DN = float(emva.get("overall_system_gain_K_e_per_DN", 0.08))
     sigma_d_e = float(emva.get("sigma_d_e", 2.0))
+    sigma_amp_e = float(emva.get("sigma_amp_e", 0.0))
     dsnu_std_e = float(emva.get("dsnu_std_e", 0.3))
-    dsnu_mean_e = float(emva.get("dsnu_mean_e", dsnu_std_e))
     prnu_std = float(emva.get("prnu_std_fraction", 0.005))
     prnu_std_r = float(emva.get("prnu_std_fraction_r", prnu_std))
     prnu_std_g = float(emva.get("prnu_std_fraction_g", prnu_std))
@@ -957,6 +987,12 @@ def main() -> None:
     if _iso_gain != 1.0:
         K_e_per_DN = K_e_per_DN / _iso_gain
         full_well_e = full_well_e / _iso_gain
+    # Amplifier noise: at high ISO, the analog gain stage adds its own noise in quadrature.
+    # sigma_amp_e is the amplifier's input-referred noise floor at unit gain.  At iso_gain
+    # G the amplifier contributes sigma_amp_e × G electrons, added in quadrature to the
+    # base read noise.  Default 0 = no amplifier noise (backward-compatible).
+    if sigma_amp_e > 0.0 and _iso_gain > 1.0:
+        sigma_d_e = float(np.sqrt(sigma_d_e**2 + (sigma_amp_e * _iso_gain)**2))
     use_poisson = bool(emva.get("use_poisson_shot_noise", True))
     t_int_s = float(sensor.get("integration_time_s", 0.01))
     if args.integration_time_s is not None:
@@ -969,6 +1005,10 @@ def main() -> None:
     dark_activation_energy_eV = float(emva.get("dark_activation_energy_eV", 0.0))
     row_fpn_std_e = float(emva.get("row_fpn_std_e", 0.0))
     col_fpn_std_e = float(emva.get("column_fpn_std_e", 0.0))
+    row_fpn_fixed_std_e = float(emva.get("row_fpn_fixed_std_e", 0.0))
+    col_fpn_fixed_std_e = float(emva.get("column_fpn_fixed_std_e", 0.0))
+    prnu_lf_std = float(emva.get("prnu_lf_std_fraction", 0.0))
+    prnu_lf_sigma_px = float(emva.get("prnu_lf_sigma_pixels", 100.0))
     ktc_cfg = emva.get("ktc_noise", {}) or {}
     ktc_enabled = bool(ktc_cfg.get("enabled", False))
 
@@ -1095,6 +1135,7 @@ def main() -> None:
                     sensor,
                     _cal_cfg,
                     strict_qe_validation=strict_qe_validation,
+                    lens_cfg=camera_model.get("lens", {}) if camera_model else None,
                 )
             except ValueError as exc:
                 # Some renders are RGB EXRs even when integrate_qe is configured.
@@ -1146,6 +1187,20 @@ def main() -> None:
         # Applied before the noise chain so shot noise is drawn on the correct mean.
         signal_e = apply_cfa_spatial_crosstalk(signal_e, spatial_xtalk_cfg, bayer_pat)
 
+    # Dark current mean: computed here (not in the temporal section) so that the DSNU
+    # log-normal distribution can be correctly centred on it — ensuring that
+    # dark_mean_e + dsnu_map[i] = D_i ≥ 0 for every pixel.
+    if dark_activation_energy_eV > 0.0:
+        _K_B_EV = 8.617333262e-5
+        _T_K  = dark_temp_c + 273.15
+        _T0_K = dark_ref_temp_c + 273.15
+        dark_temp_scale = float(np.exp(
+            (dark_activation_energy_eV / _K_B_EV) * (1.0 / _T0_K - 1.0 / _T_K)
+        ))
+    else:
+        dark_temp_scale = 2.0 ** ((dark_temp_c - dark_ref_temp_c) / max(1e-6, dark_doubling_c))
+    dark_mean_e = max(0.0, dark_current_e_per_s * t_int_s * dark_temp_scale)
+
     # ---- Fixed spatial patterns (same for every frame from the same camera) ----
     # PRNU: per-pixel multiplicative gain non-uniformity baked into the silicon.
     # DSNU: per-pixel additive dark-signal offset due to leakage current variation.
@@ -1172,45 +1227,56 @@ def main() -> None:
             0.0,
         )
 
+    # Low-frequency PRNU trend: models large-scale gain gradients (lens shading, process
+    # variation across the die).  A smooth random field is added on top of the per-pixel
+    # white-noise PRNU above.  Drawn from spatial_rng so it is fixed per camera unit.
+    # Enabled only when prnu_lf_std_fraction > 0 in the emva config.
+    if prnu_lf_std > 0.0 and prnu_lf_sigma_px > 0.0:
+        from scipy.ndimage import gaussian_filter as _gf  # noqa: PLC0415
+        _lf_raw = spatial_rng.normal(0.0, prnu_lf_std, size=signal_e.shape[:2]).astype(np.float32)
+        _lf_smooth = _gf(_lf_raw, sigma=prnu_lf_sigma_px, mode="reflect").astype(np.float32)
+        if signal_e.ndim == 2:
+            prnu_map += _lf_smooth
+        else:
+            prnu_map += _lf_smooth[:, :, None]
+        prnu_map = np.maximum(prnu_map, 0.0, out=prnu_map)
+
     # DSNU: per-pixel absolute dark-current variation follows a log-normal distribution.
     # Dark current arises from trap-mediated generation: most pixels are near the mean,
-    # a long positive tail represents sites with elevated leakage.  The Gaussian model
-    # allowed unphysical negative per-pixel dark currents; log-normal keeps D_i ≥ 0.
-    # Parameters: dsnu_mean_e (mean per-pixel dark current, default = dsnu_std_e) and
-    # dsnu_std_e (standard deviation).  The stored dsnu_map is the zero-mean offset
-    # D_i - dsnu_mean_e so that dark_mean_e (temperature-scaled nominal) remains the
-    # global mean dark signal.
-    if dsnu_mean_e > 1e-9 and dsnu_std_e > 0.0:
-        _v_ratio = dsnu_std_e / dsnu_mean_e
+    # a long positive tail represents sites with elevated leakage.
+    # The log-normal mean is dark_mean_e (computed above from dark_current_e_per_s × t_int),
+    # ensuring dark_mean_e + dsnu_map[i] = D_i ≥ 0 for every pixel — consistent with the
+    # global mean used in the Poisson draw.  dsnu_std_e is the absolute spatial std (electrons).
+    # When dark_mean_e ≈ 0 (very short exposure / low dark current) dsnu_map is all-zeros.
+    if dark_mean_e > 1e-9 and dsnu_std_e > 0.0:
+        _v_ratio = dsnu_std_e / dark_mean_e
         _sigma_ln = float(np.sqrt(np.log1p(_v_ratio ** 2)))
-        _mu_ln = np.log(dsnu_mean_e) - 0.5 * _sigma_ln ** 2
+        _mu_ln = np.log(dark_mean_e) - 0.5 * _sigma_ln ** 2
         if signal_e.ndim == 2:
             _dsnu_abs = spatial_rng.lognormal(_mu_ln, _sigma_ln, size=signal_e.shape).astype(np.float32)
-            dsnu_map = (_dsnu_abs - dsnu_mean_e).astype(np.float32)
+            dsnu_map = (_dsnu_abs - dark_mean_e).astype(np.float32)
         else:
             _dsnu_abs = spatial_rng.lognormal(_mu_ln, _sigma_ln, size=signal_e.shape[:2]).astype(np.float32)
-            dsnu_map = (_dsnu_abs - dsnu_mean_e)[:, :, None].astype(np.float32)
+            dsnu_map = (_dsnu_abs - dark_mean_e)[:, :, None].astype(np.float32)
     else:
         if signal_e.ndim == 2:
-            dsnu_map = spatial_rng.normal(0.0, dsnu_std_e, size=signal_e.shape).astype(np.float32)
+            dsnu_map = np.zeros(signal_e.shape, dtype=np.float32)
         else:
-            dsnu_map = spatial_rng.normal(0.0, dsnu_std_e, size=signal_e.shape[:2]).astype(np.float32)
-            dsnu_map = dsnu_map[:, :, None]
+            dsnu_map = np.zeros(signal_e.shape[:2] + (1,), dtype=np.float32)
 
     # ---- Temporal frame noise (varies legitimately per frame) ----
-    # Dark current: mean electrons from temperature-scaled dark current rate.
-    if dark_activation_energy_eV > 0.0:
-        # Arrhenius model: I(T) / I(T0) = exp( (Ea/kB) * (1/T0 - 1/T) )
-        # More accurate than the doubling-rule approximation for large ΔT.
-        _K_B_EV = 8.617333262e-5  # Boltzmann constant [eV/K]
-        _T_K  = dark_temp_c + 273.15
-        _T0_K = dark_ref_temp_c + 273.15
-        dark_temp_scale = float(np.exp(
-            (dark_activation_energy_eV / _K_B_EV) * (1.0 / _T0_K - 1.0 / _T_K)
-        ))
+    # dark_mean_e was computed before the spatial-patterns section so the DSNU log-normal
+    # could be correctly centred on it.  It is reused directly here.
+
+    # Fixed row/column FPN: column offset and row gain variation baked into the readout
+    # circuit — the same pattern every frame from the same camera unit.  Drawn from
+    # spatial_rng (fixed seed) after DSNU so PRNU/DSNU patterns are unaffected.
+    if signal_e.ndim == 2:
+        row_fpn_fixed = spatial_rng.normal(0.0, row_fpn_fixed_std_e, size=(signal_e.shape[0], 1)).astype(np.float32)
+        col_fpn_fixed = spatial_rng.normal(0.0, col_fpn_fixed_std_e, size=(1, signal_e.shape[1])).astype(np.float32)
     else:
-        dark_temp_scale = 2.0 ** ((dark_temp_c - dark_ref_temp_c) / max(1e-6, dark_doubling_c))
-    dark_mean_e = max(0.0, dark_current_e_per_s * t_int_s * dark_temp_scale)
+        row_fpn_fixed = spatial_rng.normal(0.0, row_fpn_fixed_std_e, size=(signal_e.shape[0], 1, 1)).astype(np.float32)
+        col_fpn_fixed = spatial_rng.normal(0.0, col_fpn_fixed_std_e, size=(1, signal_e.shape[1], 1)).astype(np.float32)
 
     # Row/column readout amplifier noise: temporal banding that changes every frame.
     if signal_e.ndim == 2:
@@ -1219,7 +1285,7 @@ def main() -> None:
     else:
         row_fpn = rng.normal(0.0, row_fpn_std_e, size=(signal_e.shape[0], 1, 1)).astype(np.float32)
         col_fpn = rng.normal(0.0, col_fpn_std_e, size=(1, signal_e.shape[1], 1)).astype(np.float32)
-    rc_fpn = row_fpn + col_fpn
+    rc_fpn = row_fpn_fixed + col_fpn_fixed + row_fpn + col_fpn
 
     # ---- Poisson shot noise on the true mean ----
     # mean_e is the expected electron count per pixel:

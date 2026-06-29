@@ -1,4 +1,3 @@
-schema_version: 1
 paths:
   scene_builder: tools/build_colorchecker_scene.py
   pbrt: third_party/pbrt-v4/build/pbrt
@@ -23,10 +22,14 @@ render:
   yres: 640
   # Keep Monte Carlo render noise sub-dominant to sensor/noise stages.
   # For quick iteration, lower this (e.g. 64-256). For final runs, keep >=1024.
-  pixelsamples: 64
+  pixelsamples: 512
   film: spectral
   film_output: null
-  spectral_nbuckets: 32
+  # 64 buckets → 7.3 nm/bucket over 360–830 nm. Sufficient for broad LED spectra and
+  # most fluorescent line spectra. Increase to 128 (3.7 nm) for narrow-band illuminants
+  # such as laser lines or phosphor-converted LEDs. 32 (14.7 nm) is too coarse for accurate
+  # colour rendering under non-blackbody sources.
+  spectral_nbuckets: 64
   spectral_lambda_min: 360.0
   spectral_lambda_max: 830.0
   # Optional repo-relative CSV override for scene illuminant spectrum.
@@ -46,26 +49,23 @@ validate_emva:
 # Set to null to use camera-model default; options: pinhole, thinlens, realistic.
 lens_type_override: realistic
 # Optional run-level lens parameter overrides (null = use camera-model value).
+# Note: pinhole_fov_deg / thinlens_* keys only take effect when lens_type_override
+# is set to pinhole or thinlens respectively.
 lens_overrides:
-  pinhole_fov_deg: null
-  thinlens_fov_deg: null
-  thinlens_lens_radius: null
-  thinlens_focal_distance: null
   realistic_lensfile: null
   realistic_aperture_diameter_mm: null
-  realistic_focus_distance: null
+  realistic_focus_distance: 4.0
 strict_physical_accuracy:
   strict_qe_validation: false
   strict_calibration_validation: false
   calibration_tier_policy: semi_strict
-realistic_focus_distance_override: 4.0
 exposure_time_override_s: 0.06
 sensor_forward:
   mode: pbrt_exr
   enabled: true
   # Optional global lux override for forward-model calibration.
   # null means "use target_illuminance_lux from the selected camera model".
-  target_illuminance_lux: 200
+  target_illuminance_lux: 500
 noise:
   enabled: true
   seed: 0

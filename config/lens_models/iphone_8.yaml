@@ -5,9 +5,10 @@ lens:
   realistic_lensfile: config/lenses/wide_22mm.dat
   realistic_aperture_diameter_mm: 4.0
   realistic_focus_distance: 1.0
+  focal_length_mm: 22.0  # wide_22mm.dat image-space focal length
 
   post_psf:
-    enabled: true
+    enabled: false  # PBRT realistic camera handles the PSF; post-render blur is redundant
     # mode: chromatic_gaussian (inherited)
     # sigma_geometric_pixels: 0.50 (inherited)
     stray_light:

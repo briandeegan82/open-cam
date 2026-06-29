@@ -251,6 +251,33 @@ def main() -> None:
         t_int = float(args.integration_time_s)
     f_number = float(sensor.get("f_number", 2.8))
     pixel_pitch_um = float(sensor.get("pixel_pitch_um", 3.45))
+
+    # For realistic cameras, derive the effective f-number from the lens prescription
+    # (focal_length_mm / aperture_diameter_mm) rather than using sensor.f_number.
+    # The PBRT realistic camera traces rays through the actual multi-element lens, so
+    # the solid-angle factor in radiance→irradiance must match the lens geometry, not
+    # the nominal f-stop label which may differ from the optical system in the .dat file.
+    if args.camera_model_config is not None:
+        _lens_cfg = camera_model.get("lens", {})
+        if str(_lens_cfg.get("camera", "pinhole")).lower() == "realistic":
+            _fl = _lens_cfg.get("focal_length_mm", None)
+            _ap = _lens_cfg.get("realistic_aperture_diameter_mm", None)
+            if _fl is not None and _ap is not None and float(_ap) > 0:
+                _eff_fn = float(_fl) / float(_ap)
+                print(
+                    f"info: realistic camera — effective f/{_eff_fn:.3f} "
+                    f"(focal_length_mm={float(_fl):.1f} / aperture_diameter_mm={float(_ap):.1f}) "
+                    f"replaces sensor.f_number={f_number} for radiance→irradiance conversion.",
+                    file=sys.stderr,
+                )
+                f_number = _eff_fn
+            else:
+                print(
+                    "warning: realistic camera lens model is missing focal_length_mm — "
+                    f"falling back to sensor.f_number={f_number}. "
+                    "Add focal_length_mm to the lens model YAML for accurate radiometry.",
+                    file=sys.stderr,
+                )
     optics_t = float(cal.get("optics_transmittance", 1.0))
     optics_t_csv = cal.get("optics_transmittance_csv", None)
     spatial_cfg = cal.get("optics_transmittance_spatial", {}) or {}

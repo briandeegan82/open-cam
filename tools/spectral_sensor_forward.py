@@ -154,8 +154,8 @@ def read_csv_curve(path: Path, *, strict_wavelength_axis: bool = False) -> tuple
                 "strict QE validation: normalized wavelength axis detected "
                 f"in {path}; provide explicit wavelength-in-nm CSV"
             )
-        w = 380.0 + (w - wmin) * (400.0 / (wmax - wmin))
-        print(f"warning: mapped normalized wavelength axis to 380..780 nm for {path}", file=sys.stderr)
+        w = 380.0 + (w - wmin) * (450.0 / (wmax - wmin))
+        print(f"warning: mapped normalized wavelength axis to 380..830 nm for {path}", file=sys.stderr)
 
     idx = np.argsort(w)
     w = w[idx]
@@ -190,6 +190,15 @@ def load_qe_curves_rgb(
             file=sys.stderr,
         )
         r, b = b, r
+    _COVERAGE_WARN_NM = 780.0
+    for _ch, (_wl, _v) in (("red", r), ("green", g), ("blue", b)):
+        _last_nonzero = float(_wl[_v > 1e-4][-1]) if np.any(_v > 1e-4) else 0.0
+        if _last_nonzero > 0 and _last_nonzero < _COVERAGE_WARN_NM:
+            print(
+                f"warning: {_ch} QE curve last non-zero value at {_last_nonzero:.0f} nm "
+                f"(< {_COVERAGE_WARN_NM:.0f} nm); verify IRCF covers the gap or extend the QE CSV.",
+                file=sys.stderr,
+            )
     return r, g, b
 
 
@@ -382,6 +391,21 @@ def main() -> None:
     if args.integration_time_s is not None:
         t_int = float(args.integration_time_s)
     f_number = float(sensor.get("f_number", 2.8))
+    # For realistic camera recipes, derive effective f-number from the lens prescription
+    # rather than using the nominal sensor.f_number label.
+    if args.camera_model_config is not None:
+        _lens_cfg = camera_model.get("lens", {})
+        if str(_lens_cfg.get("camera", "pinhole")).lower() == "realistic":
+            _fl = _lens_cfg.get("focal_length_mm")
+            _ap = _lens_cfg.get("realistic_aperture_diameter_mm")
+            if _fl is not None and _ap is not None and float(_ap) > 0:
+                f_number = float(_fl) / float(_ap)
+            else:
+                print(
+                    "warning [sensor_forward]: realistic camera missing focal_length_mm — "
+                    f"falling back to sensor.f_number={f_number}.",
+                    file=sys.stderr,
+                )
     pixel_pitch_um = float(sensor.get("pixel_pitch_um", 3.45))
 
     ircf_csv = qe_cfg.get("ircf_csv")

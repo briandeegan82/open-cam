@@ -9,6 +9,7 @@ lens:
   realistic_lensfile: config/lenses/dgauss.50mm.dat
   realistic_aperture_diameter_mm: 17.9
   realistic_focus_distance: 1.0
+  focal_length_mm: 50.0  # dgauss.50mm.dat image-space focal length
   post_psf:
     enabled: false
     mode: chromatic_gaussian

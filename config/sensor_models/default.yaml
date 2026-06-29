@@ -12,18 +12,22 @@ sensor:
 noise:
   emva:
     overall_system_gain_K_e_per_DN: 4.77
-    sigma_d_e: 2.6
+    sigma_d_e: 2.6          # base read noise (electrons) at base ISO
+    sigma_amp_e: 0.0        # amplifier noise floor at unit gain; at ISO G adds sqrt(sigma_d_e²+(sigma_amp_e×G)²)
     black_level_DN: 16
     use_poisson_shot_noise: true
     prnu_std_fraction: 0.01
+    # DSNU: per-pixel dark-current spatial variation (electrons).
+    # The log-normal distribution is centred on dark_mean_e = dark_current_e_per_s × t_int,
+    # so dsnu_std_e expresses the absolute spread around that mean.  At very short exposures
+    # (dark_mean_e ≈ 0) the DSNU map approaches zero automatically.
     dsnu_std_e: 0.3
     # ISO amplifier gain relative to base ISO.
     # At base ISO (iso_gain_factor: 1.0) K_eff = K_base and full_well_eff = full_well_base.
     # At higher ISO (iso_gain_factor > 1.0):
-    #   K_eff       = K_base       / iso_gain_factor  (fewer e per DN → brighter image)
-    #   full_well_eff = full_well_e / iso_gain_factor  (earlier ADC clip in electron space)
-    # All electron-domain quantities (sigma_d_e, prnu, dsnu, dark_current) are physical
-    # silicon properties and are NOT scaled — only the amplifier gain changes.
+    #   K_eff         = K_base       / iso_gain_factor  (fewer e per DN → brighter image)
+    #   full_well_eff = full_well_e / iso_gain_factor   (earlier ADC clip in electron space)
+    #   sigma_d_eff   = sqrt(sigma_d_e² + (sigma_amp_e × G)²)  if sigma_amp_e > 0
     # Example: iso_gain_factor: 45 ≈ ISO 900 if base ISO is 20.
     iso_gain_factor: 1.0
     # Seed for the fixed spatial-pattern RNG (PRNU and DSNU maps).
@@ -36,8 +40,15 @@ noise:
     dark_current_reference_temp_c: 20.0
     temperature_c: 20.0
     dark_current_doubling_per_c: 6.0
-    row_fpn_std_e: 0.0
-    column_fpn_std_e: 0.0
+    row_fpn_std_e: 0.0          # temporal row FPN σ (electrons) — changes every frame
+    column_fpn_std_e: 0.0       # temporal column FPN σ (electrons) — changes every frame
+    row_fpn_fixed_std_e: 0.0    # fixed row FPN σ (electrons) — same every frame per camera
+    column_fpn_fixed_std_e: 0.0 # fixed column FPN σ (electrons) — same every frame per camera
+    # PRNU low-frequency spatial trend (lens shading / die-level process gradient).
+    # A smoothed random field is added on top of the per-pixel white-noise PRNU above.
+    # 0.0 disables the component; typical values 0.003–0.010 with sigma 50–200 pixels.
+    prnu_lf_std_fraction: 0.0
+    prnu_lf_sigma_pixels: 100.0
   adc:
     bit_depth: 10
     full_well_e: 4800
@@ -72,7 +83,7 @@ sensor_forward:
     calibration:
       mode: photon_counting
       irradiance_scale_W_m2nm_per_unit: 0.001
-      illuminant_override_csv: spectra/illuminant/interpolated/D55.csv
+      illuminant_override_csv: spectra/illuminant/interpolated/D65.csv
       target_illuminance_lux: 500.0
       optics_transmittance: 1.0
       use_aperture_factor: true
@@ -81,7 +92,7 @@ sensor_forward:
     - 0.0
     - 0.0
     - 1.0
-    vignetting_cos4: false
+    vignetting_cos4: true
     pbrt_spectral_exr:
       radiance_to_irradiance: thin_lens
       radiance_to_irradiance_scale: null
@@ -108,25 +119,43 @@ validation:
 lens:
   post_psf:
     # Set enabled: true to apply a post-render Gaussian PSF to the spectral EXR.
-    # Two modes are available:
+    # Three modes are available:
     #
     #   gaussian          – a single sigma_pixels applied to every channel (legacy).
-    #   chromatic_gaussian – wavelength-dependent blur per spectral bucket:
-    #                          σ_diff(λ) = 0.42 × N × λ_nm / (1000 × pixel_pitch_µm)
+    #   chromatic_gaussian – wavelength-dependent separable Gaussian per spectral bucket:
+    #                          σ_diff(λ) = 0.437 × N × λ_nm / (1000 × pixel_pitch_µm)
     #                          σ(λ)      = sqrt( σ_diff(λ)² + σ_geom² )
-    #                        where N = f_number and σ_geom = sigma_geometric_pixels.
-    #                        f_number and pixel_pitch_um are read from sensor.f_number /
-    #                        sensor.pixel_pitch_um unless overridden here.
+    #                        Fast; appropriate when diffraction rings are not important.
+    #   airy_disk          – physically correct 2-D Airy disk (via FFT) per spectral bucket:
+    #                          ρ₀(λ) = 1.22 × N × λ_nm / (1000 × pixel_pitch_µm)
+    #                        Combined with geometric Gaussian in the spatial domain.
+    #                        Slower but preserves the central lobe and first rings.
+    #
+    # Lateral CA: set lateral_ca_coefficient > 0 to add wavelength-dependent image
+    # magnification M(λ) = 1 + lca × (λ − λ_ref) / λ_ref (typical range 0.002–0.010).
+    # f_number and pixel_pitch_um are read from sensor.f_number / sensor.pixel_pitch_um
+    # unless overridden here.
     enabled: false
     mode: chromatic_gaussian
     sigma_pixels: 0.0                # used by 'gaussian' mode only
-    sigma_geometric_pixels: 0.5      # baseline geometric-aberration σ for 'chromatic_gaussian'
+    sigma_geometric_pixels: 0.5      # geometric-aberration σ (pixels) for chromatic_gaussian / airy_disk
+    lateral_ca_coefficient: 0.0      # 0 = no lateral CA; typical 0.002–0.010
+    lambda_reference_nm: 550.0       # reference wavelength for lateral CA (zero shift)
     # f_number: null                 # override sensor.f_number (null = use sensor value)
     # pixel_pitch_um: null           # override sensor.pixel_pitch_um (null = use sensor value)
     stray_light:
       enabled: false
-      veiling_glare_fraction: 0.01
-      halo_sigma_pixels: 15.0
-      halo_strength: 0.01
+      veiling_glare_fraction: 0.01   # uniform fog fraction
+      halo_sigma_pixels: 15.0        # wide Gaussian scatter σ (pixels)
+      halo_strength: 0.01            # halo energy fraction
+      ghost_reflections:
+        enabled: false
+        ghost_strength: 0.02         # fraction of image added as 180°-inverted ghost
+      aperture_diffraction:
+        enabled: false
+        n_blades: 6                  # iris blade count (5–9 typical)
+        strength: 0.05               # diffraction energy fraction
+        rotation_deg: 0.0            # aperture rotation (degrees)
+        psf_kernel_size: 128         # FFT aperture kernel size (pixels)
 model:
   name: default

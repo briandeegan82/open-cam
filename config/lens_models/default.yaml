@@ -17,6 +17,12 @@ lens:
   realistic_lensfile: null
   realistic_aperture_diameter_mm: null
   realistic_focus_distance: null
+  # focal_length_mm: the image-space focal length of the lens prescription (mm).
+  # Used to derive the effective f-number for radiance→irradiance conversion:
+  #   N_eff = focal_length_mm / realistic_aperture_diameter_mm
+  # Set this for every realistic-camera lens model; null triggers a fallback to
+  # sensor.f_number with a warning (less accurate for multi-element systems).
+  focal_length_mm: null
 
   # --- Post-render PSF (applied to spectral EXR before electron integration) ---
   # Two modes:

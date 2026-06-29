@@ -7,6 +7,7 @@ lens:
   realistic_lensfile: config/lenses/wide_22mm.dat
   realistic_aperture_diameter_mm: 7.9
   realistic_focus_distance: 1.0
+  focal_length_mm: 22.0  # wide_22mm.dat image-space focal length
   post_psf:
     enabled: false
     mode: chromatic_gaussian

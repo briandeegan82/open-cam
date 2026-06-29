@@ -20,7 +20,7 @@ except ModuleNotFoundError:  # pragma: no cover - import path variant for tests
 
 LEGACY_REALISTIC_LENSFILE = "scenes/lenses/wide_22mm.dat"
 DEFAULT_REALISTIC_LENSFILE = "config/lenses/wide_22mm.dat"
-DEFAULT_ILLUMINANT_CSV = "spectra/illuminant/interpolated/D55.csv"
+DEFAULT_ILLUMINANT_CSV = "spectra/illuminant/interpolated/D65.csv"
 
 
 def sha256_file(path: Path) -> str:
@@ -285,19 +285,31 @@ def main() -> None:
     log.append(run_cmd(pbrt_cmd, repo, args.dry_run))
 
     # 2b) Optional post-render PSF / MTF blur
+    # NOTE: post-PSF must NOT be applied when the PBRT camera is "realistic".
+    # The realistic camera already traces rays through the full multi-element lens
+    # system (vignetting, aberrations, chromatic blur) during rendering.  Applying
+    # a second Gaussian blur afterwards blurs the image twice.
     post = lens_cfg.get("post_psf") or {}
     if bool(post.get("enabled", False)):
-        psf_cmd = [
-            py,
-            str(psf_tool),
-            "--repo-root",
-            str(repo),
-            "--camera-model-config",
-            str(camera_model_cfg),
-            "--exr-in",
-            str(exr_out),
-        ]
-        log.append(run_cmd(psf_cmd, repo, args.dry_run))
+        if cam == "realistic":
+            print(
+                "warning: lens.post_psf.enabled is true but lens.camera is 'realistic' — "
+                "skipping post-render PSF because PBRT already traces through the lens "
+                "system. Set post_psf.enabled: false in the lens model to suppress this warning.",
+                file=sys.stderr,
+            )
+        else:
+            psf_cmd = [
+                py,
+                str(psf_tool),
+                "--repo-root",
+                str(repo),
+                "--camera-model-config",
+                str(camera_model_cfg),
+                "--exr-in",
+                str(exr_out),
+            ]
+            log.append(run_cmd(psf_cmd, repo, args.dry_run))
 
     # 3) Validate scene/render
     if bool(validate.get("enabled", True)):

@@ -5,6 +5,7 @@ lens:
   # f/8-equivalent on 22mm reduces edge aberrations and field variation.
   realistic_aperture_diameter_mm: 2.75
   realistic_focus_distance: 4.0
+  focal_length_mm: 22.0  # wide_22mm.dat image-space focal length
   post_psf:
     enabled: false
     mode: gaussian
