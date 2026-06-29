@@ -20,9 +20,13 @@ render:
   cam_dist: 4.0
   xres: 960
   yres: 640
-  # Keep Monte Carlo render noise sub-dominant to sensor/noise stages.
-  # For quick iteration, lower this (e.g. 64-256). For final runs, keep >=1024.
-  pixelsamples: 512
+  # Monte Carlo render noise after spectral integration scales as ~1.4%/sqrt(N/512)
+  # in electron space.  Rule of thumb vs shot noise at 300 e:
+  #   512   spp → ~1.4% electron CV → ~25% of shot noise  (fast iteration)
+  #   4096  spp → ~0.5% electron CV → ~9%  of shot noise  (default final)
+  #   16384 spp → ~0.25% electron CV → ~4%  of shot noise (archival quality)
+  # Render time at 512 spp ≈ 4 min → scales linearly with spp.
+  pixelsamples: 4096
   film: spectral
   film_output: null
   # 64 buckets → 7.3 nm/bucket over 360–830 nm. Sufficient for broad LED spectra and
