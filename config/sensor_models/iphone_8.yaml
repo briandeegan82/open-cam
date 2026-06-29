@@ -10,10 +10,9 @@ sensor:
 noise:
   emva:
     overall_system_gain_K_e_per_DN: 9.9062  # base ISO gain (full_well / usable_DN)
-    # ISO amplifier gain for simulation.  base-ISO (1.0) is too dark at 200 lux / 0.01 s.
-    # 45× ≈ ISO 900 (assuming base ISO ~20), which is a typical indoor operating point.
-    # Change to 1.0 to simulate maximum dynamic range (base ISO).
-    iso_gain_factor: 45.0
+    # Base ISO (gain_factor = 1.0): full_well_eff = 9500 e, K_eff = 9.906 e/DN.
+    # For higher-ISO simulation multiply by the desired gain (e.g. 45 ≈ ISO 900).
+    iso_gain_factor: 1.0
     sigma_d_e: 1.6
     black_level_DN: 64
     prnu_std_fraction: 0.018

@@ -63,7 +63,7 @@ strict_physical_accuracy:
   strict_qe_validation: false
   strict_calibration_validation: false
   calibration_tier_policy: semi_strict
-exposure_time_override_s: 0.003  # iPhone 8 @ ISO 45, f/2.51, 500 lux → ~180e on white patches
+exposure_time_override_s: 0.12   # iPhone 8 base ISO, f/2.51, 500 lux → ~6500e on white patches
 sensor_forward:
   mode: pbrt_exr
   enabled: true
