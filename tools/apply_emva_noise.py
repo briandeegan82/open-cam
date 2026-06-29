@@ -478,9 +478,11 @@ def _demosaic_rggb_malvar(raw: np.ndarray) -> np.ndarray:
     R_at_Gb = _conv(raw, K_R_at_Gb)
     R_at_B  = _conv(raw, K_R_at_B)
 
-    # B interpolation (mirrors R kernels by 90° symmetry).
-    K_B_at_Gb = K_R_at_Gr.T   # Gr↔Gb swap
-    K_B_at_Gr = K_R_at_Gb.T
+    # B interpolation: same directional emphasis as the mirror-symmetric R kernels.
+    # B at Gb (odd,even): nearest B are horizontal (odd,odd)±1 → same kernel as R at Gr.
+    # B at Gr (even,odd): nearest B are vertical (odd,odd)±1 row → same kernel as R at Gb.
+    K_B_at_Gb = K_R_at_Gr    # horizontal emphasis — no transpose
+    K_B_at_Gr = K_R_at_Gb    # vertical emphasis  — no transpose
     K_B_at_R  = K_R_at_B
     B_at_Gb = _conv(raw, K_B_at_Gb)
     B_at_Gr = _conv(raw, K_B_at_Gr)
