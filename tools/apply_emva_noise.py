@@ -1094,6 +1094,10 @@ def main() -> None:
     sigma_d_e = float(emva.get("sigma_d_e", 2.0))
     sigma_amp_e = float(emva.get("sigma_amp_e", 0.0))
     dsnu_std_e = float(emva.get("dsnu_std_e", 0.3))
+    # Per-pixel dark current rate variation (relative std of rates).  When set, the DSNU
+    # is computed as (per-pixel rate − mean rate) × t_int, so it scales correctly with
+    # exposure time and temperature.  Takes precedence over dsnu_std_e when non-zero.
+    dsnu_rate_std_fraction = float(emva.get("dsnu_rate_std_fraction", 0.0))
     prnu_std = float(emva.get("prnu_std_fraction", 0.005))
     prnu_std_r = float(emva.get("prnu_std_fraction_r", prnu_std))
     prnu_std_g = float(emva.get("prnu_std_fraction_g", prnu_std))
@@ -1322,12 +1326,16 @@ def main() -> None:
     # log-normal distribution can be correctly centred on it — ensuring that
     # dark_mean_e + dsnu_map[i] = D_i ≥ 0 for every pixel.
     if dark_activation_energy_eV > 0.0:
+        # Shockley-Read-Hall: J_dark ∝ T^1.5 × exp(−Ea / k_B T).
+        # The T^1.5 pre-exponential (intrinsic carrier concentration ∝ T^1.5) is
+        # significant: at 60 °C vs 20 °C it adds ~16% on top of the exponential.
         _K_B_EV = 8.617333262e-5
         _T_K  = dark_temp_c + 273.15
         _T0_K = dark_ref_temp_c + 273.15
-        dark_temp_scale = float(np.exp(
-            (dark_activation_energy_eV / _K_B_EV) * (1.0 / _T0_K - 1.0 / _T_K)
-        ))
+        dark_temp_scale = float(
+            (_T_K / _T0_K) ** 1.5
+            * np.exp((dark_activation_energy_eV / _K_B_EV) * (1.0 / _T0_K - 1.0 / _T_K))
+        )
     else:
         dark_temp_scale = 2.0 ** ((dark_temp_c - dark_ref_temp_c) / max(1e-6, dark_doubling_c))
     dark_mean_e = max(0.0, dark_current_e_per_s * t_int_s * dark_temp_scale)
@@ -1374,12 +1382,33 @@ def main() -> None:
 
     # DSNU: per-pixel absolute dark-current variation follows a log-normal distribution.
     # Dark current arises from trap-mediated generation: most pixels are near the mean,
-    # a long positive tail represents sites with elevated leakage.
-    # The log-normal mean is dark_mean_e (computed above from dark_current_e_per_s × t_int),
-    # ensuring dark_mean_e + dsnu_map[i] = D_i ≥ 0 for every pixel — consistent with the
-    # global mean used in the Poisson draw.  dsnu_std_e is the absolute spatial std (electrons).
-    # When dark_mean_e ≈ 0 (very short exposure / low dark current) dsnu_map is all-zeros.
-    if dark_mean_e > 1e-9 and dsnu_std_e > 0.0:
+    # DSNU: per-pixel dark-signal non-uniformity.
+    # Models the spatial variation in individual pixel dark current rates.
+    # The absolute dark signal per pixel D_i = rate_i × t_int is log-normally
+    # distributed (long positive tail for elevated-leakage "hot" pixels), so
+    # dsnu_map[i] = D_i − dark_mean_e is the signed offset from the global mean.
+    #
+    # Two parameterisations are supported:
+    #   dsnu_rate_std_fraction  (preferred): coefficient of variation of per-pixel
+    #     dark current *rates* (dimensionless).  DSNU scales with t_int and
+    #     temperature automatically: dsnu_e = rate_i × t_int × dark_temp_scale.
+    #   dsnu_std_e (legacy): absolute DSNU std in electrons at the measurement
+    #     condition.  _v_ratio = dsnu_std_e / dark_mean_e gives an implied CV;
+    #     when dark_mean_e ≈ 0 (short exposure) the lognormal is ill-conditioned,
+    #     so dsnu_map is zeroed in that regime.
+    if dsnu_rate_std_fraction > 0.0 and dark_current_e_per_s > 0.0:
+        # Preferred path: per-pixel rates drawn from lognormal, DSNU = (rate_i − mean_rate) × t_int.
+        _mean_rate = dark_current_e_per_s * dark_temp_scale  # e/s, temperature-corrected
+        _sigma_ln_rate = float(np.sqrt(np.log1p(dsnu_rate_std_fraction ** 2)))
+        _mu_ln_rate = np.log(_mean_rate) - 0.5 * _sigma_ln_rate ** 2
+        _sp_shape = signal_e.shape if signal_e.ndim == 2 else signal_e.shape[:2]
+        _rate_map = spatial_rng.lognormal(_mu_ln_rate, _sigma_ln_rate, size=_sp_shape).astype(np.float64)
+        _dsnu_e_map = (_rate_map - _mean_rate) * t_int_s  # scale by t_int
+        if signal_e.ndim == 2:
+            dsnu_map = _dsnu_e_map.astype(np.float32)
+        else:
+            dsnu_map = _dsnu_e_map[:, :, None].astype(np.float32)
+    elif dark_mean_e > 1e-9 and dsnu_std_e > 0.0:
         _v_ratio = dsnu_std_e / dark_mean_e
         _sigma_ln = float(np.sqrt(np.log1p(_v_ratio ** 2)))
         _mu_ln = np.log(dark_mean_e) - 0.5 * _sigma_ln ** 2
@@ -1442,12 +1471,16 @@ def main() -> None:
         _Q_E   = 1.602176634e-19    # elementary charge [C]
         _T_K   = dark_temp_c + 273.15
         if "node_capacitance_fF" in ktc_cfg:
+            # Preferred: directly measured sense-node capacitance.
             _C = float(ktc_cfg["node_capacitance_fF"]) * 1e-15  # fF → F
         else:
-            # Estimate C from conversion gain assuming a supply reference voltage.
-            # C = q · K[e/DN] · 2^bits / V_ref
+            # Derive C from the conversion gain (electrons per volt) using the
+            # relationship C = q / CVF where CVF [V/e] = K_e_per_DN / DN_per_V.
+            # DN_per_V = (2^bits − 1) / V_swing.  V_swing ≈ V_ref for rail-to-rail ADC.
+            # Therefore: C = q × K_e_per_DN × (2^bits − 1) / V_ref
+            # (corrected from the previous 2^bits approximation).
             _vref = float(ktc_cfg.get("vref_V", 1.8))
-            _C = K_e_per_DN * _Q_E * float(2 ** bit_depth) / _vref
+            _C = K_e_per_DN * _Q_E * float((1 << bit_depth) - 1) / _vref
         sigma_ktc_e = float(np.sqrt(_K_B_J * _T_K * _C) / _Q_E)
 
     # ---- Additive Gaussian readout noise (post-Poisson, includes kTC when enabled) ----
@@ -1471,7 +1504,13 @@ def main() -> None:
         bow = x * (1.0 - x)
         dn_noisy = np.clip(dn_noisy + (adc_inl_quad_fraction * max_dn) * bow, 0.0, max_dn)
     if adc_dnl_std_lsb > 0.0:
-        dn_noisy = np.clip(dn_noisy + rng.normal(0.0, adc_dnl_std_lsb, size=dn_noisy.shape), 0.0, max_dn)
+        # ADC DNL is a FIXED per-bin non-linearity (not temporal noise): every read of the
+        # same DN code produces the same offset.  Generate a fixed offset table from
+        # spatial_rng (seeded per camera unit) and look up the bin for each pixel.
+        _n_bins = int(max_dn) + 1
+        _dnl_table = spatial_rng.normal(0.0, adc_dnl_std_lsb, size=_n_bins).astype(np.float32)
+        _bin_idx = np.clip(np.rint(dn_noisy).astype(np.int32), 0, _n_bins - 1)
+        dn_noisy = np.clip(dn_noisy + _dnl_table[_bin_idx], 0.0, max_dn)
 
     if bayer_on:
         raw_u16 = np.rint(dn_noisy).astype(np.uint16)
@@ -1612,17 +1651,20 @@ def main() -> None:
         "dark_current_e_per_s": dark_current_e_per_s,
         "dark_current_reference_temp_c": dark_ref_temp_c,
         "temperature_c": dark_temp_c,
-        "dark_current_model": "arrhenius" if dark_activation_energy_eV > 0.0 else "doubling_rule",
+        "dark_current_model": "arrhenius_T1.5" if dark_activation_energy_eV > 0.0 else "doubling_rule",
         "dark_activation_energy_eV": dark_activation_energy_eV if dark_activation_energy_eV > 0.0 else None,
         "dark_current_doubling_per_c": dark_doubling_c,
         "dark_temp_scale": dark_temp_scale,
         "dark_mean_e_per_pixel": dark_mean_e,
+        "dsnu_parameterisation": "rate_std_fraction" if dsnu_rate_std_fraction > 0.0 else "absolute_std_e",
+        "dsnu_rate_std_fraction": dsnu_rate_std_fraction if dsnu_rate_std_fraction > 0.0 else None,
         "row_fpn_std_e": row_fpn_std_e,
         "column_fpn_std_e": col_fpn_std_e,
         "ktc_noise_enabled": ktc_enabled,
         "sigma_ktc_e": sigma_ktc_e if ktc_enabled else None,
         "adc_inl_quadratic_fraction": adc_inl_quad_fraction,
         "adc_dnl_std_lsb": adc_dnl_std_lsb,
+        "adc_dnl_model": "fixed_per_bin_map" if adc_dnl_std_lsb > 0.0 else None,
         "adc_clipping": adc_clipping,
         "defect_pixels": defect_stats,
         "preview_no_normalize": preview_no_normalize,

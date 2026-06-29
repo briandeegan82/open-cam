@@ -17,11 +17,26 @@ noise:
     black_level_DN: 16
     use_poisson_shot_noise: true
     prnu_std_fraction: 0.01
-    # DSNU: per-pixel dark-current spatial variation (electrons).
-    # The log-normal distribution is centred on dark_mean_e = dark_current_e_per_s × t_int,
-    # so dsnu_std_e expresses the absolute spread around that mean.  At very short exposures
-    # (dark_mean_e ≈ 0) the DSNU map approaches zero automatically.
+    # DSNU: per-pixel dark-current spatial variation.
+    # Two parameterisations — set one, not both:
+    #
+    #   dsnu_rate_std_fraction  (preferred): coefficient of variation of per-pixel
+    #     dark current rates (dimensionless).  DSNU = (rate_i − mean_rate) × t_int
+    #     so it scales correctly with exposure time and temperature.  Typical: 0.1–0.5.
+    #
+    #   dsnu_std_e (legacy): absolute spatial std in electrons at the EMVA measurement
+    #     condition.  Does NOT scale with t_int; use only when quoting a datasheet value.
+    #
+    # When dsnu_rate_std_fraction > 0 it takes precedence over dsnu_std_e.
     dsnu_std_e: 0.3
+    dsnu_rate_std_fraction: 0.0       # set to e.g. 0.2 to use the rate-based model
+    # Dark current temperature scaling.
+    # Two models — select via dark_activation_energy_eV:
+    #   0.0  → simple doubling rule: I(T) = I_ref × 2^((T − T_ref) / doubling_per_C)
+    #   >0.0 → Shockley-Read-Hall Arrhenius with T^1.5 pre-exponential:
+    #           I(T) = I_ref × (T/T_ref)^1.5 × exp(Ea/k_B × (1/T_ref − 1/T))
+    #           Typical CMOS: Ea ≈ 0.55–0.70 eV (generation-dominated dark current).
+    dark_activation_energy_eV: 0.0   # set to e.g. 0.63 to enable Arrhenius+T^1.5
     # ISO amplifier gain relative to base ISO.
     # At base ISO (iso_gain_factor: 1.0) K_eff = K_base and full_well_eff = full_well_base.
     # At higher ISO (iso_gain_factor > 1.0):
@@ -54,6 +69,9 @@ noise:
     full_well_e: 4800
     clipping: hard
     inl_quadratic_fraction: 0.0
+    # ADC differential non-linearity: fixed per-bin offset (same every frame from the
+    # same camera unit — drawn from spatial_rng, not the temporal frame RNG).
+    # Models code-width variation in the ADC comparator ladder.  Typical: 0.3–0.8 LSB.
     dnl_std_lsb: 0.0
   processing:
     auto_exposure: false
