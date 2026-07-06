@@ -43,13 +43,16 @@ Project usage notes
 
 Pipeline GPU toggle
 -------------------
-`tools/run_pipeline.py` can add wavefront mode automatically from pipeline YAML:
+`tools/run_pipeline.py` can enable GPU rendering automatically from pipeline YAML:
 
   render:
     gpu_enabled: true
     pbrt_args: ["--stats"]
 
-When `gpu_enabled` is true, the pipeline injects `--wavefront` into the pbrt
-command unless it is already present in `render.pbrt_args`.
+When `gpu_enabled` is true, the pipeline injects `--gpu` into the pbrt command
+unless it is already present in `render.pbrt_args`. `--gpu` selects pbrt's OptiX
+GPU wavefront renderer and requires a pbrt binary built with OptiX support (a
+CPU-only build will reject `--gpu`). Note: `--wavefront` alone runs the wavefront
+integrator on the CPU and does not use the GPU.
 
 Reference: https://pbrt.org/fileformat-v4.html

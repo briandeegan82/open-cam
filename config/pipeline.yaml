@@ -40,10 +40,14 @@ render:
   # Example: spectra/illuminant/interpolated/D65.csv
   illuminant: spectra/illuminant/interpolated/D65.csv
   builder_extra_args: []
-  # GPU render path (PBRT wavefront). Requires a GPU-enabled PBRT build.
+  # GPU render path. When true, the pipeline injects --gpu (pbrt's OptiX GPU
+  # wavefront renderer), which accelerates the dominant render stage. Requires a
+  # pbrt binary built with OptiX support (see docs/guides/building_pbrt.md,
+  # Step 3). NOTE: --wavefront alone runs on the CPU and does NOT use the GPU.
+  # Keep this false until the OptiX-enabled pbrt build exists; then set true.
   gpu_enabled: true
-  # Extra PBRT render CLI args, e.g. ["--stats"] or ["--wavefront", "--stats"].
-  # If gpu_enabled=true, --wavefront is injected automatically unless already present.
+  # Extra PBRT render CLI args, e.g. ["--stats"]. --gpu is injected automatically
+  # when gpu_enabled: true (unless already present here).
   pbrt_args: ["--stats"]
 validate:
   enabled: true

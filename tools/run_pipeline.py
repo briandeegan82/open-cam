@@ -63,8 +63,12 @@ def parse_render_pbrt_args(render: dict) -> list[str]:
     if not isinstance(pbrt_args, list):
         raise TypeError("render.pbrt_args must be a YAML list of CLI tokens")
     args = [str(tok) for tok in pbrt_args]
-    if gpu_enabled and "--wavefront" not in args:
-        args = ["--wavefront", *args]
+    # GPU rendering in pbrt-v4 is selected with --gpu, which runs the OptiX
+    # wavefront path on the GPU. NOTE: --wavefront alone runs the wavefront
+    # integrator on the CPU and does NOT use the GPU. Requires a pbrt binary
+    # built with OptiX support (see docs/guides/building_pbrt.md, Step 3).
+    if gpu_enabled and "--gpu" not in args:
+        args = ["--gpu", *args]
     return args
 
 
