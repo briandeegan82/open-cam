@@ -151,6 +151,10 @@ render:
 
 When `gpu_enabled: true`, `run_pipeline.py` automatically prepends `--gpu` to the PBRT command (unless it is already in `pbrt_args`), selecting pbrt's OptiX GPU wavefront renderer. This requires a pbrt binary built with OptiX (Step 3); a CPU-only build will reject `--gpu`.
 
+> For what actually differs between the CPU and GPU renderers — spectral
+> accuracy parity, feature limitations, and the integrator override under
+> `--gpu` — see [GPU vs CPU Rendering](gpu_vs_cpu_rendering.md).
+
 ---
 
 ## Building Scene Files
