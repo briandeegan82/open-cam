@@ -311,7 +311,70 @@ def to_png8_preview(
     return np.rint(scaled * 255.0).astype(np.uint8)
 
 
+def to_png16_preview(
+    rgb_dn: np.ndarray,
+    bit_depth: int,
+    black_dn: float,
+    white_dn: float | None = None,
+    *,
+    srgb: bool = False,
+) -> np.ndarray:
+    """16-bit sibling of :func:`to_png8_preview`.
+
+    Uses the same [black_dn, white_dn] -> [0, 1] linear stretch, then quantises to
+    16-bit.  ``srgb`` defaults to False so this emits *linear* (no gamma) data, for
+    which 16-bit avoids the shadow banding that linear light suffers in 8-bit.
+    """
+    max_dn = float((1 << bit_depth) - 1)
+    hi = float(white_dn) if white_dn is not None else max_dn
+    hi = min(max_dn, max(black_dn + 1.0, hi))
+    scaled = (rgb_dn - black_dn) / (hi - black_dn)
+    scaled = np.clip(scaled, 0.0, 1.0)
+    if srgb:
+        scaled = linear_to_srgb(scaled)
+    return np.rint(scaled * 65535.0).astype(np.uint16)
+
+
+def _write_png16_rgb(path: Path, arr: np.ndarray) -> None:
+    """Write an HxWx3 uint16 array as a 16-bit RGB PNG.
+
+    Pillow (imageio's default backend) cannot encode 16-bit multi-channel PNGs,
+    so we emit the file directly with a minimal, dependency-free encoder
+    (color type 2, bit depth 16, single zlib IDAT, no per-row prediction).
+    """
+    import struct
+    import zlib
+
+    a = np.ascontiguousarray(np.asarray(arr, dtype=">u2"))  # big-endian (PNG byte order)
+    h, w, c = a.shape
+    if c != 3:
+        raise ValueError(f"_write_png16_rgb expects 3 channels, got {c}")
+    raw = np.zeros((h, 1 + w * c * 2), dtype=np.uint8)  # leading 0 = filter type None
+    raw[:, 1:] = a.reshape(h, w * c).view(np.uint8)
+
+    def _chunk(tag: bytes, data: bytes) -> bytes:
+        return (
+            struct.pack(">I", len(data))
+            + tag
+            + data
+            + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+        )
+
+    ihdr = struct.pack(">IIBBBBB", w, h, 16, 2, 0, 0, 0)
+    png = (
+        b"\x89PNG\r\n\x1a\n"
+        + _chunk(b"IHDR", ihdr)
+        + _chunk(b"IDAT", zlib.compress(raw.tobytes(), 9))
+        + _chunk(b"IEND", b"")
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(png)
+
+
 def write_png(path: Path, arr: np.ndarray) -> None:
+    if arr.dtype == np.uint16 and arr.ndim == 3 and arr.shape[2] == 3:
+        _write_png16_rgb(path, arr)
+        return
     try:
         import imageio.v3 as iio
     except ImportError as exc:
@@ -1049,6 +1112,12 @@ def main() -> None:
         action="store_true",
         help="Regenerate and overwrite persistent defect-pixel map when configured.",
     )
+    ap.add_argument(
+        "--emit-demosaic-linear16",
+        action="store_true",
+        help="Also write linear (no-gamma) 16-bit demosaiced previews "
+        "(clean/noisy_demosaic_linear_rgb16.png) alongside the 8-bit sRGB previews.",
+    )
     args = ap.parse_args()
 
     repo = args.repo_root.resolve()
@@ -1693,6 +1762,29 @@ def main() -> None:
                 srgb=demosaic_srgb,
             ),
         )
+        if args.emit_demosaic_linear16:
+            # Same [black, white] stretch as the sRGB previews above, but linear
+            # (no gamma) and 16-bit so shadow detail is preserved.
+            write_png(
+                png_dir / "clean_demosaic_linear_rgb16.png",
+                to_png16_preview(
+                    dn_clean_rgb,
+                    bit_depth,
+                    black_dn=black_dn,
+                    white_dn=pw_d_clean,
+                    srgb=False,
+                ),
+            )
+            write_png(
+                png_dir / "noisy_demosaic_linear_rgb16.png",
+                to_png16_preview(
+                    dn_noisy_rgb,
+                    bit_depth,
+                    black_dn=black_dn,
+                    white_dn=pw_d_noisy,
+                    srgb=False,
+                ),
+            )
 
     stats = {
         "config": str(cfg_path),
@@ -1751,8 +1843,11 @@ def main() -> None:
         "preview_white_dn_value_noisy": preview_white_noisy,
         "bayer_enabled": bayer_on,
         "bayer_pattern": bayer_pat if bayer_on else None,
-        "demosaic": ("bilinear" if demosaic_on else None),
+        "demosaic": (demosaic_alg if demosaic_on else None),
         "demosaic_srgb_preview": bool(demosaic_srgb) if demosaic_on else None,
+        "demosaic_linear16_emitted": (
+            bool(args.emit_demosaic_linear16) if demosaic_on else None
+        ),
     }
     if bayer_on:
         stats["signal_e_mean_mono"] = float(np.mean(signal_e))

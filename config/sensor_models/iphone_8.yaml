@@ -26,6 +26,9 @@ noise:
   adc:
     full_well_e: 9500
 cfa:
+  # Override the sensor-default demosaic (malvar) so the recipe/full-model paths
+  # agree: bilinear everywhere for this sensor.
+  demosaic: bilinear
   spatial_crosstalk:
     enabled: true
 validation:

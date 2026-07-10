@@ -114,6 +114,17 @@ def main() -> None:
     )
     ap.add_argument("--dry-run", action="store_true", help="Print commands only; do not execute.")
     ap.add_argument("--name", type=str, default=None, help="Optional run name for manifest filename.")
+    ap.add_argument(
+        "--skip-render",
+        action="store_true",
+        help="Reuse the existing rendered EXR (paths.exr_out) and skip the pbrt render "
+        "and post-render PSF blur. Fails if the EXR is missing.",
+    )
+    ap.add_argument(
+        "--emit-demosaic-linear16",
+        action="store_true",
+        help="Pass through to the noise step: also write linear 16-bit demosaiced previews.",
+    )
     args = ap.parse_args()
 
     repo = args.repo_root.resolve()
@@ -285,8 +296,15 @@ def main() -> None:
     log.append(run_cmd(build_cmd, repo, args.dry_run))
 
     # 2) Render with pbrt
-    pbrt_cmd = [str(pbrt_bin), *parse_render_pbrt_args(render), str(scene_file)]
-    log.append(run_cmd(pbrt_cmd, repo, args.dry_run))
+    if args.skip_render:
+        if not args.dry_run and not exr_out.is_file():
+            raise FileNotFoundError(
+                f"--skip-render given but rendered EXR is missing: {exr_out}"
+            )
+        print(f"skip-render: reusing existing EXR {exr_out}", flush=True)
+    else:
+        pbrt_cmd = [str(pbrt_bin), *parse_render_pbrt_args(render), str(scene_file)]
+        log.append(run_cmd(pbrt_cmd, repo, args.dry_run))
 
     # 2b) Optional post-render PSF / MTF blur
     # NOTE: post-PSF must NOT be applied when the PBRT camera is "realistic".
@@ -294,7 +312,7 @@ def main() -> None:
     # system (vignetting, aberrations, chromatic blur) during rendering.  Applying
     # a second Gaussian blur afterwards blurs the image twice.
     post = lens_cfg.get("post_psf") or {}
-    if bool(post.get("enabled", False)):
+    if bool(post.get("enabled", False)) and not args.skip_render:
         if cam == "realistic":
             print(
                 "warning: lens.post_psf.enabled is true but lens.camera is 'realistic' — "
@@ -413,6 +431,8 @@ def main() -> None:
             noise_cmd.extend(["--integration-time-s", str(integration_time_override_s)])
         if strict_qe_validation:
             noise_cmd.append("--strict-qe-validation")
+        if args.emit_demosaic_linear16:
+            noise_cmd.append("--emit-demosaic-linear16")
         log.append(run_cmd(noise_cmd, repo, args.dry_run))
 
     # 5) Validate Bayer+demosaic linear fidelity (optional)
