@@ -2,10 +2,11 @@
 """Generate Munsell patches for three-protocol iPhone 8 dataset.
 
 Protocols: 1000lux_1x, 100lux_2x, 20lux_8x
-Illuminants: A (2856K), D65, CWF
+Illuminants: CWF (CIE F2), A (2856K)
 Lux levels: med (200 lux) for each protocol's base illuminance
 
-Outputs under out/dataset_dual/munsell/
+Outputs under out/dataset_dual/munsell/ (illuminant subfolders alongside any
+existing D65 run).
 """
 from __future__ import annotations
 
@@ -49,7 +50,8 @@ PROTOCOLS = {
 }
 
 ILLUMINANTS = {
-    "D65": "spectra/illuminant/interpolated/D65.csv",
+    "CWF": "spectra/illuminant/interpolated/F2_CWF.csv",  # CIE F2 cool white fluorescent
+    "A": "spectra/illuminant/interpolated/A.csv",          # CIE A ~2856K incandescent
 }
 
 # Illuminance for sensor forward (use protocol's base illuminance)
