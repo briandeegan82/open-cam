@@ -96,6 +96,10 @@ BUILD_CMD=(
   --repo-root "${REPO_DIR}"
   --out-dir "${MUNSELL_OUT_DIR}"
   --illuminant "${RENDER_ILLUMINANT_REL}"
+  --pixelsamples "${PIXELSAMPLES}"
+  --spectral-nbuckets "${SPECTRAL_NBUCKETS}"
+  --spectral-lambda-min "${SPECTRAL_LAMBDA_MIN}"
+  --spectral-lambda-max "${SPECTRAL_LAMBDA_MAX}"
 )
 if [[ -n "${MUNSELL_BUILD_ARGS}" ]]; then
   read -r -a EXTRA_ARGS <<< "${MUNSELL_BUILD_ARGS}"
