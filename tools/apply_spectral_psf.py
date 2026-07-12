@@ -296,6 +296,13 @@ def _aperture_diffraction_psf(n_blades: int, size: int, rotation_deg: float = 0.
     mask = _n_polygon_mask(n_blades, size, rotation_deg)
     fft_mask = np.fft.fft2(mask)
     psf = np.abs(np.fft.fftshift(fft_mask)) ** 2
+    # Taper to zero at the kernel boundary: the pattern is truncated at the
+    # array edge, and without a window the residual energy there stamps a
+    # visible square outline around bright sources after convolution.
+    yy, xx = np.meshgrid(np.linspace(-1, 1, size), np.linspace(-1, 1, size), indexing="ij")
+    r = np.sqrt(xx * xx + yy * yy)
+    taper = 0.5 * (1.0 + np.cos(np.pi * np.clip((r - 0.7) / 0.3, 0.0, 1.0)))
+    psf *= taper
     psf /= psf.sum()
     return psf.astype(np.float64)
 
