@@ -1,0 +1,36 @@
+# Registry of downloadable CC0 car assets for highway scenes.
+#
+# Fetched by tools/fetch_highway_assets.py into scenes/assets/cars/<model>/
+# (gitignored). URLs carry a content hash that changes when the pack is
+# updated upstream; if the pinned URL 404s the fetcher re-scrapes
+# fallback_page for the current .zip link and reports the new sha256.
+
+packs:
+  kenney_car_kit:
+    url: "https://kenney.nl/media/pages/assets/car-kit/1a312ec241-1775131960/kenney_car-kit.zip"
+    fallback_page: "https://kenney.nl/assets/car-kit"
+    sha256: "fac7dacac5c7874348cf19729af3ef205f3d366493edaf0a827d93f4fdf3d0c4"
+    license: "CC0 1.0 (kenney.nl)"
+    obj_dir: "Models/OBJ format"
+
+# Real-world lengths drive uniform scaling of the source mesh.
+# forward: source axis the vehicle faces; normalized to -Z (scene forward).
+models:
+  sedan:     {pack: kenney_car_kit, obj: sedan.obj,            length_m: 4.5, forward: "+z"}
+  sedan_sports: {pack: kenney_car_kit, obj: sedan-sports.obj,  length_m: 4.4, forward: "+z"}
+  hatchback: {pack: kenney_car_kit, obj: hatchback-sports.obj, length_m: 4.2, forward: "+z"}
+  suv:       {pack: kenney_car_kit, obj: suv.obj,              length_m: 4.7, forward: "+z"}
+  suv_luxury: {pack: kenney_car_kit, obj: suv-luxury.obj,      length_m: 4.9, forward: "+z"}
+  van:       {pack: kenney_car_kit, obj: van.obj,              length_m: 5.0, forward: "+z"}
+  truck:     {pack: kenney_car_kit, obj: truck.obj,            length_m: 6.0, forward: "+z"}
+  delivery:  {pack: kenney_car_kit, obj: delivery.obj,         length_m: 5.5, forward: "+z"}
+  taxi:      {pack: kenney_car_kit, obj: taxi.obj,             length_m: 4.5, forward: "+z"}
+  police:    {pack: kenney_car_kit, obj: police.obj,           length_m: 4.6, forward: "+z"}
+
+# Glob patterns matched (case-insensitive) against OBJ group (g) and material
+# (usemtl) names, in slot order below; first match wins, paint is the fallback.
+slot_map:
+  tire:  ["wheel*", "*tire*", "*tyre*"]
+  glass: ["*glass*", "*window*"]
+  trim:  ["*bumper*", "*trim*", "*chrome*"]
+  paint: ["*"]

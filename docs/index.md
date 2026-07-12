@@ -31,6 +31,7 @@ Step-by-step instructions for installation, configuration, and use.
 | [Pipeline Config](guides/pipeline_config.md) | Complete `pipeline.yaml` key reference |
 | [Camera Models](guides/camera_models.md) | YAML schema, inheritance, adding new cameras |
 | [Lens Models](guides/lens_models.md) | Lens prescriptions, PBRT realistic lenses, assignment rules |
+| [Highway Scenes](guides/highway_scenes.md) | Autonomous-driving highway scene generator: road, cars, signs, sun+sky |
 | [Tools Reference](guides/tools_reference.md) | CLI reference for every script in `tools/` |
 | [Validation](guides/validation.md) | EMVA, PTC, demosaic validation — interpreting outputs |
 
