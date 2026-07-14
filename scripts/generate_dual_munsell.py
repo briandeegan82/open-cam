@@ -95,55 +95,84 @@ def copy_if(src: Path, dst: Path):
     return False
 
 
+# Filenames apply_emva_noise.py writes into the shared out/colorchecker_noisy_png/
+# intermediate dir. Must be removed before each hue's run so that a tool invocation
+# which fails to regenerate one of these (e.g. --emit-demosaic-linear16 omitted)
+# leaves the destination copy missing instead of silently reusing a stale file
+# left over from a previous hue/protocol/illuminant.
+INTERMEDIATE_OUTPUTS = [
+    "clean_demosaic_rgb8.png",
+    "noisy_demosaic_rgb8.png",
+    "clean_demosaic_linear_rgb16.png",
+    "noisy_demosaic_linear_rgb16.png",
+    "noisy_rgb8.png",
+    "clean_rgb8.png",
+    "noisy_mono_16.png",
+    "run_stats.json",
+]
+
+
+def clean_intermediate(png_dir: Path) -> None:
+    for name in INTERMEDIATE_OUTPUTS:
+        (png_dir / name).unlink(missing_ok=True)
+
+
 def generate_munsell(protocols, illuminants, hues, spp, xres, yres,
                      skip_render=False, emit_linear16=False):
-    """Generate Munsell patches for each protocol and illuminant."""
+    """Generate Munsell patches for each protocol and illuminant.
+
+    The render (pbrt scene + EXR) only depends on the illuminant, not the
+    protocol's exposure/gain, so illuminant is the outer loop: each hue is
+    rendered once per illuminant and its EXR is reused for every protocol's
+    (fast, CPU-only) sensor-forward + noise pass.
+    """
     print("\n==== MUNSELL PATCHES ====", flush=True)
     scene_root = REPO / "scenes/generated/munsell"
     cam_dist = DEFAULT_FRAMING["munsell"]
     lensfile, aperture = cam_lens(REPO / "config/camera_recipes/iphone_8.yaml")
 
-    for proto_name, protocol in protocols.items():
-        camera_cfg = make_camera_model_config(proto_name, protocol)
+    for ilabel, icsv in illuminants.items():
+        print(f"\n== Illuminant: {ilabel} ==", flush=True)
+        if not skip_render:
+            if scene_root.exists():
+                shutil.rmtree(scene_root)
 
-        for ilabel, icsv in illuminants.items():
+            # Build Munsell scene
+            run([PY, "tools/build_munsell_scenes.py",
+                 "--repo-root", str(REPO),
+                 "--out-dir", "scenes/generated/munsell",
+                 "--illuminant", icsv,
+                 "--hues", hues,
+                 "--camera", "realistic",
+                 "--lensfile", lensfile,
+                 "--aperture-diameter-mm", str(aperture),
+                 "--focus-distance", str(cam_dist),
+                 "--cam-dist", str(cam_dist),
+                 "--xres", str(xres),
+                 "--yres", str(yres),
+                 "--pixelsamples", str(spp),
+                 "--film", "spectral",
+                 "--spectral-nbuckets", "64",
+                 "--spectral-lambda-min", "360",
+                 "--spectral-lambda-max", "830"])
+
+        scenes = sorted(scene_root.glob("*/munsell_*.pbrt"))
+        if not scenes:
+            msg = ("no existing scenes found under scenes/generated/munsell"
+                   if skip_render else f"no scenes generated for {ilabel}")
+            print(f"  !! {msg}; skipping", flush=True)
+            continue
+
+        # Render with pbrt (reuse existing EXRs when --skip-render)
+        if not skip_render:
+            for sc in scenes:
+                run([PBRT, "--gpu", str(sc)])
+        else:
+            print(f"  skip-render: reusing {len(scenes)} existing EXRs", flush=True)
+
+        for proto_name, protocol in protocols.items():
             print(f"\n-- {proto_name} / {ilabel} --", flush=True)
-            if not skip_render:
-                if scene_root.exists():
-                    shutil.rmtree(scene_root)
-
-                # Build Munsell scene
-                run([PY, "tools/build_munsell_scenes.py",
-                     "--repo-root", str(REPO),
-                     "--out-dir", "scenes/generated/munsell",
-                     "--illuminant", icsv,
-                     "--hues", hues,
-                     "--camera", "realistic",
-                     "--lensfile", lensfile,
-                     "--aperture-diameter-mm", str(aperture),
-                     "--focus-distance", str(cam_dist),
-                     "--cam-dist", str(cam_dist),
-                     "--xres", str(xres),
-                     "--yres", str(yres),
-                     "--pixelsamples", str(spp),
-                     "--film", "spectral",
-                     "--spectral-nbuckets", "64",
-                     "--spectral-lambda-min", "360",
-                     "--spectral-lambda-max", "830"])
-
-            scenes = sorted(scene_root.glob("*/munsell_*.pbrt"))
-            if not scenes:
-                msg = ("no existing scenes found under scenes/generated/munsell"
-                       if skip_render else f"no scenes generated for {ilabel}")
-                print(f"  !! {msg}; skipping", flush=True)
-                continue
-
-            # Render with pbrt (reuse existing EXRs when --skip-render)
-            if not skip_render:
-                for sc in scenes:
-                    run([PBRT, "--gpu", str(sc)])
-            else:
-                print(f"  skip-render: reusing {len(scenes)} existing EXRs", flush=True)
+            camera_cfg = make_camera_model_config(proto_name, protocol)
 
             # Apply sensor model
             for sc in scenes:
@@ -168,6 +197,7 @@ def generate_munsell(protocols, illuminants, hues, spp, xres, yres,
                      "--scene-manifest-json", str(manifest)], quiet=True)
 
                 # Apply noise
+                clean_intermediate(REPO / "out/colorchecker_noisy_png")
                 noise_cmd = [PY, "tools/apply_emva_noise.py",
                              "--repo-root", str(REPO),
                              "--camera-model-config", str(camera_cfg),
