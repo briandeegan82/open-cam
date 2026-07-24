@@ -118,7 +118,7 @@ render noise below sensor noise (256+ spp recommended).
 ## How the open-cam pipeline invokes PBRT
 
 The dataset generators invoke PBRT on the GPU
-(`scripts/generate_dataset.py:141`, `scripts/generate_dual_munsell.py:142`):
+(`scripts/generate_dataset.py:141`, `scripts/generate_dual_munsell.py:199`):
 
 ```
 pbrt --gpu <scene>.pbrt

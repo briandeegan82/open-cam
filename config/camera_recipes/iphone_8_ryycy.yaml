@@ -1,0 +1,11 @@
+schema_version: 1
+model:
+  name: iphone_8_ryycy
+  display_name: iPhone 8 (RYYCy CFA)
+lens_model: phone_wide_f18
+sensor_model: iphone_8_ryycy
+source:
+  qe_variant: iphone_8_ryycy
+  qe_variant_note: 'RYYCy approximated as RGB channels: R, Y->G, Cy->B'
+  sensor_class: phone
+  calibration_tier: inferred

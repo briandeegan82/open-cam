@@ -1,0 +1,80 @@
+# Delta from config/sensor_models/default.yaml — only overrides are listed.
+#
+# iPhone 8 sensor electronics with an RYYCy colour filter array instead of Bayer RGGB.
+# Every electrical/optical parameter is copied from config/sensor_models/iphone_8.yaml
+# so that a dataset rendered with this model differs from the iPhone 8 Bayer model in
+# the CFA alone.
+#
+# RYYCy is mapped onto the pipeline's three-channel + 2x2-pattern architecture exactly
+# as config/sensor_models/default_ryycy.yaml does: R -> red slot, Y -> green slot (two
+# sites per 2x2 tile, like G in Bayer), Cy -> blue slot.  RYYCy is structurally a Bayer
+# mosaic, so the GBRG pattern inherited from the default sensor model is correct.
+schema_version: 1
+sensor:
+  quantum_efficiency:
+    # Generic complementary-filter curves, NOT the measured iPhone 8 curves: there is no
+    # yellow/cyan measurement for this device.  All three come from spectra/QE/interpolated
+    # so the channels share one measurement basis (mixing the measured iPhone 8 red with
+    # generic Y/Cy would combine two normalisations).
+    red_csv: spectra/QE/interpolated/QE_red.csv
+    green_csv: spectra/QE/interpolated/QE_yellow.csv
+    blue_csv: spectra/QE/interpolated/QE_cyan.csv
+    # ircf_csv deliberately NOT overridden -> inherits the default QE_IRCF.csv.
+    # config/sensor_models/iphone_8.yaml sets ircf_csv: null because its measured curves
+    # are full-system sensitivities that already include the IRCF.  These interpolated
+    # curves are bare filter QE, so the IRCF must be applied on top (as default_ryycy does).
+    # Do not copy the null from the Bayer model.
+  f_number: 1.8
+  fill_factor: 0.76
+noise:
+  emva:
+    overall_system_gain_K_e_per_DN: 9.9062  # base ISO gain (full_well / usable_DN)
+    # Base ISO (gain_factor = 1.0): full_well_eff = 9500 e, K_eff = 9.906 e/DN.
+    # For higher-ISO simulation multiply by the desired gain (e.g. 45 ≈ ISO 900).
+    iso_gain_factor: 1.0
+    sigma_d_e: 1.6
+    black_level_DN: 64
+    prnu_std_fraction: 0.018
+    dsnu_std_e: 0.16
+    dark_current_e_per_s: 0.25
+  adc:
+    full_well_e: 9500
+cfa:
+  # Override the sensor-default demosaic (malvar) so the recipe/full-model paths
+  # agree: bilinear everywhere for this sensor.
+  demosaic: bilinear
+  spatial_crosstalk:
+    enabled: true
+validation:
+  # Unchanged from iphone_8: the EMVA parameters being validated (gain, read noise,
+  # full well, black level) are properties of the sensor electronics, not of the CFA.
+  mean_abs_dn_atol: 0.06
+  ptc_mu_e_levels:
+  - 0.0
+  - 800.0
+  - 4000.0
+  - 6900.0
+  - 9300.0
+  datasheet:
+    overall_system_gain_K_e_per_DN: 9.9062
+    temporal_dark_noise_sigma_d_e: 1.6
+    full_well_e: 9500
+    black_level_DN: 64
+    bit_depth: 10
+    gain_convention: e_per_dn
+    source: K corrected to base-ISO gain (full_well_e / usable_DN) for ADC consistency.
+      Original web-scraped K was 0.22 e/DN (measured at amplified ISO). Other parameters
+      unchanged from scraped internet table (2026-04-24).
+source:
+  qe_variant: iphone_8_ryycy
+  qe_variant_note: 'RYYCy approximated as RGB channels: R, Y->G, Cy->B'
+  qe_workbook: spectra/QE/interpolated (generic complementary curves; no measured
+    yellow/cyan exists for the iPhone 8)
+  emva_param_method: inferred_web_table_v1
+  sensor_class: phone
+  emva_gain_note: K corrected from web-scraped 0.22 e/DN to base-ISO 9.906 e/DN (=
+    full_well_e / usable_DN) for ADC self-consistency
+  calibration_tier: inferred
+model:
+  name: iphone_8_ryycy
+  display_name: iPhone 8 (RYYCy CFA)

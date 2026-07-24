@@ -24,6 +24,7 @@
 - google_pixel_3
 - huawei_mate_20_pro
 - iphone_8
+- iphone_8_ryycy
 - iphone_x_tele
 - iphone_x_wide
 - iphone_xs_max

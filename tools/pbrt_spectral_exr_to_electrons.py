@@ -113,11 +113,45 @@ def photometry_calibration_scale(
     that case.  In all other modes, omitting ``illuminant_override_csv`` while
     ``target_illuminance_lux`` is set is an error because the lux normalisation would be
     silently skipped.
+
+    ``calibration.scene_illuminance_reference_exr`` selects a third, mutually exclusive
+    mode for chart scenes rendered with a photometrically-normalised pbrt light: it is
+    the scene illuminance at the chart plane expressed in raw-EXR photopic lux (measured
+    on-axis from a known-reflectance surface, e.g. via tools/scene_illuminance_probe.py),
+    and the electrons become ``E_e = L * rad_to_e * target_lux / reference``.  This keeps
+    the f-number dependence (``rad_to_e`` is applied exactly once; any aperture/SPD
+    normalisation baked into the EXR by pbrt is part of the measured reference and
+    cancels) and is illuminant-independent because pbrt normalises light SPDs
+    photometrically.  See docs/notes/chart_radiometry_calibration.md.
     """
     irr_scale = float(cal.get("irradiance_scale_W_m2nm_per_unit", 1.0e-3))
     target_lux = cal.get("target_illuminance_lux", None)
     illum_csv = cal.get("illuminant_override_csv", None)
+    ref_exr = cal.get("scene_illuminance_reference_exr", None)
     illuminance_scale = 1.0
+    if ref_exr is not None:
+        _autocal_active = auto_cal_mode.lower() not in ("off", "none", "disabled", "false", "0")
+        if illum_csv:
+            raise RuntimeError(
+                "calibration.scene_illuminance_reference_exr and "
+                "calibration.illuminant_override_csv are mutually exclusive lux "
+                "normalisations; setting both would apply the target twice (lux**2)."
+            )
+        if _autocal_active:
+            raise RuntimeError(
+                "calibration.scene_illuminance_reference_exr and "
+                "pbrt_spectral_exr.radiometric_autocalibration are mutually exclusive "
+                "lux normalisations; setting both would apply the target twice (lux**2)."
+            )
+        if target_lux is None:
+            raise RuntimeError(
+                "calibration.scene_illuminance_reference_exr is set but "
+                "calibration.target_illuminance_lux is not; the reference has no effect "
+                "without a target."
+            )
+        if float(ref_exr) <= 0:
+            raise RuntimeError("calibration.scene_illuminance_reference_exr must be > 0")
+        return irr_scale * (float(target_lux) / float(ref_exr))
     if target_lux is not None and illum_csv:
         e_wl, e_v = read_csv_curve((repo / illum_csv).resolve())
         ill_in = illuminance_lux_from_irradiance(e_wl, e_v * irr_scale)
@@ -358,8 +392,15 @@ def main() -> None:
                 file=sys.stderr,
             )
         else:
-            E_scene_mean = np.mean(E_raw, axis=(0, 1))
-            scene_lux = illuminance_lux_from_irradiance(lam, E_scene_mean)
+            # FIX-C prototype: normalise on RADIANCE, not on E_raw (irradiance).
+            # E_raw = L * rad_to_e * extra_scale, and illuminance_lux_from_irradiance is
+            # linear, so dividing by lux(E_raw) cancels rad_to_e = pi/(4 N^2) exactly --
+            # which is why autocal made exposure independent of f-number. Normalising on L
+            # leaves rad_to_e in the result, preserving the f-number (and tau) dependence,
+            # while still deriving the absolute scale from the rendered EXR (so it stays
+            # immune to pbrt's photometric light-SPD normalisation, lights.cpp:266).
+            L_scene_mean = np.mean(L.astype(np.float64), axis=(0, 1))
+            scene_lux = illuminance_lux_from_irradiance(lam, L_scene_mean)
             if scene_lux > 0:
                 exr_autocal_scale = float(target_lux) / float(scene_lux)
             else:
@@ -415,6 +456,9 @@ def main() -> None:
         photometry_calibration_scale=np.float64(photometry_scale),
         exr_radiometric_autocalibration=np.array(auto_cal_mode),
         exr_radiometric_autocalibration_scale=np.float64(exr_autocal_scale),
+        scene_illuminance_reference_exr=np.float64(
+            cal.get("scene_illuminance_reference_exr") or np.nan
+        ),
         calibration_mode=np.array(cal_mode),
         geometry_factor=np.float64(geom),
         optics_transmittance_mode=np.array(optics_mode),
