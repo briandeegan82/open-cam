@@ -112,8 +112,20 @@ sensor_forward:
     surround_reflectance: 0.22
     calibration:
       mode: photon_counting
-      irradiance_scale_W_m2nm_per_unit: 0.001
-      illuminant_override_csv: spectra/illuminant/interpolated/D65.csv
+      # irradiance_scale is unity because the default lux normalisation is autocal
+      # (radiometric_autocalibration below): autocal uses irr_scale as a raw
+      # multiplier (no cancellation), so it must be 1.0. In the two *other* lux
+      # modes irr_scale cancels through the lux division, so 1.0 is also correct
+      # there. See docs/notes/chart_radiometry_calibration.md.
+      irradiance_scale_W_m2nm_per_unit: 1.0
+      # The three lux-normalisation mechanisms are mutually exclusive (enforced in
+      # photometry_calibration_scale). The inherited default carries ONLY autocal
+      # (the 3D-scene mechanism). Charts override this per run: the generators inject
+      # calibration.scene_illuminance_reference_exr (surround-probe anchor, §0.2) and
+      # set radiometric_autocalibration: off. Do NOT also set illuminant_override_csv
+      # here — illum_csv + autocal applies target_illuminance_lux twice (lux**2), the
+      # bug that shipped in this file until it was split out.
+      illuminant_override_csv: null
       target_illuminance_lux: 500.0
       optics_transmittance: 1.0
       use_aperture_factor: true

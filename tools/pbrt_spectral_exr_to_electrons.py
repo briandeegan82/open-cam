@@ -129,8 +129,8 @@ def photometry_calibration_scale(
     illum_csv = cal.get("illuminant_override_csv", None)
     ref_exr = cal.get("scene_illuminance_reference_exr", None)
     illuminance_scale = 1.0
+    _autocal_active = auto_cal_mode.lower() not in ("off", "none", "disabled", "false", "0")
     if ref_exr is not None:
-        _autocal_active = auto_cal_mode.lower() not in ("off", "none", "disabled", "false", "0")
         if illum_csv:
             raise RuntimeError(
                 "calibration.scene_illuminance_reference_exr and "
@@ -153,6 +153,15 @@ def photometry_calibration_scale(
             raise RuntimeError("calibration.scene_illuminance_reference_exr must be > 0")
         return irr_scale * (float(target_lux) / float(ref_exr))
     if target_lux is not None and illum_csv:
+        if _autocal_active:
+            raise RuntimeError(
+                "calibration.illuminant_override_csv and "
+                "pbrt_spectral_exr.radiometric_autocalibration are mutually exclusive lux "
+                "normalisations; setting both applies target_illuminance_lux twice (lux**2). "
+                "Use illuminant_override_csv for uniform-illumination charts (autocal off), "
+                "radiometric_autocalibration for 3D scenes (illuminant_override_csv null), or "
+                "calibration.scene_illuminance_reference_exr for probe-anchored charts."
+            )
         e_wl, e_v = read_csv_curve((repo / illum_csv).resolve())
         ill_in = illuminance_lux_from_irradiance(e_wl, e_v * irr_scale)
         if ill_in > 0:
@@ -160,7 +169,6 @@ def photometry_calibration_scale(
         else:
             print("warning: photopic illuminance <= 0; illuminance_scale left at 1", file=sys.stderr)
     elif target_lux is not None and not illum_csv:
-        _autocal_active = auto_cal_mode.lower() not in ("off", "none", "disabled", "false", "0")
         if not _autocal_active:
             raise RuntimeError(
                 "calibration.target_illuminance_lux is set but "

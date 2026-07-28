@@ -94,11 +94,18 @@ model, overstating it by **3.8%**. Both generators now override
 
 ### 0.6 Remaining follow-ups
 
-1. **Root-cause guard** in `photometry_calibration_scale`: `illuminant_override_csv` +
-   active autocal (the original lux² pair) still only *documented*, not raised on,
-   because `sensor_models/default.yaml` ships both keys to every recipe — raising
-   changes/breaks every legacy consumer. The new reference mode does raise on any
-   combination with the other two mechanisms. Needs its own decision.
+1. ~~**Root-cause guard** in `photometry_calibration_scale`~~ — **RESOLVED (2026-07-28).**
+   `photometry_calibration_scale` now raises when `illuminant_override_csv` and active
+   autocal are both set (symmetric with the existing `scene_illuminance_reference_exr`
+   guards — all three lux mechanisms are now mutually exclusive at runtime). To keep
+   the default from tripping the guard, `sensor_models/default.yaml` (and the two legacy
+   monoliths `camera_models/default.yaml`, `camera_models/iphone_8.yaml`) now carry ONLY
+   autocal: `illuminant_override_csv: null`, `irradiance_scale_W_m2nm_per_unit: 1.0`
+   (irr_scale is a raw multiplier under autocal — it cancels through the lux division in
+   the illum_csv and analytic paths, so 1.0 is correct everywhere). Charts still override
+   per run with the surround-probe anchor (§0.2). Consequence: a direct chart render through
+   the default (e.g. `run_pipeline.py` with no anchor injection) now uses frame-mean autocal,
+   which is biased for charts (§0.3) — charts must inject the anchor; the default is 3D-oriented.
 2. **Highway/3D semantics under FIX-C**: autocal now normalises on radiance, so for 3D
    scenes `target_illuminance_lux` effectively anchors mean scene luminance (then
    optics apply), not mean sensor-plane lux as `build_highway_scene.py`'s comments
@@ -314,8 +321,9 @@ Models setting **both** keys (→ lux² on any chart render):
 - `config/camera_models/iphone_8.yaml` (legacy monolith)
 
 A root-cause code fix (guard branch 1 on autocal, and raise if both are set rather than
-silently squaring) would protect every future model, but changes calibration for every
-recipe inheriting `default.yaml` — so it needs its own decision.
+silently squaring) protects every future model but changes calibration for every recipe
+inheriting `default.yaml`. **Done 2026-07-28** — see §0.6 item 1: the guard is in place and
+the default is now autocal-only (`illuminant_override_csv: null`), so no recipe trips it.
 
 ## 6. Data affected
 
