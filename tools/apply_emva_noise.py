@@ -1097,6 +1097,15 @@ def main() -> None:
         help="Optional override for processing.preview_color_correction.enabled.",
     )
     ap.add_argument(
+        "--preview-white-balance-gains",
+        type=str,
+        default=None,
+        help='Fixed preview white-balance gains "R,G,B" applied to every image instead '
+        "of per-image gray_world/white_patch estimation. Use for multi-scene datasets "
+        "(e.g. per-hue Munsell) so the white balance is consistent across scenes and "
+        "does not neutralise each scene's dominant colour.",
+    )
+    ap.add_argument(
         "--integration-time-s",
         type=float,
         default=None,
@@ -1307,6 +1316,12 @@ def main() -> None:
     wb_method = str(wb_cfg.get("method", "white_patch")).lower().strip()
     if wb_enabled and wb_method not in ("gray_world", "white_patch"):
         raise ValueError('processing.preview_white_balance.method must be "gray_world" or "white_patch"')
+    fixed_wb_gains = None
+    if args.preview_white_balance_gains is not None:
+        parts = [p for p in args.preview_white_balance_gains.replace(" ", "").split(",") if p]
+        if len(parts) != 3:
+            raise ValueError('--preview-white-balance-gains must be "R,G,B"')
+        fixed_wb_gains = np.array([float(p) for p in parts], dtype=np.float32)
     ccm_cfg = proc_cfg.get("preview_color_correction", {}) or {}
     ccm_enabled = bool(ccm_cfg.get("enabled", True))
     if args.preview_color_correction_enabled is not None:
@@ -1672,9 +1687,12 @@ def main() -> None:
             ccm_source = "reference_unavailable"
             print(f"warning: preview CCM reference unavailable from {exr_in}: {exc}", file=sys.stderr)
     if wb_enabled and not bayer_on:
-        _wb_src = np.clip(dn_clean - black_dn, 0.0, None)
-        wb_gains = (white_patch_gains(_wb_src) if wb_method == "white_patch"
-                    else gray_world_gains(_wb_src))
+        if fixed_wb_gains is not None:
+            wb_gains = fixed_wb_gains
+        else:
+            _wb_src = np.clip(dn_clean - black_dn, 0.0, None)
+            wb_gains = (white_patch_gains(_wb_src) if wb_method == "white_patch"
+                        else gray_world_gains(_wb_src))
         dn_clean = apply_preview_wb_dn(dn_clean, black_dn, wb_gains)
         dn_noisy = apply_preview_wb_dn(dn_noisy, black_dn, wb_gains)
     if ccm_enabled and not bayer_on and ref_linear is not None and ref_linear.shape == dn_clean.shape:
@@ -1717,9 +1735,12 @@ def main() -> None:
         dn_clean_rgb = _demosaic_fn(dn_clean, bayer_pat)
         dn_noisy_rgb = _demosaic_fn(dn_noisy, bayer_pat)
         if wb_enabled:
-            _wb_src = np.clip(dn_clean_rgb - black_dn, 0.0, None)
-            wb_gains = (white_patch_gains(_wb_src) if wb_method == "white_patch"
-                        else gray_world_gains(_wb_src))
+            if fixed_wb_gains is not None:
+                wb_gains = fixed_wb_gains
+            else:
+                _wb_src = np.clip(dn_clean_rgb - black_dn, 0.0, None)
+                wb_gains = (white_patch_gains(_wb_src) if wb_method == "white_patch"
+                            else gray_world_gains(_wb_src))
             dn_clean_rgb = apply_preview_wb_dn(dn_clean_rgb, black_dn, wb_gains)
             dn_noisy_rgb = apply_preview_wb_dn(dn_noisy_rgb, black_dn, wb_gains)
         if ccm_enabled and ref_linear is not None and ref_linear.shape == dn_clean_rgb.shape:
