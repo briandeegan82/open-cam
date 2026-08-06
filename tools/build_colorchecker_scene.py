@@ -122,6 +122,24 @@ def main() -> None:
     ap.add_argument("--patch-width", type=float, default=0.45)
     ap.add_argument("--patch-height", type=float, default=0.45)
     ap.add_argument("--gap", type=float, default=0.04)
+    ap.add_argument(
+        "--single-patch-index",
+        type=int,
+        default=None,
+        help="If set (1..24), emit ONE full-frame plane of that patch's spectral "
+        "reflectance instead of the 6x4 grid. Fills the frame so the surround is "
+        "occluded (do not build an illuminance probe from such a scene; reuse the "
+        "full-chart probe reference, which is illuminant/geometry-only). The scene is "
+        "written as colorchecker_patch_<NN>.pbrt.",
+    )
+    ap.add_argument(
+        "--single-patch-plane-size",
+        type=float,
+        nargs=2,
+        default=(12.0, 9.0),
+        metavar=("W", "H"),
+        help="Width/height of the single-patch full-frame plane (scene units).",
+    )
     ap.add_argument("--light-scale", type=float, default=2.0)
     ap.add_argument("--cam-dist", type=float, default=4.25)
     ap.add_argument(
@@ -355,44 +373,64 @@ def main() -> None:
         ]
     )
 
-    for row in range(4):
-        for col in range(6):
-            idx = row * 6 + col + 1
-            meta = patches_meta[idx - 1]
-            xL = x0 + col * (pw + g)
-            xR = xL + pw
-            y_max = y_top - row * (ph + g)
-            y_min = y_max - ph
-            # Match pbrt-v4 LookAt: camera +X is world -X; mirror board in X so patch 01 is image-left.
-            p00 = (-xR, y_min, 0.0)
-            p10 = (-xL, y_min, 0.0)
-            p01 = (-xR, y_max, 0.0)
-            p11 = (-xL, y_max, 0.0)
-            pbrt_lines.append("AttributeBegin")
-            pbrt_lines.append(f'    Material "diffuse" "spectrum reflectance" "{meta["spd"]}"')
-            pbrt_lines.append('    Shape "bilinearmesh"')
-            pbrt_lines.append(
-                '        "point3 P" [ %s %s %s   %s %s %s   %s %s %s   %s %s %s ]'
-                % (
-                    p00[0],
-                    p00[1],
-                    p00[2],
-                    p10[0],
-                    p10[1],
-                    p10[2],
-                    p01[0],
-                    p01[1],
-                    p01[2],
-                    p11[0],
-                    p11[1],
-                    p11[2],
+    single_idx = args.single_patch_index
+    if single_idx is not None:
+        if not (1 <= single_idx <= 24):
+            raise ValueError(f"--single-patch-index must be in 1..24, got {single_idx}")
+        meta = patches_meta[single_idx - 1]
+        pw_full, ph_full = float(args.single_patch_plane_size[0]), float(args.single_patch_plane_size[1])
+        hw, hh = pw_full / 2.0, ph_full / 2.0
+        pbrt_lines.append(f"# Single patch {single_idx:02d} ({meta['file']}) full-frame plane")
+        pbrt_lines.append("AttributeBegin")
+        pbrt_lines.append(f'    Material "diffuse" "spectrum reflectance" "{meta["spd"]}"')
+        pbrt_lines.append('    Shape "bilinearmesh"')
+        pbrt_lines.append(
+            '        "point3 P" [ %g %g 0.001   %g %g 0.001   %g %g 0.001   %g %g 0.001 ]'
+            % (-hw, -hh, hw, -hh, -hw, hh, hw, hh)
+        )
+        pbrt_lines.append('        "point2 uv" [ 0 0   1 0   0 1   1 1 ]')
+        pbrt_lines.append("AttributeEnd")
+        pbrt_lines.append("")
+        scene_path = out_dir / f"colorchecker_patch_{single_idx:02d}.pbrt"
+    else:
+        for row in range(4):
+            for col in range(6):
+                idx = row * 6 + col + 1
+                meta = patches_meta[idx - 1]
+                xL = x0 + col * (pw + g)
+                xR = xL + pw
+                y_max = y_top - row * (ph + g)
+                y_min = y_max - ph
+                # Match pbrt-v4 LookAt: camera +X is world -X; mirror board in X so patch 01 is image-left.
+                p00 = (-xR, y_min, 0.0)
+                p10 = (-xL, y_min, 0.0)
+                p01 = (-xR, y_max, 0.0)
+                p11 = (-xL, y_max, 0.0)
+                pbrt_lines.append("AttributeBegin")
+                pbrt_lines.append(f'    Material "diffuse" "spectrum reflectance" "{meta["spd"]}"')
+                pbrt_lines.append('    Shape "bilinearmesh"')
+                pbrt_lines.append(
+                    '        "point3 P" [ %s %s %s   %s %s %s   %s %s %s   %s %s %s ]'
+                    % (
+                        p00[0],
+                        p00[1],
+                        p00[2],
+                        p10[0],
+                        p10[1],
+                        p10[2],
+                        p01[0],
+                        p01[1],
+                        p01[2],
+                        p11[0],
+                        p11[1],
+                        p11[2],
+                    )
                 )
-            )
-            pbrt_lines.append('        "point2 uv" [ 0 0   1 0   0 1   1 1 ]')
-            pbrt_lines.append("AttributeEnd")
-            pbrt_lines.append("")
+                pbrt_lines.append('        "point2 uv" [ 0 0   1 0   0 1   1 1 ]')
+                pbrt_lines.append("AttributeEnd")
+                pbrt_lines.append("")
+        scene_path = out_dir / "colorchecker.pbrt"
 
-    scene_path = out_dir / "colorchecker.pbrt"
     scene_path.write_text("\n".join(pbrt_lines) + "\n")
 
     manifest = {

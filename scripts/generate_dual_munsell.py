@@ -48,17 +48,17 @@ CAMERAS = {
 PROTOCOLS = {
     "1000lux_1x": {
         "illuminance_lux": 1000.0,
-        "exposure_s": 0.020,
+        "exposure_s": 0.050,
         "iso_gain": 1.0,
     },
     "100lux_2x": {
         "illuminance_lux": 100.0,
-        "exposure_s": 0.020,
+        "exposure_s": 0.050,
         "iso_gain": 2.0,
     },
     "20lux_8x": {
         "illuminance_lux": 20.0,
-        "exposure_s": 0.020,
+        "exposure_s": 0.050,
         "iso_gain": 8.0,
     },
 }
@@ -71,7 +71,7 @@ ILLUMINANTS = {
 
 # Illuminance for sensor forward (use protocol's base illuminance)
 
-DEFAULT_FRAMING = {"munsell": 6.0}
+DEFAULT_FRAMING = {"munsell": 3.75}
 
 
 def run(cmd, quiet=False):

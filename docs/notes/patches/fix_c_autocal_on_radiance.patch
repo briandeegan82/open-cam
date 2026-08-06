@@ -1,0 +1,20 @@
+--- a/tools/pbrt_spectral_exr_to_electrons.py
++++ b/tools/pbrt_spectral_exr_to_electrons.py
+@@ -358,8 +358,15 @@
+                 file=sys.stderr,
+             )
+         else:
+-            E_scene_mean = np.mean(E_raw, axis=(0, 1))
+-            scene_lux = illuminance_lux_from_irradiance(lam, E_scene_mean)
++            # FIX-C prototype: normalise on RADIANCE, not on E_raw (irradiance).
++            # E_raw = L * rad_to_e * extra_scale, and illuminance_lux_from_irradiance is
++            # linear, so dividing by lux(E_raw) cancels rad_to_e = pi/(4 N^2) exactly --
++            # which is why autocal made exposure independent of f-number. Normalising on L
++            # leaves rad_to_e in the result, preserving the f-number (and tau) dependence,
++            # while still deriving the absolute scale from the rendered EXR (so it stays
++            # immune to pbrt's photometric light-SPD normalisation, lights.cpp:266).
++            L_scene_mean = np.mean(L.astype(np.float64), axis=(0, 1))
++            scene_lux = illuminance_lux_from_irradiance(lam, L_scene_mean)
+             if scene_lux > 0:
+                 exr_autocal_scale = float(target_lux) / float(scene_lux)
+             else:

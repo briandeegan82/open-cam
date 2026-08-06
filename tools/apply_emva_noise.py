@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import re
 import sys
 from pathlib import Path
@@ -734,6 +735,55 @@ def _spatial_shape(arr: np.ndarray) -> tuple[int, int]:
     raise ValueError(f"unsupported signal shape for defect model: {arr.shape}")
 
 
+def build_illumination_field(
+    shape: tuple[int, int],
+    vignette_strength: float = 0.0,
+    gradient_strength: float = 0.0,
+    gradient_angle_deg: float = 0.0,
+) -> np.ndarray:
+    """Deterministic uneven-illumination multiplier map (H×W, float32).
+
+    Two independent, repeatable components multiply together:
+
+    * **cos^4 vignette** — physical lens illumination falloff.  With normalised
+      radius ``rn`` (0 at centre, 1 at the corners) the gain is
+      ``1 / (1 + k*rn^2)^2`` where ``k`` is solved so the corner gain equals
+      ``1 - vignette_strength`` exactly.  ``cos(atan(x)) = 1/sqrt(1+x^2)`` makes
+      this an exact cos^4 law, so ``vignette_strength`` is the fractional corner
+      falloff.
+
+    * **linear gradient** — a tilt of peak-to-peak amplitude ``gradient_strength``
+      along ``gradient_angle_deg`` (0 = left→right), centred on 1.0 so the frame
+      mean stays ≈1 (one edge ``1 - g/2``, the opposite edge ``1 + g/2``).
+
+    The result is clipped to ``>= 0``.  All-zero strengths return an exact ones
+    map (no-op), so the field is inert unless explicitly configured.
+    """
+    h, w = int(shape[0]), int(shape[1])
+    field = np.ones((h, w), dtype=np.float64)
+
+    # Normalised centred coordinates; rn = 1 at the corners.
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float64)
+    cx = (w - 1) / 2.0
+    cy = (h - 1) / 2.0
+    nx = (xx - cx) / max(cx, 1e-9)  # [-1, 1] across width
+    ny = (yy - cy) / max(cy, 1e-9)  # [-1, 1] across height
+
+    v = float(np.clip(vignette_strength, 0.0, 0.999))
+    if v > 0.0:
+        rn2 = (nx * nx + ny * ny) / 2.0  # corner (nx=ny=±1) -> 1.0
+        k = (1.0 - v) ** (-0.5) - 1.0    # corner gain == 1 - v
+        field *= 1.0 / (1.0 + k * rn2) ** 2
+
+    g = float(gradient_strength)
+    if g != 0.0:
+        theta = math.radians(gradient_angle_deg)
+        proj = nx * math.cos(theta) + ny * math.sin(theta)  # [-1, 1] along direction
+        field *= 1.0 + 0.5 * g * proj
+
+    return np.maximum(field, 0.0).astype(np.float32)
+
+
 def apply_blooming(shot_e: np.ndarray, full_well_e: float,
                    spread_fraction: float = 0.5, max_iters: int = 20) -> np.ndarray:
     """Simulate charge blooming: excess electrons overflow to adjacent pixels.
@@ -1122,6 +1172,14 @@ def main() -> None:
         help="Regenerate and overwrite persistent defect-pixel map when configured.",
     )
     ap.add_argument(
+        "--illum-gain-map-out",
+        type=Path,
+        default=None,
+        help="If set, save the applied uneven-illumination gain map (H×W float32) to "
+        "this .npy path. Written even when no illumination field is configured (ones "
+        "map), so a dataset always has a matching ground-truth label per image.",
+    )
+    ap.add_argument(
         "--emit-demosaic-linear16",
         action="store_true",
         help="Also write linear (no-gamma) 16-bit demosaiced previews "
@@ -1257,6 +1315,17 @@ def main() -> None:
     flicker_noise_std_e = float(emva.get("flicker_noise_std_e", 0.0))
     prnu_lf_std = float(emva.get("prnu_lf_std_fraction", 0.0))
     prnu_lf_sigma_px = float(emva.get("prnu_lf_sigma_pixels", 100.0))
+    # Deterministic uneven-illumination field (lens illumination falloff): a smooth,
+    # repeatable multiplicative attenuation of the incident photon signal — as distinct
+    # from prnu_lf above, which is a *random* per-unit gain trend.  Applied to signal_e
+    # before the noise chain so shot noise, blooming and full-well clipping all correctly
+    # follow the reduced photon count at the frame edges.
+    #   illum_vignette_strength: fractional cos^4 falloff at the image corners (0..1).
+    #   illum_gradient_strength: peak-to-peak linear brightness gradient across the frame.
+    #   illum_gradient_angle_deg: gradient direction (0 = +x / left-to-right).
+    illum_vignette_strength = float(emva.get("illum_vignette_strength", 0.0))
+    illum_gradient_strength = float(emva.get("illum_gradient_strength", 0.0))
+    illum_gradient_angle_deg = float(emva.get("illum_gradient_angle_deg", 0.0))
     ktc_cfg = emva.get("ktc_noise", {}) or {}
     ktc_enabled = bool(ktc_cfg.get("enabled", False))
     bloom_cfg = emva.get("blooming", {}) or {}
@@ -1448,6 +1517,28 @@ def main() -> None:
         # so that the blur acts on the RAW mosaic (R leaking to G/B wells, etc.).
         # Applied before the noise chain so shot noise is drawn on the correct mean.
         signal_e = apply_cfa_spatial_crosstalk(signal_e, spatial_xtalk_cfg, bayer_pat)
+
+    # Deterministic uneven illumination: attenuate the incident photon signal by a smooth,
+    # repeatable field (lens vignette + gradient) BEFORE the noise chain, so that shot
+    # noise, blooming and full-well clipping all follow the reduced photon count.  Inert
+    # (exact ones map) unless a strength is configured.
+    illum_field = None
+    if illum_vignette_strength > 0.0 or illum_gradient_strength != 0.0:
+        illum_field = build_illumination_field(
+            signal_e.shape[:2],
+            vignette_strength=illum_vignette_strength,
+            gradient_strength=illum_gradient_strength,
+            gradient_angle_deg=illum_gradient_angle_deg,
+        )
+        if signal_e.ndim == 2:
+            signal_e = signal_e * illum_field
+        else:
+            signal_e = signal_e * illum_field[:, :, None]
+    if args.illum_gain_map_out is not None:
+        _gm = illum_field if illum_field is not None else np.ones(signal_e.shape[:2], dtype=np.float32)
+        _gm_path = args.illum_gain_map_out.resolve()
+        _gm_path.parent.mkdir(parents=True, exist_ok=True)
+        np.save(_gm_path, _gm)
 
     # Dark current mean: computed here (not in the temporal section) so that the DSNU
     # log-normal distribution can be correctly centred on it — ensuring that
@@ -1856,6 +1947,15 @@ def main() -> None:
         "adc_dnl_model": "fixed_per_bin_map" if adc_dnl_std_lsb > 0.0 else None,
         "adc_clipping": adc_clipping,
         "defect_pixels": defect_stats,
+        "illumination_field": {
+            "vignette_strength": illum_vignette_strength,
+            "gradient_strength": illum_gradient_strength,
+            "gradient_angle_deg": illum_gradient_angle_deg,
+            "applied": bool(illum_field is not None),
+            "gain_map_path": (
+                str(args.illum_gain_map_out) if args.illum_gain_map_out is not None else None
+            ),
+        },
         "preview_no_normalize": preview_no_normalize,
         "crosstalk_enabled": crosstalk_enabled,
         "crosstalk_matrix_3x3": crosstalk_matrix.tolist(),

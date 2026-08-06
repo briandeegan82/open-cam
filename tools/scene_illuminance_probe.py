@@ -56,9 +56,15 @@ from pbrt_spectral_exr_to_electrons import illuminance_lux_from_irradiance  # no
 DEFAULT_PBRT = TOOLS_DIR.parent / "third_party" / "pbrt-v4" / "build" / "pbrt"
 
 # Central rectangle (fraction of W, H) that the chart may occupy in chart EXRs.
-# Generous for both chart types at the standard cam_dist=6 framing; verified against
-# the rendered board extents (CC: 0.19/0.19, Munsell: 0.10/0.23 half-fractions).
-CHART_EXCLUDE_FRAC = (0.25, 0.30)
+# Generous for both chart types at the standard cam_dist=3.75 framing (closer than the
+# original cam_dist=6.0 rig so patches cover more pixels); verified against the
+# rendered board extents at cam_dist=4.0 (CC: 0.276/0.273, Munsell worst-case R_5/Y_10:
+# 0.234/0.383 fx/fy) and re-checked at cam_dist=3.75 (CC: 0.297/0.297, Munsell worst-case
+# R_5/Y_10: 0.245/0.430 fx/fy) — both still fit under this rectangle with margin. A
+# tighter rectangle sized for the old cam_dist=6.0 framing let chart-patch radiance leak
+# into the "surround-only" verification region and produced spurious ~15% deviations
+# against the probe; re-measure and widen this if cam_dist is lowered further.
+CHART_EXCLUDE_FRAC = (0.33, 0.46)
 
 
 @dataclass

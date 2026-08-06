@@ -47,26 +47,26 @@ PROTOCOLS = {
     "standard": {
         "label": "1000lux_1x",
         "illuminance_lux": 1000.0,
-        "exposure_s": 0.020,
+        "exposure_s": 0.050,
         "iso_gain": 1.0,
         "spp": 4096,
-        "note": "Baseline: 1000 lux, 20ms, 1x ISO",
+        "note": "Baseline: 1000 lux, 50ms, 1x ISO",
     },
     "midlight": {
         "label": "100lux_2x",
         "illuminance_lux": 100.0,
-        "exposure_s": 0.020,
+        "exposure_s": 0.050,
         "iso_gain": 2.0,
         "spp": 4096,
-        "note": "Mid-light: 100 lux, 20ms, 2x ISO",
+        "note": "Mid-light: 100 lux, 50ms, 2x ISO",
     },
     "lowlight": {
         "label": "20lux_8x",
         "illuminance_lux": 20.0,
-        "exposure_s": 0.020,
+        "exposure_s": 0.050,
         "iso_gain": 8.0,
         "spp": 4096,
-        "note": "Low-light: 20 lux, 20ms, 8x ISO",
+        "note": "Low-light: 20 lux, 50ms, 8x ISO",
     },
 }
 
@@ -78,7 +78,7 @@ ILLUMINANTS = {
 
 LUX = {"low": 10.0, "med": 200.0, "high": 2000.0}
 
-DEFAULT_FRAMING = {"cc": 6.0, "munsell": 16.0}
+DEFAULT_FRAMING = {"cc": 3.75, "munsell": 16.0}
 
 
 def run(cmd, quiet=False):
