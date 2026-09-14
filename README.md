@@ -286,6 +286,15 @@ venv/bin/python tools/munsell_mat_to_sqlite.py --summary
 - Pipeline command mismatch: run with `--dry-run` and inspect generated command list.
 - Unexpected camera config behavior: ensure only one of `paths.camera_model_name` and `paths.camera_model_config` is set.
 
+## Interactive GUI & Tutorials
+
+For an interactive, guided introduction to the optics, sensor, and image
+generation stages -- Dear PyGui demos with scripted lecture scenarios and a
+markdown tutorial per topic (in the style of the `teaching-sims` project) --
+see [`gui/README.md`](gui/README.md). It is a pure interface layer: every
+curve and generated image comes from importing or subprocess-calling the same
+`tools/*.py` scripts documented above.
+
 ## Contributing
 
 Before opening a PR:
