@@ -91,10 +91,10 @@ def _gaussian_kernel_1d(sigma: float) -> np.ndarray:
 def separable_gaussian_blur_2d(img: np.ndarray, sigma: float) -> np.ndarray:
     """HxW float — reflect-pad separable Gaussian."""
     if sigma <= 0:
-        return np.asarray(img, dtype=np.float32, copy=False)
+        return np.asarray(img, dtype=np.float32)
     k = _gaussian_kernel_1d(sigma)
     if k.size == 1:
-        return np.asarray(img, dtype=np.float32, copy=False)
+        return np.asarray(img, dtype=np.float32)
     pad = k.size // 2
     acc = np.asarray(img, dtype=np.float64)
     # horizontal
@@ -192,7 +192,7 @@ def airy_disk_convolve(img: np.ndarray, rho0_px: float, sigma_geom_px: float = 0
     from scipy.signal import fftconvolve
 
     if rho0_px <= 0 and sigma_geom_px <= 0:
-        return np.asarray(img, dtype=np.float32, copy=False)
+        return np.asarray(img, dtype=np.float32)
 
     src = np.asarray(img, dtype=np.float64)
 
@@ -239,11 +239,11 @@ def apply_lateral_ca(
     from scipy.ndimage import map_coordinates
 
     if abs(lca_coeff) < 1e-9:
-        return np.asarray(arr, dtype=np.float32, copy=False)
+        return np.asarray(arr, dtype=np.float32)
 
     M = 1.0 + lca_coeff * (wavelength_nm - lambda_ref_nm) / lambda_ref_nm
     if abs(M - 1.0) < 1e-6:
-        return np.asarray(arr, dtype=np.float32, copy=False)
+        return np.asarray(arr, dtype=np.float32)
 
     H, W = arr.shape
     cy, cx = (H - 1) / 2.0, (W - 1) / 2.0
@@ -319,9 +319,9 @@ def apply_stray_light(arr: np.ndarray, cfg: dict) -> np.ndarray:
         ``psf_kernel_size`` (default 128).
     """
     if not bool(cfg.get("enabled", False)):
-        return np.asarray(arr, dtype=np.float32, copy=False)
+        return np.asarray(arr, dtype=np.float32)
 
-    out = np.asarray(arr, dtype=np.float32, copy=False)
+    out = np.asarray(arr, dtype=np.float32)
 
     # ---- Veiling glare ----
     veiling = float(np.clip(cfg.get("veiling_glare_fraction", 0.0), 0.0, 1.0))

@@ -475,6 +475,7 @@ def main() -> None:
     # Radial/tangential distortion undistortion (Brown-Conrady model).
     # Converts distorted pixel coordinates to undistorted ray directions so that
     # each pixel samples the correct chart position.  No effect when all k/p = 0.
+    lens_cfg = camera_model.get("lens", {}) if args.camera_model_config is not None else {}
     k1 = float(lens_cfg.get("distortion_k1", 0.0))
     k2 = float(lens_cfg.get("distortion_k2", 0.0))
     p1 = float(lens_cfg.get("distortion_p1", 0.0))
