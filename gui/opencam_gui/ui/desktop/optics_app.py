@@ -291,6 +291,7 @@ class OpticsApp:
                                     scale_max=1.0,
                                     bounds_min=(-KERNEL_SIZE / 2.0, -KERNEL_SIZE / 2.0),
                                     bounds_max=(KERNEL_SIZE / 2.0, KERNEL_SIZE / 2.0),
+                                    format="",
                                     tag="psf_heat",
                                 )
                         with dpg.group():
