@@ -6,7 +6,7 @@ import pytest
 
 from opencam_gui.ui import cli
 
-BUILT_TOPICS = ("optics", "sensor", "image_generation")
+BUILT_TOPICS = ("geometry", "optics", "sensor", "image_generation")
 
 
 def test_every_topic_id_is_unique():

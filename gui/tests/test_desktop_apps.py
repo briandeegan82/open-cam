@@ -13,11 +13,15 @@ import dearpygui.dearpygui as dpg
 import pytest
 
 from opencam_gui.ui.desktop.base import CUSTOM_RECIPE
+from opencam_gui.ui.desktop.geometry_app import GeometryApp
 from opencam_gui.ui.desktop.image_generation_app import ImageGenerationApp
 from opencam_gui.ui.desktop.optics_app import OpticsApp
 from opencam_gui.ui.desktop.sensor_app import SensorApp
 
-ALL_APPS = [OpticsApp, SensorApp, ImageGenerationApp]
+ALL_APPS = [GeometryApp, OpticsApp, SensorApp, ImageGenerationApp]
+
+#: Apps with a "Custom" recipe entry that auto-loads a camera config on change.
+RECIPE_APPS = [GeometryApp, OpticsApp, SensorApp]
 
 
 @pytest.fixture
@@ -70,7 +74,7 @@ def test_controls_round_trip(dpg_context, app_cls):
             assert after[key] == old, key
 
 
-@pytest.mark.parametrize("app_cls", [OpticsApp, SensorApp], ids=lambda c: c.__name__)
+@pytest.mark.parametrize("app_cls", RECIPE_APPS, ids=lambda c: c.__name__)
 def test_recipe_dropdown_loads_real_configs(dpg_context, app_cls):
     app = _built(app_cls)
     for recipe_id in ("nikon_z6", "iphone_8"):
@@ -79,7 +83,7 @@ def test_recipe_dropdown_loads_real_configs(dpg_context, app_cls):
         assert dpg.get_value("recipe_combo") == recipe_id
 
 
-@pytest.mark.parametrize("app_cls", [OpticsApp, SensorApp], ids=lambda c: c.__name__)
+@pytest.mark.parametrize("app_cls", RECIPE_APPS, ids=lambda c: c.__name__)
 def test_custom_recipe_entry_does_not_load(dpg_context, app_cls):
     app = _built(app_cls)
     app._on_recipe_change(app_data="nikon_z6")
@@ -87,7 +91,7 @@ def test_custom_recipe_entry_does_not_load(dpg_context, app_cls):
     assert app.camera_recipe_id == "nikon_z6"
 
 
-@pytest.mark.parametrize("app_cls", [OpticsApp, SensorApp], ids=lambda c: c.__name__)
+@pytest.mark.parametrize("app_cls", RECIPE_APPS, ids=lambda c: c.__name__)
 def test_presenter_mode_hides_advanced_controls(dpg_context, app_cls):
     app = _built(app_cls)
     assert dpg.does_item_exist("advanced_controls")
