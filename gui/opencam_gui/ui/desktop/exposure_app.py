@@ -50,14 +50,17 @@ class ExposureApp(DemoApp):
         self.f_number = 16.0
         self.integration_time_s = 1.0 / 125.0
         self.iso_gain = 1.0
+        # A full-frame sensor with the well and the converter matched: 65 ke- at
+        # 4.1 e-/DN fills a 14-bit range almost exactly. Mismatching them would
+        # put the clipping point somewhere the exposure readout cannot explain.
         self.quantum_efficiency = 0.6
-        self.pixel_pitch_um = 4.3
-        self.K_e_per_DN = 4.77
-        self.full_well_e = 45000.0
-        self.sigma_d_e = 2.6
+        self.pixel_pitch_um = 5.94
+        self.K_e_per_DN = 4.10
+        self.full_well_e = 65000.0
+        self.sigma_d_e = 2.3
         self.sigma_amp_e = 0.3
-        self.black_level_DN = 16.0
-        self.bit_depth = 12
+        self.black_level_DN = 512.0
+        self.bit_depth = 14
         self.temperature_c = 20.0
 
         self.row_fpn_std_e = 12.0

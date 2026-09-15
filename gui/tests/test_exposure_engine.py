@@ -279,3 +279,59 @@ class TestScenarios:
             scene_luminance_cd_m2=sc.scene_luminance_cd_m2, f_number=sc.f_number,
             integration_time_s=sc.integration_time_s, iso_gain=sc.iso_gain, **EXPOSURE)
         assert point.regime == "clipped"
+
+
+class TestAgainstTheNamedRecipe:
+    """The tests above use a deliberately noisy 25 e- sensor. Every scenario
+    names ``nikon_z6``, though, whose read noise is 2.3 e- -- and a claim that
+    only holds on a noisier sensor than the one loaded is not a claim the demo
+    can make on screen.
+    """
+
+    Z6 = dict(
+        pixel_pitch_um=5.94,
+        quantum_efficiency=0.6,
+        K_e_per_DN=4.0955,
+        full_well_e=65000.0,
+        sigma_d_e=2.3,
+        black_level_DN=512.0,
+        bit_depth=14,
+    )
+
+    def _point(self, sc):
+        return ee.exposure_point(
+            scene_luminance_cd_m2=sc.scene_luminance_cd_m2, f_number=sc.f_number,
+            integration_time_s=sc.integration_time_s, iso_gain=sc.iso_gain, **self.Z6)
+
+    def test_every_scenario_names_a_recipe(self):
+        assert all(sc.camera_recipe_id for sc in SCENARIOS.values())
+
+    def test_the_underexposed_scenario_is_read_noise_limited_here_too(self):
+        """At 2.3 e- of read noise the crossover is about five electrons, so this
+        scenario has to be far darker than it would need to be on a noisy sensor."""
+        point = self._point(SCENARIOS["read_noise_limited"])
+        assert point.regime == "read-noise limited"
+        assert point.signal_e < self.Z6["sigma_d_e"] ** 2
+
+    def test_one_stop_is_enough_to_leave_the_read_limited_branch(self):
+        """Which is the scenario's actual lesson: the branch is narrow."""
+        sc = SCENARIOS["read_noise_limited"]
+        opened = ee.exposure_point(
+            scene_luminance_cd_m2=sc.scene_luminance_cd_m2, f_number=sc.f_number / np.sqrt(2),
+            integration_time_s=sc.integration_time_s, iso_gain=sc.iso_gain, **self.Z6)
+        assert opened.regime == "shot-noise limited"
+
+    def test_sunny_16_still_meters_correctly(self):
+        assert abs(self._point(SCENARIOS["sunny_16"]).ev
+                   - self._point(SCENARIOS["sunny_16"]).ev100_scene) < 0.34
+
+    def test_the_blown_highlight_scenario_clips_here_too(self):
+        assert self._point(SCENARIOS["blown_highlight"]).regime == "clipped"
+
+    def test_the_well_and_the_converter_are_matched(self):
+        """A well that overruns the top code moves the clipping point somewhere
+        the exposure readout cannot account for, and a well that falls short of
+        it wastes bits. They should coincide to within a code or so."""
+        point = self._point(SCENARIOS["sunny_16"])
+        assert (point.full_well_e / point.K_e_per_DN + self.Z6["black_level_DN"]
+                == pytest.approx(point.max_dn, abs=2.0))

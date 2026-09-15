@@ -66,15 +66,16 @@ SCENARIOS: dict[str, Scenario] = {
         id="read_noise_limited",
         title="Underexposed: down in the read noise",
         teaching_point=(
-            "With only a few tens of electrons per pixel, shot noise is smaller than read noise "
-            "and the sensor  -  not the light  -  sets the noise floor. This is the left-hand "
-            "branch of the photon transfer curve."
+            "Shot noise is sqrt(signal), so it only falls below a read noise of sigma when the "
+            "signal drops under sigma squared  -  a handful of electrons, not a few hundred. "
+            "Below that the sensor, not the light, sets the noise floor: the left-hand branch "
+            "of the photon transfer curve."
         ),
         notes=(
-            "Watch the regime label. Open the aperture a stop at a time until it flips to "
-            "shot-noise limited, and note how little exposure that takes."
+            "Watch the regime label. One stop of aperture is enough to flip it to shot-noise "
+            "limited, which is how narrow this branch really is."
         ),
-        scene_luminance_cd_m2=2.0,
+        scene_luminance_cd_m2=0.6,
         f_number=8.0,
         integration_time_s=1.0 / 500.0,
         iso_gain=1.0,

@@ -16,14 +16,15 @@ from opencam_gui.ui.desktop.base import CUSTOM_RECIPE
 from opencam_gui.ui.desktop.exposure_app import ExposureApp
 from opencam_gui.ui.desktop.geometry_app import GeometryApp
 from opencam_gui.ui.desktop.image_generation_app import ImageGenerationApp
+from opencam_gui.ui.desktop.isp_app import IspApp
 from opencam_gui.ui.desktop.mtf_app import MtfApp
 from opencam_gui.ui.desktop.optics_app import OpticsApp
 from opencam_gui.ui.desktop.sensor_app import SensorApp
 
-ALL_APPS = [GeometryApp, OpticsApp, MtfApp, SensorApp, ExposureApp, ImageGenerationApp]
+ALL_APPS = [GeometryApp, OpticsApp, MtfApp, SensorApp, ExposureApp, IspApp, ImageGenerationApp]
 
 #: Apps with a "Custom" recipe entry that auto-loads a camera config on change.
-RECIPE_APPS = [GeometryApp, OpticsApp, MtfApp, SensorApp, ExposureApp]
+RECIPE_APPS = [GeometryApp, OpticsApp, MtfApp, SensorApp, ExposureApp, IspApp]
 
 
 @pytest.fixture
