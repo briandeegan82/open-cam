@@ -65,9 +65,13 @@ class TestDemosaic(unittest.TestCase):
         self.assertFalse(np.array_equal(lin, enc))
         self.assertGreater(int(enc[0, 0, 0]), int(lin[0, 0, 0]))
 
+    def test_demosaic_requested_accepts_known_methods(self) -> None:
+        self.assertTrue(demosaic_requested({"demosaic": "bilinear"}))
+        self.assertTrue(demosaic_requested({"demosaic": "malvar"}))
+
     def test_demosaic_requested_rejects_unknown_method(self) -> None:
         with self.assertRaises(ValueError):
-            demosaic_requested({"demosaic": "malvar"})
+            demosaic_requested({"demosaic": "vng"})
 
 
 if __name__ == "__main__":
