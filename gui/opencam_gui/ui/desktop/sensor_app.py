@@ -17,9 +17,9 @@ import dearpygui.dearpygui as dpg
 
 from opencam_gui.core import dark_current as dc
 from opencam_gui.core import sensor_engine as se
-from opencam_gui.core.camera import emva_summary, load_camera_model
-from opencam_gui.core.catalog import list_camera_recipes
+from opencam_gui.core.camera import emva_summary
 from opencam_gui.topics.sensor.scenarios import SCENARIOS, get_scenario
+from opencam_gui.ui.desktop.base import DemoApp
 
 MAP_SIZE = se.FPN_MAP_SIZE
 _DSNU_MODELS = ("gaussian", "lognormal")
@@ -56,8 +56,20 @@ def _histogram_series(
     return centers.tolist(), counts.astype(np.float64).tolist()
 
 
-class SensorApp:
-    def __init__(self, scenario_id: str | None = None) -> None:
+class SensorApp(DemoApp):
+    viewport_title = "Open Cam - Sensor / EMVA1288 Explorer"
+    viewport_width = 1480
+    viewport_height = 960
+    window_label = "Sensor"
+    control_panel_width = 430
+    scenarios = SCENARIOS
+    default_banner_title = "Interactive photon-transfer explorer"
+    default_banner_body = (
+        "Pick a camera recipe or drag the sliders. The PTC curve is computed by the "
+        "real tools/emva_theory.py functions, the same ones the EMVA validator uses."
+    )
+
+    def init_state(self) -> None:
         self.sigma_d_e = 2.6
         self.K_e_per_DN = 4.77
         self.black_level_DN = 16.0
@@ -73,21 +85,16 @@ class SensorApp:
         self.dsnu_std_e = 0.3
         self.dsnu_model = "gaussian"
         self.n_measure_frames = 50
-        self.camera_recipe_id: str | None = None
-        self._presenter = False
         self._measure_key: tuple | None = None
         self._unit_prnu: np.ndarray | None = None
         self._unit_dsnu: np.ndarray | None = None
-        self._recipes = list_camera_recipes()
-        self._scenario_title = "Interactive photon-transfer explorer"
-        self._scenario_note = (
-            "Pick a camera recipe or drag the sliders. The PTC curve is computed by the "
-            "real tools/emva_theory.py functions, the same ones the EMVA validator uses."
-        )
-        if scenario_id:
-            self._apply_scenario_fields(get_scenario(scenario_id))
+        self._dark_point_theme: int | None = None
+        self._measured_theme: int | None = None
 
-    def _apply_scenario_fields(self, sc) -> None:
+    def get_scenario(self, scenario_id: str):
+        return get_scenario(scenario_id)
+
+    def apply_scenario_state(self, sc) -> None:
         self.sigma_d_e = sc.sigma_d_e
         self.K_e_per_DN = sc.K_e_per_DN
         self.black_level_DN = sc.black_level_DN
@@ -103,47 +110,8 @@ class SensorApp:
         self.dsnu_std_e = sc.dsnu_std_e
         self.dsnu_model = sc.dsnu_model
         self.n_measure_frames = sc.n_measure_frames
-        self.camera_recipe_id = sc.camera_recipe_id
-        self._scenario_title = sc.title
-        self._scenario_note = f"{sc.teaching_point}\n{sc.notes}"
 
-    # --- controls --------------------------------------------------
-    def _read_controls(self) -> None:
-        self.sigma_d_e = float(dpg.get_value("sigma_d_e"))
-        self.K_e_per_DN = float(dpg.get_value("k_gain"))
-        self.black_level_DN = float(dpg.get_value("black_level"))
-        self.full_well_e = float(dpg.get_value("full_well"))
-        self.use_poisson = bool(dpg.get_value("use_poisson"))
-        self.dark_current_e_per_s = float(dpg.get_value("dark_rate"))
-        self.temperature_c = float(dpg.get_value("temperature"))
-        self.dark_activation_energy_eV = float(dpg.get_value("activation_energy"))
-        self.integration_time_s = float(dpg.get_value("integration_time"))
-        self.prnu_std_fraction = float(dpg.get_value("prnu_std"))
-        self.dsnu_std_e = float(dpg.get_value("dsnu_std"))
-        self.dsnu_model = str(dpg.get_value("dsnu_model"))
-        self.n_measure_frames = int(dpg.get_value("n_frames"))
-
-    def _push_controls(self) -> None:
-        dpg.set_value("sigma_d_e", self.sigma_d_e)
-        dpg.set_value("k_gain", self.K_e_per_DN)
-        dpg.set_value("black_level", self.black_level_DN)
-        dpg.set_value("full_well", self.full_well_e)
-        dpg.set_value("use_poisson", self.use_poisson)
-        dpg.set_value("dark_rate", self.dark_current_e_per_s)
-        dpg.set_value("temperature", self.temperature_c)
-        dpg.set_value("activation_energy", self.dark_activation_energy_eV)
-        dpg.set_value("integration_time", self.integration_time_s)
-        dpg.set_value("prnu_std", self.prnu_std_fraction)
-        dpg.set_value("dsnu_std", self.dsnu_std_e)
-        dpg.set_value("dsnu_model", self.dsnu_model)
-        dpg.set_value("n_frames", self.n_measure_frames)
-        dpg.configure_item("verify_mu_e", max_value=self.full_well_e)
-
-    def _load_recipe(self, recipe_id: str) -> None:
-        recipe = next((r for r in self._recipes if r.id == recipe_id), None)
-        if recipe is None:
-            return
-        model = load_camera_model(recipe.path)
+    def apply_recipe_state(self, model: dict) -> None:
         s = emva_summary(model)
         self.sigma_d_e = s.sigma_d_e
         self.K_e_per_DN = s.K_e_per_DN
@@ -158,22 +126,38 @@ class SensorApp:
         self.integration_time_s = s.integration_time_s
         self.prnu_std_fraction = s.prnu_std_fraction
         self.dsnu_std_e = s.dsnu_std_e
-        self.camera_recipe_id = recipe_id
-        self._push_controls()
-        self.refresh()
 
-    def _on_recipe_change(self, _sender=None, app_data=None, _user_data=None) -> None:
-        if app_data and app_data != "Custom":
-            self._load_recipe(app_data)
+    # --- controls --------------------------------------------------
+    def read_controls(self) -> None:
+        self.sigma_d_e = float(dpg.get_value("sigma_d_e"))
+        self.K_e_per_DN = float(dpg.get_value("k_gain"))
+        self.black_level_DN = float(dpg.get_value("black_level"))
+        self.full_well_e = float(dpg.get_value("full_well"))
+        self.use_poisson = bool(dpg.get_value("use_poisson"))
+        self.dark_current_e_per_s = float(dpg.get_value("dark_rate"))
+        self.temperature_c = float(dpg.get_value("temperature"))
+        self.dark_activation_energy_eV = float(dpg.get_value("activation_energy"))
+        self.integration_time_s = float(dpg.get_value("integration_time"))
+        self.prnu_std_fraction = float(dpg.get_value("prnu_std"))
+        self.dsnu_std_e = float(dpg.get_value("dsnu_std"))
+        self.dsnu_model = str(dpg.get_value("dsnu_model"))
+        self.n_measure_frames = int(dpg.get_value("n_frames"))
 
-    def _apply_scenario(self, _sender=None, _app_data=None, user_data=None) -> None:
-        sc = get_scenario(user_data)
-        self._apply_scenario_fields(sc)
-        self._push_controls()
-        dpg.set_value("recipe_combo", sc.camera_recipe_id or "Custom")
-        dpg.set_value("banner_title", self._scenario_title)
-        dpg.set_value("banner_body", self._scenario_note)
-        self.refresh()
+    def push_controls(self) -> None:
+        dpg.set_value("sigma_d_e", self.sigma_d_e)
+        dpg.set_value("k_gain", self.K_e_per_DN)
+        dpg.set_value("black_level", self.black_level_DN)
+        dpg.set_value("full_well", self.full_well_e)
+        dpg.set_value("use_poisson", self.use_poisson)
+        dpg.set_value("dark_rate", self.dark_current_e_per_s)
+        dpg.set_value("temperature", self.temperature_c)
+        dpg.set_value("activation_energy", self.dark_activation_energy_eV)
+        dpg.set_value("integration_time", self.integration_time_s)
+        dpg.set_value("prnu_std", self.prnu_std_fraction)
+        dpg.set_value("dsnu_std", self.dsnu_std_e)
+        dpg.set_value("dsnu_model", self.dsnu_model)
+        dpg.set_value("n_frames", self.n_measure_frames)
+        dpg.configure_item("verify_mu_e", max_value=self.full_well_e)
 
     def _mu_dark_e(self) -> float:
         return dc.dark_current_electrons_per_s(
@@ -206,12 +190,8 @@ class SensorApp:
             round(self._mu_dark_e(), 6),
         )
 
-    def _set_presenter(self, _sender=None, app_data=None, _user_data=None) -> None:
-        self._presenter = bool(app_data)
-        dpg.configure_item("advanced_controls", show=not self._presenter)
-
     def _run_verify(self, _sender=None, _app_data=None, _user_data=None) -> None:
-        self._read_controls()
+        self.read_controls()
         mu_dark_e = self._mu_dark_e()
         mu_e = float(dpg.get_value("verify_mu_e"))
         v = se.verify_against_monte_carlo(
@@ -235,7 +215,7 @@ class SensorApp:
         )
 
     def _run_emva_measure(self, _sender=None, _app_data=None, _user_data=None) -> None:
-        self._read_controls()
+        self.read_controls()
         mu_dark_e = self._mu_dark_e()
         measured = se.measure_emva1288(
             prnu_std_fraction=self.prnu_std_fraction,
@@ -270,7 +250,7 @@ class SensorApp:
 
     # --- compute + draw ---------------------------------------------
     def refresh(self) -> None:
-        self._read_controls()
+        self.read_controls()
         mu_dark_e = self._mu_dark_e()
 
         curve = se.photon_transfer_curve(
@@ -317,8 +297,6 @@ class SensorApp:
                 f"-- PTC is temporal-only; open the DSNU/PRNU tab for spatial noise"
             ),
         )
-        dpg.set_value("banner_title", self._scenario_title)
-        dpg.set_value("banner_body", self._scenario_note)
 
         preview = se.fpn_preview(
             prnu_std_fraction=self.prnu_std_fraction,
@@ -377,198 +355,155 @@ class SensorApp:
                 "Click Measure DSNU1288 / PRNU1288 to run the EMVA protocol on simulated stacks.",
             )
 
-    def run(self) -> None:
-        dpg.create_context()
-        dpg.create_viewport(title="Open Cam - Sensor / EMVA1288 Explorer", width=1480, height=960)
-
-        with dpg.theme() as global_theme:
-            with dpg.theme_component(dpg.mvAll):
-                dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, 4)
-                dpg.add_theme_style(dpg.mvStyleVar_WindowRounding, 6)
-        dpg.bind_theme(global_theme)
-
+    # --- layout -----------------------------------------------------
+    def register_themes(self) -> None:
         with dpg.theme() as dark_point_theme:
             with dpg.theme_component(dpg.mvScatterSeries):
                 dpg.add_theme_color(dpg.mvPlotCol_MarkerFill, (255, 190, 60), category=dpg.mvThemeCat_Plots)
                 dpg.add_theme_color(dpg.mvPlotCol_Line, (255, 190, 60), category=dpg.mvThemeCat_Plots)
+        self._dark_point_theme = dark_point_theme
 
         with dpg.theme() as measured_theme:
             with dpg.theme_component(dpg.mvScatterSeries):
                 dpg.add_theme_color(dpg.mvPlotCol_MarkerFill, (90, 200, 255), category=dpg.mvThemeCat_Plots)
                 dpg.add_theme_color(dpg.mvPlotCol_Line, (90, 200, 255), category=dpg.mvThemeCat_Plots)
+        self._measured_theme = measured_theme
 
-        with dpg.texture_registry():
-            dpg.add_dynamic_texture(
-                TEX_SIZE, TEX_SIZE, [0.5, 0.5, 0.5, 1.0] * (TEX_SIZE * TEX_SIZE), tag="dsnu_texture"
+    def register_textures(self) -> None:
+        gray = [0.5, 0.5, 0.5, 1.0] * (TEX_SIZE * TEX_SIZE)
+        dpg.add_dynamic_texture(TEX_SIZE, TEX_SIZE, gray, tag="dsnu_texture")
+        dpg.add_dynamic_texture(TEX_SIZE, TEX_SIZE, list(gray), tag="prnu_texture")
+
+    def build_controls(self) -> None:
+        dpg.add_text("Core controls")
+        dpg.add_slider_float(
+            tag="sigma_d_e", label="Read noise sigma_d", default_value=self.sigma_d_e,
+            min_value=0.1, max_value=15.0, callback=self.on_control_change,
+        )
+        dpg.add_slider_float(
+            tag="k_gain", label="Gain K (e-/DN)", default_value=self.K_e_per_DN,
+            min_value=0.3, max_value=8.0, callback=self.on_control_change,
+        )
+        dpg.add_slider_float(
+            tag="full_well", label="Full well (e-)", default_value=self.full_well_e,
+            min_value=500.0, max_value=100000.0, callback=self.on_control_change,
+        )
+        dpg.add_slider_float(
+            tag="black_level", label="Black level (DN)", default_value=self.black_level_DN,
+            min_value=0.0, max_value=100.0, callback=self.on_control_change,
+        )
+        dpg.add_checkbox(
+            tag="use_poisson", label="Poisson shot noise enabled",
+            default_value=self.use_poisson, callback=self.on_control_change,
+        )
+        dpg.add_separator()
+        dpg.add_text("Fixed-pattern noise (EMVA1288)")
+        dpg.add_slider_float(
+            tag="prnu_std", label="PRNU (fraction)",
+            default_value=self.prnu_std_fraction, min_value=0.0, max_value=0.05,
+            format="%.3f", callback=self.on_control_change,
+        )
+        dpg.add_slider_float(
+            tag="dsnu_std", label="DSNU (e-)",
+            default_value=self.dsnu_std_e, min_value=0.0, max_value=8.0,
+            callback=self.on_control_change,
+        )
+        dpg.add_slider_int(
+            tag="n_frames", label="Frames L to average",
+            default_value=self.n_measure_frames, min_value=2, max_value=100,
+            callback=self.on_control_change,
+        )
+        dpg.add_button(
+            label="Measure DSNU1288 / PRNU1288", width=-1,
+            callback=self._run_emva_measure,
+        )
+        dpg.add_text("", tag="fpn_measure_text", wrap=350)
+
+        with dpg.group(tag="advanced_controls"):
+            dpg.add_separator()
+            dpg.add_text("Dark current / temperature")
+            dpg.add_slider_float(
+                tag="dark_rate", label="Dark current (e-/s)",
+                default_value=self.dark_current_e_per_s, min_value=0.0, max_value=5.0,
+                callback=self.on_control_change,
             )
-            dpg.add_dynamic_texture(
-                TEX_SIZE, TEX_SIZE, [0.5, 0.5, 0.5, 1.0] * (TEX_SIZE * TEX_SIZE), tag="prnu_texture"
+            dpg.add_slider_float(
+                tag="temperature", label="Temperature (C)", default_value=self.temperature_c,
+                min_value=-10.0, max_value=80.0, callback=self.on_control_change,
+            )
+            dpg.add_slider_float(
+                tag="activation_energy", label="Arrhenius Ea (eV)",
+                default_value=self.dark_activation_energy_eV, min_value=0.0, max_value=1.0,
+                callback=self.on_control_change,
+            )
+            dpg.add_slider_float(
+                tag="integration_time", label="Exposure time (s)",
+                default_value=self.integration_time_s, min_value=0.0001, max_value=2.0,
+                callback=self.on_control_change,
+            )
+            dpg.add_combo(
+                tag="dsnu_model", label="DSNU model",
+                items=list(_DSNU_MODELS), default_value=self.dsnu_model,
+                callback=self.on_control_change,
             )
 
-        with dpg.window(tag="primary", label="Sensor"):
-            with dpg.child_window(tag="banner_panel", height=72, border=True):
-                dpg.add_text(self._scenario_title, tag="banner_title")
-                dpg.add_text(self._scenario_note, tag="banner_body", wrap=1000)
+    def build_footer(self) -> None:
+        dpg.add_separator()
+        dpg.add_text("Monte Carlo verification")
+        dpg.add_slider_float(
+            tag="verify_mu_e", label="mu_e to verify", default_value=2000.0,
+            min_value=0.0, max_value=self.full_well_e,
+        )
+        dpg.add_button(label="Run Monte Carlo check", width=-1, callback=self._run_verify)
+        dpg.add_text("", tag="verify_text", wrap=350)
 
-            with dpg.group(horizontal=True):
-                with dpg.child_window(width=430, border=True):
-                    dpg.add_checkbox(
-                        tag="presenter_mode", label="Presenter mode (hide advanced)",
-                        default_value=False, callback=self._set_presenter,
-                    )
-                    dpg.add_separator()
-                    dpg.add_text("Camera recipe")
-                    dpg.add_combo(
-                        tag="recipe_combo", items=["Custom", *[r.id for r in self._recipes]],
-                        default_value=self.camera_recipe_id or "Custom", callback=self._on_recipe_change,
-                    )
-                    dpg.add_separator()
-                    dpg.add_text("Core controls")
-                    dpg.add_slider_float(
-                        tag="sigma_d_e", label="Read noise sigma_d", default_value=self.sigma_d_e,
-                        min_value=0.1, max_value=15.0, callback=lambda *_: self.refresh(),
-                    )
-                    dpg.add_slider_float(
-                        tag="k_gain", label="Gain K (e-/DN)", default_value=self.K_e_per_DN,
-                        min_value=0.3, max_value=8.0, callback=lambda *_: self.refresh(),
-                    )
-                    dpg.add_slider_float(
-                        tag="full_well", label="Full well (e-)", default_value=self.full_well_e,
-                        min_value=500.0, max_value=100000.0, callback=lambda *_: self.refresh(),
-                    )
-                    dpg.add_slider_float(
-                        tag="black_level", label="Black level (DN)", default_value=self.black_level_DN,
-                        min_value=0.0, max_value=100.0, callback=lambda *_: self.refresh(),
-                    )
-                    dpg.add_checkbox(
-                        tag="use_poisson", label="Poisson shot noise enabled",
-                        default_value=self.use_poisson, callback=lambda *_: self.refresh(),
-                    )
-                    dpg.add_separator()
-                    dpg.add_text("Fixed-pattern noise (EMVA1288)")
-                    dpg.add_slider_float(
-                        tag="prnu_std", label="PRNU (fraction)",
-                        default_value=self.prnu_std_fraction, min_value=0.0, max_value=0.05,
-                        format="%.3f", callback=lambda *_: self.refresh(),
-                    )
-                    dpg.add_slider_float(
-                        tag="dsnu_std", label="DSNU (e-)",
-                        default_value=self.dsnu_std_e, min_value=0.0, max_value=8.0,
-                        callback=lambda *_: self.refresh(),
-                    )
-                    dpg.add_slider_int(
-                        tag="n_frames", label="Frames L to average",
-                        default_value=self.n_measure_frames, min_value=2, max_value=100,
-                        callback=lambda *_: self.refresh(),
-                    )
-                    dpg.add_button(
-                        label="Measure DSNU1288 / PRNU1288", width=-1,
-                        callback=self._run_emva_measure,
-                    )
-                    dpg.add_text("", tag="fpn_measure_text", wrap=350)
+    def build_content(self) -> None:
+        with dpg.tab_bar():
+            with dpg.tab(label="Photon transfer"):
+                with dpg.plot(label="Photon transfer curve (log-log)", height=380, width=-1, tag="ptc_plot"):
+                    dpg.add_plot_legend()
+                    dpg.add_plot_axis(dpg.mvXAxis, label="mean signal (DN)", tag="ptc_x", scale=dpg.mvPlotScale_Log10)
+                    with dpg.plot_axis(dpg.mvYAxis, label="variance (DN^2)", tag="ptc_y", scale=dpg.mvPlotScale_Log10):
+                        dpg.add_line_series([1.0], [1.0], label="Var(DN) vs mean(DN)", tag="ptc_series")
+                        dark_pt = dpg.add_scatter_series([1.0], [1.0], label="dark floor (mu_e=0)", tag="ptc_dark_point")
+                        dpg.bind_item_theme(dark_pt, self._dark_point_theme)
 
-                    with dpg.group(tag="advanced_controls"):
-                        dpg.add_separator()
-                        dpg.add_text("Dark current / temperature")
-                        dpg.add_slider_float(
-                            tag="dark_rate", label="Dark current (e-/s)",
-                            default_value=self.dark_current_e_per_s, min_value=0.0, max_value=5.0,
-                            callback=lambda *_: self.refresh(),
-                        )
-                        dpg.add_slider_float(
-                            tag="temperature", label="Temperature (C)", default_value=self.temperature_c,
-                            min_value=-10.0, max_value=80.0, callback=lambda *_: self.refresh(),
-                        )
-                        dpg.add_slider_float(
-                            tag="activation_energy", label="Arrhenius Ea (eV)",
-                            default_value=self.dark_activation_energy_eV, min_value=0.0, max_value=1.0,
-                            callback=lambda *_: self.refresh(),
-                        )
-                        dpg.add_slider_float(
-                            tag="integration_time", label="Exposure time (s)",
-                            default_value=self.integration_time_s, min_value=0.0001, max_value=2.0,
-                            callback=lambda *_: self.refresh(),
-                        )
-                        dpg.add_combo(
-                            tag="dsnu_model", label="DSNU model",
-                            items=list(_DSNU_MODELS), default_value=self.dsnu_model,
-                            callback=lambda *_: self.refresh(),
-                        )
+                with dpg.plot(label="SNR vs mean signal", height=340, width=-1, tag="snr_plot"):
+                    dpg.add_plot_axis(dpg.mvXAxis, label="mean signal (DN)", tag="snr_x", scale=dpg.mvPlotScale_Log10)
+                    with dpg.plot_axis(dpg.mvYAxis, label="SNR (dB)", tag="snr_y"):
+                        dpg.add_line_series([1.0], [0.0], label="SNR", tag="snr_series")
 
-                    dpg.add_separator()
-                    dpg.add_text("Lecture scenarios")
-                    for sid, sc in SCENARIOS.items():
-                        dpg.add_button(label=sc.title, width=-1, user_data=sid, callback=self._apply_scenario)
-                    dpg.add_separator()
-                    dpg.add_text("", tag="status_text", wrap=350)
-                    dpg.add_separator()
-                    dpg.add_text("Monte Carlo verification")
-                    dpg.add_slider_float(
-                        tag="verify_mu_e", label="mu_e to verify", default_value=2000.0,
-                        min_value=0.0, max_value=self.full_well_e,
-                    )
-                    dpg.add_button(label="Run Monte Carlo check", width=-1, callback=self._run_verify)
-                    dpg.add_text("", tag="verify_text", wrap=350)
+            with dpg.tab(label="DSNU / PRNU"):
+                with dpg.group(horizontal=True):
+                    with dpg.group():
+                        dpg.add_text("", tag="dsnu_caption")
+                        dpg.add_image("dsnu_texture", width=TEX_SIZE, height=TEX_SIZE)
+                    with dpg.group():
+                        dpg.add_text("", tag="prnu_caption")
+                        dpg.add_image("prnu_texture", width=TEX_SIZE, height=TEX_SIZE)
 
-                with dpg.child_window(border=False):
-                    with dpg.tab_bar():
-                        with dpg.tab(label="Photon transfer"):
-                            with dpg.plot(label="Photon transfer curve (log-log)", height=380, width=-1, tag="ptc_plot"):
-                                dpg.add_plot_legend()
-                                dpg.add_plot_axis(dpg.mvXAxis, label="mean signal (DN)", tag="ptc_x", scale=dpg.mvPlotScale_Log10)
-                                with dpg.plot_axis(dpg.mvYAxis, label="variance (DN^2)", tag="ptc_y", scale=dpg.mvPlotScale_Log10):
-                                    dpg.add_line_series([1.0], [1.0], label="Var(DN) vs mean(DN)", tag="ptc_series")
-                                    dark_pt = dpg.add_scatter_series([1.0], [1.0], label="dark floor (mu_e=0)", tag="ptc_dark_point")
-                                    dpg.bind_item_theme(dark_pt, dark_point_theme)
+                with dpg.plot(
+                    label="Spatial std vs signal (after infinite averaging)",
+                    height=280, width=-1, tag="spatial_plot",
+                ):
+                    dpg.add_plot_legend()
+                    dpg.add_plot_axis(dpg.mvXAxis, label="mean signal (e-)", tag="spatial_x")
+                    with dpg.plot_axis(dpg.mvYAxis, label="spatial std (e-)", tag="spatial_y"):
+                        dpg.add_line_series([0.0], [0.0], label="total  sqrt(DSNU^2 + (PRNU x mu)^2)", tag="spatial_total")
+                        dpg.add_line_series([0.0], [0.0], label="DSNU floor", tag="spatial_dsnu")
+                        dpg.add_line_series([0.0], [0.0], label="PRNU x mu", tag="spatial_prnu")
+                        meas = dpg.add_scatter_series([], [], label="EMVA1288 measured", tag="spatial_measured")
+                        dpg.bind_item_theme(meas, self._measured_theme)
 
-                            with dpg.plot(label="SNR vs mean signal", height=340, width=-1, tag="snr_plot"):
-                                dpg.add_plot_axis(dpg.mvXAxis, label="mean signal (DN)", tag="snr_x", scale=dpg.mvPlotScale_Log10)
-                                with dpg.plot_axis(dpg.mvYAxis, label="SNR (dB)", tag="snr_y"):
-                                    dpg.add_line_series([1.0], [0.0], label="SNR", tag="snr_series")
-
-                        with dpg.tab(label="DSNU / PRNU"):
-                            with dpg.group(horizontal=True):
-                                with dpg.group():
-                                    dpg.add_text("", tag="dsnu_caption")
-                                    dpg.add_image("dsnu_texture", width=TEX_SIZE, height=TEX_SIZE)
-                                with dpg.group():
-                                    dpg.add_text("", tag="prnu_caption")
-                                    dpg.add_image("prnu_texture", width=TEX_SIZE, height=TEX_SIZE)
-
-                            with dpg.plot(
-                                label="Spatial std vs signal (after infinite averaging)",
-                                height=280, width=-1, tag="spatial_plot",
-                            ):
-                                dpg.add_plot_legend()
-                                dpg.add_plot_axis(dpg.mvXAxis, label="mean signal (e-)", tag="spatial_x")
-                                with dpg.plot_axis(dpg.mvYAxis, label="spatial std (e-)", tag="spatial_y"):
-                                    dpg.add_line_series([0.0], [0.0], label="total  sqrt(DSNU^2 + (PRNU x mu)^2)", tag="spatial_total")
-                                    dpg.add_line_series([0.0], [0.0], label="DSNU floor", tag="spatial_dsnu")
-                                    dpg.add_line_series([0.0], [0.0], label="PRNU x mu", tag="spatial_prnu")
-                                    meas = dpg.add_scatter_series([], [], label="EMVA1288 measured", tag="spatial_measured")
-                                    dpg.bind_item_theme(meas, measured_theme)
-
-                            with dpg.group(horizontal=True):
-                                with dpg.plot(label="DSNU histogram (e-)", height=180, width=460):
-                                    dpg.add_plot_axis(dpg.mvXAxis, label="offset (e-)", tag="dsnu_hist_x")
-                                    with dpg.plot_axis(dpg.mvYAxis, label="count"):
-                                        dpg.add_line_series([0.0], [0.0], tag="dsnu_hist")
-                                with dpg.plot(label="PRNU histogram (% from mean)", height=180, width=460):
-                                    dpg.add_plot_axis(dpg.mvXAxis, label="gain - 1 (%)", tag="prnu_hist_x")
-                                    with dpg.plot_axis(dpg.mvYAxis, label="count"):
-                                        dpg.add_line_series([0.0], [0.0], tag="prnu_hist")
-
-        dpg.setup_dearpygui()
-        dpg.show_viewport()
-        dpg.set_primary_window("primary", True)
-        self._push_controls()
-        dpg.set_value("recipe_combo", self.camera_recipe_id or "Custom")
-        self.refresh()
-
-        while dpg.is_dearpygui_running():
-            dpg.render_dearpygui_frame()
-
-        dpg.destroy_context()
+                with dpg.group(horizontal=True):
+                    with dpg.plot(label="DSNU histogram (e-)", height=180, width=460):
+                        dpg.add_plot_axis(dpg.mvXAxis, label="offset (e-)", tag="dsnu_hist_x")
+                        with dpg.plot_axis(dpg.mvYAxis, label="count"):
+                            dpg.add_line_series([0.0], [0.0], tag="dsnu_hist")
+                    with dpg.plot(label="PRNU histogram (% from mean)", height=180, width=460):
+                        dpg.add_plot_axis(dpg.mvXAxis, label="gain - 1 (%)", tag="prnu_hist_x")
+                        with dpg.plot_axis(dpg.mvYAxis, label="count"):
+                            dpg.add_line_series([0.0], [0.0], tag="prnu_hist")
 
 
 def run_app(scenario_id: str | None = None) -> None:

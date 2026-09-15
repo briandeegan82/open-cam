@@ -18,11 +18,15 @@ import dearpygui.dearpygui as dpg
 from PIL import Image
 
 from opencam_gui.core import pipeline as pl
-from opencam_gui.core.catalog import illuminant_label, list_camera_recipes, list_illuminants
+from opencam_gui.core.catalog import illuminant_label, list_illuminants
 from opencam_gui.core.repo import pbrt_available
 from opencam_gui.topics.image_generation.scenarios import SCENARIOS, get_scenario
+from opencam_gui.ui.desktop.base import DemoApp
 
 PREVIEW_W, PREVIEW_H = 420, 280
+
+_FAST_LABEL = "Fast preview (analytic, no PBRT)"
+_PBRT_LABEL = "Physically accurate (PBRT render)"
 
 _LUX_PRESETS = [
     ("Moonlight (~0.3 lux)", 0.3),
@@ -48,12 +52,30 @@ def _load_png_rgba_flat(path: Path, w: int, h: int) -> list[float] | None:
     return rgba.ravel().tolist()
 
 
-class ImageGenerationApp:
-    def __init__(self, scenario_id: str | None = None) -> None:
-        self._recipes = list_camera_recipes()
+class ImageGenerationApp(DemoApp):
+    viewport_title = "Open Cam - Image Generation"
+    viewport_width = 1500
+    viewport_height = 980
+    window_label = "Image Generation"
+    control_panel_width = 400
+    banner_wrap = 1100
+    presenter_mode = False
+    recipe_custom_entry = False
+    recipe_autoload = False
+    show_status_text = False
+    scenarios = SCENARIOS
+    default_banner_title = "Scene -> sensor -> image"
+    default_banner_body = (
+        "Pick a scene, camera and illumination, then Generate. Every step below is a "
+        "real tools/*.py subprocess call, streamed into the log panel as it runs."
+    )
+
+    def init_state(self) -> None:
         self._illuminants = list_illuminants()
         self._illum_by_id = {i.id: i for i in self._illuminants}
+        self._illum_id_by_label = {illuminant_label(i): i.id for i in self._illuminants}
         self._scenes = pl.list_scenes()
+        self._scene_id_by_label = {s.label: s.id for s in self._scenes}
 
         self.scene_id = "colorchecker"
         self.camera_recipe_id = "nikon_z6"
@@ -72,35 +94,25 @@ class ImageGenerationApp:
         self._running = False
         self._log_lines: list[str] = []
 
-        self._scenario_title = "Scene -> sensor -> image"
-        self._scenario_note = (
-            "Pick a scene, camera and illumination, then Generate. Every step below is a "
-            "real tools/*.py subprocess call, streamed into the log panel as it runs."
-        )
-        if scenario_id:
-            self._apply_scenario_fields(get_scenario(scenario_id))
+    def get_scenario(self, scenario_id: str):
+        return get_scenario(scenario_id)
 
-    def _apply_scenario_fields(self, sc) -> None:
+    def apply_scenario_state(self, sc) -> None:
         self.scene_id = sc.scene_id
-        self.camera_recipe_id = sc.camera_recipe_id
         self.illuminant_id = sc.illuminant_id or self.illuminant_id
         self.target_lux = sc.target_illuminance_lux
         self.exposure_time_s = sc.exposure_time_s
         self.mode = sc.mode
-        self._scenario_title = sc.title
-        self._scenario_note = f"{sc.teaching_point}\n{sc.notes}"
 
     # --- controls --------------------------------------------------
     def _current_scene(self) -> pl.Scene:
         return pl.SCENES[self.scene_id]
 
-    def _read_controls(self) -> None:
-        scene_label = dpg.get_value("scene_combo")
-        self.scene_id = self._scene_id_by_label[scene_label]
+    def read_controls(self) -> None:
+        self.scene_id = self._scene_id_by_label[dpg.get_value("scene_combo")]
         self.camera_recipe_id = dpg.get_value("recipe_combo")
-        self.mode = "fast_analytic" if dpg.get_value("mode_radio") == "Fast preview (analytic, no PBRT)" else "pbrt_accurate"
-        illum_label = dpg.get_value("illuminant_combo")
-        self.illuminant_id = self._illum_id_by_label.get(illum_label)
+        self.mode = "fast_analytic" if dpg.get_value("mode_radio") == _FAST_LABEL else "pbrt_accurate"
+        self.illuminant_id = self._illum_id_by_label.get(dpg.get_value("illuminant_combo"))
         self.target_lux = float(dpg.get_value("lux_slider"))
         self.exposure_time_s = float(dpg.get_value("exposure_slider"))
         self.seed = int(dpg.get_value("seed_input"))
@@ -109,14 +121,10 @@ class ImageGenerationApp:
         self.pixelsamples = int(dpg.get_value("pixelsamples_slider"))
         self.dry_run = bool(dpg.get_value("dry_run_checkbox"))
 
-    def _push_controls(self) -> None:
-        scene = self._current_scene()
-        dpg.set_value("scene_combo", scene.label)
+    def push_controls(self) -> None:
+        dpg.set_value("scene_combo", self._current_scene().label)
         dpg.set_value("recipe_combo", self.camera_recipe_id)
-        dpg.set_value(
-            "mode_radio",
-            "Fast preview (analytic, no PBRT)" if self.mode == "fast_analytic" else "Physically accurate (PBRT render)",
-        )
+        dpg.set_value("mode_radio", _FAST_LABEL if self.mode == "fast_analytic" else _PBRT_LABEL)
         if self.illuminant_id and self.illuminant_id in self._illum_by_id:
             dpg.set_value("illuminant_combo", illuminant_label(self._illum_by_id[self.illuminant_id]))
         dpg.set_value("lux_slider", self.target_lux)
@@ -127,31 +135,26 @@ class ImageGenerationApp:
         dpg.set_value("pixelsamples_slider", self.pixelsamples)
         self._update_mode_availability()
 
+    def refresh(self) -> None:
+        self._update_mode_availability()
+
     def _update_mode_availability(self) -> None:
         scene = self._current_scene()
-        pbrt_ok = pbrt_available()
         note_lines = [scene.description]
         if not scene.supports_fast_analytic:
             note_lines.append("This scene requires the physically-accurate PBRT path (no fast preview available).")
             if self.mode == "fast_analytic":
                 self.mode = "pbrt_accurate"
-                dpg.set_value("mode_radio", "Physically accurate (PBRT render)")
+                dpg.set_value("mode_radio", _PBRT_LABEL)
         if not scene.supports_illuminant_spectrum:
             note_lines.append("Illuminant spectrum is fixed by the scene builder for this target.")
-        if not pbrt_ok:
+        if not pbrt_available():
             note_lines.append("PBRT binary not found -- 'Physically accurate' will only work as a Dry run.")
         dpg.configure_item("illuminant_combo", enabled=scene.supports_illuminant_spectrum)
         dpg.set_value("scene_note", "\n".join(note_lines))
 
-    def _apply_scenario(self, _sender=None, _app_data=None, user_data=None) -> None:
-        sc = get_scenario(user_data)
-        self._apply_scenario_fields(sc)
-        self._push_controls()
-        dpg.set_value("banner_title", self._scenario_title)
-        dpg.set_value("banner_body", self._scenario_note)
-
     def _on_scene_change(self, *_):
-        self._read_controls()
+        self.read_controls()
         self._update_mode_availability()
 
     def _set_lux_preset(self, _sender=None, _app_data=None, user_data=None) -> None:
@@ -168,7 +171,7 @@ class ImageGenerationApp:
     def _generate(self, _sender=None, _app_data=None, _user_data=None) -> None:
         if self._running:
             return
-        self._read_controls()
+        self.read_controls()
         self._log_lines = []
         dpg.set_value("log_text", "")
         dpg.configure_item("generate_button", enabled=False)
@@ -197,7 +200,7 @@ class ImageGenerationApp:
         self._worker = threading.Thread(target=worker, daemon=True)
         self._worker.start()
 
-    def _drain_queue(self) -> None:
+    def tick(self) -> None:
         try:
             while True:
                 item = self._log_queue.get_nowait()
@@ -240,113 +243,69 @@ class ImageGenerationApp:
                 )
         dpg.set_value("result_text", "\n".join(lines))
 
-    def _tick(self) -> None:
-        self._drain_queue()
+    # --- layout -----------------------------------------------------
+    def register_textures(self) -> None:
+        dpg.add_dynamic_texture(PREVIEW_W, PREVIEW_H, _blank_rgba(PREVIEW_W, PREVIEW_H), tag="clean_texture")
+        dpg.add_dynamic_texture(PREVIEW_W, PREVIEW_H, _blank_rgba(PREVIEW_W, PREVIEW_H), tag="noisy_texture")
 
-    def run(self) -> None:
-        dpg.create_context()
-        dpg.create_viewport(title="Open Cam - Image Generation", width=1500, height=980)
+    def build_pre_controls(self) -> None:
+        dpg.add_text("Scene")
+        dpg.add_combo(
+            tag="scene_combo", items=[s.label for s in self._scenes], callback=self._on_scene_change
+        )
+        dpg.add_text("", tag="scene_note", wrap=370)
+        dpg.add_separator()
 
-        with dpg.theme() as global_theme:
-            with dpg.theme_component(dpg.mvAll):
-                dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, 4)
-                dpg.add_theme_style(dpg.mvStyleVar_WindowRounding, 6)
-        dpg.bind_theme(global_theme)
+    def build_controls(self) -> None:
+        dpg.add_text("Generation mode")
+        dpg.add_radio_button(tag="mode_radio", items=[_FAST_LABEL, _PBRT_LABEL], callback=lambda *_: None)
+        dpg.add_separator()
 
-        with dpg.texture_registry():
-            dpg.add_dynamic_texture(PREVIEW_W, PREVIEW_H, _blank_rgba(PREVIEW_W, PREVIEW_H), tag="clean_texture")
-            dpg.add_dynamic_texture(PREVIEW_W, PREVIEW_H, _blank_rgba(PREVIEW_W, PREVIEW_H), tag="noisy_texture")
+        dpg.add_text("Illumination spectrum")
+        dpg.add_combo(
+            tag="illuminant_combo",
+            items=[illuminant_label(i) for i in self._illuminants],
+            callback=lambda *_: None,
+        )
+        dpg.add_text("Illumination intensity (lux)")
+        dpg.add_slider_float(
+            tag="lux_slider", default_value=self.target_lux, min_value=0.1, max_value=50000.0,
+            format="%.1f lux",
+        )
+        with dpg.group(horizontal=True):
+            for label, val in _LUX_PRESETS:
+                dpg.add_button(label=label.split(" (")[0], user_data=val, callback=self._set_lux_preset)
+        dpg.add_slider_float(
+            tag="exposure_slider", label="Exposure time (s)", default_value=self.exposure_time_s,
+            min_value=0.0005, max_value=1.0,
+        )
 
-        scene_labels = [s.label for s in self._scenes]
-        self._scene_id_by_label = {s.label: s.id for s in self._scenes}
-        illum_labels = [illuminant_label(i) for i in self._illuminants]
-        self._illum_id_by_label = {illuminant_label(i): i.id for i in self._illuminants}
+    def build_footer(self) -> None:
+        dpg.add_separator()
+        dpg.add_text("Advanced")
+        dpg.add_input_int(tag="seed_input", label="Seed", default_value=self.seed)
+        dpg.add_slider_int(tag="xres_slider", label="Width (px)", default_value=self.xres, min_value=80, max_value=960)
+        dpg.add_slider_int(tag="yres_slider", label="Height (px)", default_value=self.yres, min_value=60, max_value=640)
+        dpg.add_slider_int(
+            tag="pixelsamples_slider", label="PBRT samples/px", default_value=self.pixelsamples,
+            min_value=4, max_value=1024,
+        )
+        dpg.add_checkbox(tag="dry_run_checkbox", label="Dry run (print commands only)", default_value=False)
+        dpg.add_button(tag="generate_button", label="Generate", width=-1, callback=self._generate)
+        dpg.add_text("", tag="result_text", wrap=370)
 
-        with dpg.window(tag="primary", label="Image Generation"):
-            with dpg.child_window(tag="banner_panel", height=72, border=True):
-                dpg.add_text(self._scenario_title, tag="banner_title")
-                dpg.add_text(self._scenario_note, tag="banner_body", wrap=1100)
-
-            with dpg.group(horizontal=True):
-                with dpg.child_window(width=400, border=True):
-                    dpg.add_text("Scene")
-                    dpg.add_combo(tag="scene_combo", items=scene_labels, callback=self._on_scene_change)
-                    dpg.add_text("", tag="scene_note", wrap=370)
-                    dpg.add_separator()
-
-                    dpg.add_text("Camera recipe")
-                    dpg.add_combo(
-                        tag="recipe_combo", items=[r.id for r in self._recipes],
-                        callback=lambda *_: None,
-                    )
-                    dpg.add_separator()
-
-                    dpg.add_text("Generation mode")
-                    dpg.add_radio_button(
-                        tag="mode_radio",
-                        items=["Fast preview (analytic, no PBRT)", "Physically accurate (PBRT render)"],
-                        callback=lambda *_: None,
-                    )
-                    dpg.add_separator()
-
-                    dpg.add_text("Illumination spectrum")
-                    dpg.add_combo(tag="illuminant_combo", items=illum_labels, callback=lambda *_: None)
-                    dpg.add_text("Illumination intensity (lux)")
-                    dpg.add_slider_float(
-                        tag="lux_slider", default_value=self.target_lux, min_value=0.1, max_value=50000.0,
-                        format="%.1f lux",
-                    )
-                    with dpg.group(horizontal=True):
-                        for label, val in _LUX_PRESETS:
-                            dpg.add_button(label=label.split(" (")[0], user_data=val, callback=self._set_lux_preset)
-                    dpg.add_slider_float(
-                        tag="exposure_slider", label="Exposure time (s)", default_value=self.exposure_time_s,
-                        min_value=0.0005, max_value=1.0,
-                    )
-                    dpg.add_separator()
-
-                    dpg.add_text("Lecture scenarios")
-                    for sid, sc in SCENARIOS.items():
-                        dpg.add_button(label=sc.title, width=-1, user_data=sid, callback=self._apply_scenario)
-                    dpg.add_separator()
-
-                    dpg.add_text("Advanced")
-                    dpg.add_input_int(tag="seed_input", label="Seed", default_value=self.seed)
-                    dpg.add_slider_int(tag="xres_slider", label="Width (px)", default_value=self.xres, min_value=80, max_value=960)
-                    dpg.add_slider_int(tag="yres_slider", label="Height (px)", default_value=self.yres, min_value=60, max_value=640)
-                    dpg.add_slider_int(
-                        tag="pixelsamples_slider", label="PBRT samples/px", default_value=self.pixelsamples,
-                        min_value=4, max_value=1024,
-                    )
-                    dpg.add_checkbox(tag="dry_run_checkbox", label="Dry run (print commands only)", default_value=False)
-                    dpg.add_button(tag="generate_button", label="Generate", width=-1, callback=self._generate)
-                    dpg.add_text("", tag="result_text", wrap=370)
-
-                with dpg.child_window(border=False):
-                    with dpg.group(horizontal=True):
-                        with dpg.group():
-                            dpg.add_text("Clean (no sensor noise)")
-                            dpg.add_image("clean_texture", width=PREVIEW_W, height=PREVIEW_H)
-                        with dpg.group():
-                            dpg.add_text("Noisy (full EMVA + Bayer + demosaic)")
-                            dpg.add_image("noisy_texture", width=PREVIEW_W, height=PREVIEW_H)
-                    dpg.add_separator()
-                    dpg.add_text("Command log")
-                    with dpg.child_window(tag="log_window", height=-1, border=True):
-                        dpg.add_text("", tag="log_text", wrap=1000)
-
-        dpg.setup_dearpygui()
-        dpg.show_viewport()
-        dpg.set_primary_window("primary", True)
-        self._push_controls()
-        dpg.set_value("banner_title", self._scenario_title)
-        dpg.set_value("banner_body", self._scenario_note)
-
-        while dpg.is_dearpygui_running():
-            self._tick()
-            dpg.render_dearpygui_frame()
-
-        dpg.destroy_context()
+    def build_content(self) -> None:
+        with dpg.group(horizontal=True):
+            with dpg.group():
+                dpg.add_text("Clean (no sensor noise)")
+                dpg.add_image("clean_texture", width=PREVIEW_W, height=PREVIEW_H)
+            with dpg.group():
+                dpg.add_text("Noisy (full EMVA + Bayer + demosaic)")
+                dpg.add_image("noisy_texture", width=PREVIEW_W, height=PREVIEW_H)
+        dpg.add_separator()
+        dpg.add_text("Command log")
+        with dpg.child_window(tag="log_window", height=-1, border=True):
+            dpg.add_text("", tag="log_text", wrap=1000)
 
 
 def run_app(scenario_id: str | None = None) -> None:
