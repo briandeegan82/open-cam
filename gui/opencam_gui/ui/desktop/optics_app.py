@@ -17,6 +17,8 @@ from opencam_gui.ui.desktop.base import DemoApp
 
 KERNEL_SIZE = 65
 CHART_SIZE = 160
+FLARE_SIZE = 192
+STARBURST_SIZE = 128
 _RGB_HEX = {"R": (255, 100, 100), "G": (100, 220, 100), "B": (110, 160, 255)}
 
 
@@ -35,10 +37,10 @@ def _gray_rgba_flat(gray: np.ndarray) -> list[float]:
 
 class OpticsApp(DemoApp):
     viewport_title = "Open Cam — Optics / PSF Explorer"
-    viewport_width = 1400
-    viewport_height = 900
+    viewport_width = 1460
+    viewport_height = 940
     window_label = "Optics"
-    control_panel_width = 360
+    control_panel_width = 400
     scenarios = SCENARIOS
     default_banner_title = "Interactive PSF explorer"
     default_banner_body = (
@@ -52,6 +54,18 @@ class OpticsApp(DemoApp):
         self.pixel_pitch_um = 1.4
         self.sigma_geometric_px = 0.5
         self.lateral_ca_coefficient = 0.0
+
+        self.stray_light_enabled = False
+        self.veiling_glare_fraction = 0.0
+        self.halo_sigma_pixels = 15.0
+        self.halo_strength = 0.0
+        self.ghost_enabled = False
+        self.ghost_strength = 0.02
+        self.aperture_diffraction_enabled = False
+        self.n_blades = 6
+        self.diffraction_strength = 0.05
+        self.blade_rotation_deg = 0.0
+
         self._line_themes: dict[str, int] = {}
 
     def get_scenario(self, scenario_id: str):
@@ -63,6 +77,16 @@ class OpticsApp(DemoApp):
         self.pixel_pitch_um = sc.pixel_pitch_um
         self.sigma_geometric_px = sc.sigma_geometric_px
         self.lateral_ca_coefficient = sc.lateral_ca_coefficient
+        self.stray_light_enabled = sc.stray_light_enabled
+        self.veiling_glare_fraction = sc.veiling_glare_fraction
+        self.halo_sigma_pixels = sc.halo_sigma_pixels
+        self.halo_strength = sc.halo_strength
+        self.ghost_enabled = sc.ghost_enabled
+        self.ghost_strength = sc.ghost_strength
+        self.aperture_diffraction_enabled = sc.aperture_diffraction_enabled
+        self.n_blades = sc.n_blades
+        self.diffraction_strength = sc.diffraction_strength
+        self.blade_rotation_deg = sc.blade_rotation_deg
 
     def apply_recipe_state(self, model: dict) -> None:
         summary = optics_summary(model)
@@ -78,6 +102,16 @@ class OpticsApp(DemoApp):
         self.pixel_pitch_um = float(dpg.get_value("pixel_pitch_um"))
         self.sigma_geometric_px = float(dpg.get_value("sigma_geom"))
         self.lateral_ca_coefficient = float(dpg.get_value("lca_coeff"))
+        self.stray_light_enabled = bool(dpg.get_value("stray_enabled"))
+        self.veiling_glare_fraction = float(dpg.get_value("veiling"))
+        self.halo_sigma_pixels = float(dpg.get_value("halo_sigma"))
+        self.halo_strength = float(dpg.get_value("halo_strength"))
+        self.ghost_enabled = bool(dpg.get_value("ghost_enabled"))
+        self.ghost_strength = float(dpg.get_value("ghost_strength"))
+        self.aperture_diffraction_enabled = bool(dpg.get_value("diffraction_enabled"))
+        self.n_blades = int(dpg.get_value("n_blades"))
+        self.diffraction_strength = float(dpg.get_value("diffraction_strength"))
+        self.blade_rotation_deg = float(dpg.get_value("blade_rotation"))
 
     def push_controls(self) -> None:
         dpg.set_value("psf_mode", self.mode)
@@ -85,6 +119,16 @@ class OpticsApp(DemoApp):
         dpg.set_value("pixel_pitch_um", self.pixel_pitch_um)
         dpg.set_value("sigma_geom", self.sigma_geometric_px)
         dpg.set_value("lca_coeff", self.lateral_ca_coefficient)
+        dpg.set_value("stray_enabled", self.stray_light_enabled)
+        dpg.set_value("veiling", self.veiling_glare_fraction)
+        dpg.set_value("halo_sigma", self.halo_sigma_pixels)
+        dpg.set_value("halo_strength", self.halo_strength)
+        dpg.set_value("ghost_enabled", self.ghost_enabled)
+        dpg.set_value("ghost_strength", self.ghost_strength)
+        dpg.set_value("diffraction_enabled", self.aperture_diffraction_enabled)
+        dpg.set_value("n_blades", self.n_blades)
+        dpg.set_value("diffraction_strength", self.diffraction_strength)
+        dpg.set_value("blade_rotation", self.blade_rotation_deg)
 
     # --- compute + draw ---------------------------------------------
     def refresh(self) -> None:
@@ -132,6 +176,8 @@ class OpticsApp(DemoApp):
             dpg.set_value(f"tbl_{ch}_stotal", f"{r.sigma_total_px:.3f}")
             dpg.set_value(f"tbl_{ch}_rho0", f"{r.rho0_px:.3f}" if r.rho0_px else "-")
 
+        self._refresh_stray_light()
+
         diffraction_limited = results["B"].sigma_diff_px >= self.sigma_geometric_px
         dpg.set_value(
             "status_text",
@@ -144,6 +190,50 @@ class OpticsApp(DemoApp):
                     if self.lateral_ca_coefficient > 0
                     else ""
                 )
+            ),
+        )
+
+    def _refresh_stray_light(self) -> None:
+        clean = oe.stray_light_test_image(FLARE_SIZE)
+        cfg = oe.stray_light_config(
+            enabled=self.stray_light_enabled,
+            veiling_glare_fraction=self.veiling_glare_fraction,
+            halo_sigma_pixels=self.halo_sigma_pixels,
+            halo_strength=self.halo_strength,
+            ghost_enabled=self.ghost_enabled,
+            ghost_strength=self.ghost_strength,
+            aperture_diffraction_enabled=self.aperture_diffraction_enabled,
+            n_blades=self.n_blades,
+            diffraction_strength=self.diffraction_strength,
+            rotation_deg=self.blade_rotation_deg,
+            psf_kernel_size=STARBURST_SIZE,
+        )
+        strayed = oe.apply_stray_light(clean, cfg)
+
+        dpg.set_value("flare_clean_texture", _gray_rgba_flat(oe.tone_for_display(clean)))
+        dpg.set_value("flare_texture", _gray_rgba_flat(oe.tone_for_display(strayed)))
+
+        starburst = oe.aperture_diffraction_kernel(self.n_blades, STARBURST_SIZE, self.blade_rotation_deg)
+        dpg.set_value("starburst_texture", _gray_rgba_flat(np.power(starburst, 0.25)))
+        dpg.set_value(
+            "starburst_caption",
+            f"{self.n_blades}-blade iris PSF  ->  "
+            f"{self.n_blades if self.n_blades % 2 == 0 else 2 * self.n_blades} spikes",
+        )
+
+        ec = oe.edge_contrast(clean, strayed)
+        dpg.set_value("edge_clean", [ec.position_px.tolist(), ec.clean.tolist()])
+        dpg.set_value("edge_strayed", [ec.position_px.tolist(), ec.strayed.tolist()])
+        dpg.set_axis_limits("edge_x", 0.0, float(ec.position_px[-1]))
+        dpg.set_axis_limits("edge_y", 0.0, max(float(ec.strayed.max()), 1.0) * 1.1)
+        dpg.set_value(
+            "edge_caption",
+            (
+                f"Michelson contrast across the step edge: {ec.clean_contrast:.3f} clean  ->  "
+                f"{ec.strayed_contrast:.3f} with stray light  "
+                f"({ec.contrast_loss_percent:.1f}% lost)\n"
+                "Veiling glare adds the same constant everywhere: the black-to-white difference "
+                "survives, but the sum grows, so contrast falls with no extra blur."
             ),
         )
 
@@ -160,6 +250,16 @@ class OpticsApp(DemoApp):
         dpg.add_dynamic_texture(CHART_SIZE, CHART_SIZE, blank, tag="ca_texture")
         dpg.add_dynamic_texture(CHART_SIZE, CHART_SIZE, list(blank), tag="ca_gray_texture")
 
+        flare_blank = [0.0, 0.0, 0.0, 1.0] * (FLARE_SIZE * FLARE_SIZE)
+        dpg.add_dynamic_texture(FLARE_SIZE, FLARE_SIZE, flare_blank, tag="flare_clean_texture")
+        dpg.add_dynamic_texture(FLARE_SIZE, FLARE_SIZE, list(flare_blank), tag="flare_texture")
+        dpg.add_dynamic_texture(
+            STARBURST_SIZE,
+            STARBURST_SIZE,
+            [0.0, 0.0, 0.0, 1.0] * (STARBURST_SIZE * STARBURST_SIZE),
+            tag="starburst_texture",
+        )
+
     def build_controls(self) -> None:
         dpg.add_text("Core controls")
         dpg.add_slider_float(
@@ -174,6 +274,55 @@ class OpticsApp(DemoApp):
             tag="psf_mode", label="PSF mode", items=["chromatic_gaussian", "airy_disk"],
             default_value=self.mode, callback=self.on_control_change,
         )
+
+        dpg.add_separator()
+        dpg.add_checkbox(
+            tag="stray_enabled", label="Stray light enabled",
+            default_value=self.stray_light_enabled, callback=self.on_control_change,
+        )
+        with dpg.collapsing_header(label="Stray light terms", default_open=True):
+            dpg.add_slider_float(
+                tag="veiling", label="Veiling glare fraction",
+                default_value=self.veiling_glare_fraction, min_value=0.0, max_value=0.25,
+                format="%.3f", callback=self.on_control_change,
+            )
+            dpg.add_slider_float(
+                tag="halo_strength", label="Halo strength",
+                default_value=self.halo_strength, min_value=0.0, max_value=0.25,
+                format="%.3f", callback=self.on_control_change,
+            )
+            dpg.add_slider_float(
+                tag="halo_sigma", label="Halo sigma (px)",
+                default_value=self.halo_sigma_pixels, min_value=1.0, max_value=60.0,
+                callback=self.on_control_change,
+            )
+            dpg.add_checkbox(
+                tag="ghost_enabled", label="Ghost reflection",
+                default_value=self.ghost_enabled, callback=self.on_control_change,
+            )
+            dpg.add_slider_float(
+                tag="ghost_strength", label="Ghost strength",
+                default_value=self.ghost_strength, min_value=0.0, max_value=0.2,
+                format="%.3f", callback=self.on_control_change,
+            )
+            dpg.add_checkbox(
+                tag="diffraction_enabled", label="Aperture blade diffraction",
+                default_value=self.aperture_diffraction_enabled, callback=self.on_control_change,
+            )
+            dpg.add_slider_int(
+                tag="n_blades", label="Iris blades", default_value=self.n_blades,
+                min_value=3, max_value=14, callback=self.on_control_change,
+            )
+            dpg.add_slider_float(
+                tag="diffraction_strength", label="Starburst strength",
+                default_value=self.diffraction_strength, min_value=0.0, max_value=0.4,
+                format="%.3f", callback=self.on_control_change,
+            )
+            dpg.add_slider_float(
+                tag="blade_rotation", label="Blade rotation (deg)",
+                default_value=self.blade_rotation_deg, min_value=0.0, max_value=90.0,
+                callback=self.on_control_change,
+            )
 
         with dpg.group(tag="advanced_controls"):
             dpg.add_separator()
@@ -190,6 +339,34 @@ class OpticsApp(DemoApp):
             )
 
     def build_content(self) -> None:
+        with dpg.tab_bar():
+            with dpg.tab(label="PSF and aberrations"):
+                self._build_psf_tab()
+            with dpg.tab(label="Stray light"):
+                self._build_stray_light_tab()
+
+    def _build_stray_light_tab(self) -> None:
+        with dpg.group(horizontal=True):
+            with dpg.group():
+                dpg.add_text("Clean scene (log-tone mapped)")
+                dpg.add_image("flare_clean_texture", width=300, height=300)
+            with dpg.group():
+                dpg.add_text("With stray light (apply_stray_light)")
+                dpg.add_image("flare_texture", width=300, height=300)
+            with dpg.group():
+                dpg.add_text("", tag="starburst_caption")
+                dpg.add_image("starburst_texture", width=260, height=260)
+
+        dpg.add_separator()
+        with dpg.plot(label="High-contrast edge profile", height=280, width=-1):
+            dpg.add_plot_legend()
+            dpg.add_plot_axis(dpg.mvXAxis, label="column (px)", tag="edge_x")
+            with dpg.plot_axis(dpg.mvYAxis, label="scene value", tag="edge_y"):
+                dpg.add_line_series([0.0], [0.0], label="clean", tag="edge_clean")
+                dpg.add_line_series([0.0], [0.0], label="with stray light", tag="edge_strayed")
+        dpg.add_text("", tag="edge_caption", wrap=940)
+
+    def _build_psf_tab(self) -> None:
         with dpg.table(
             header_row=True, borders_innerH=True, borders_outerH=True,
             borders_innerV=True, borders_outerV=True,
