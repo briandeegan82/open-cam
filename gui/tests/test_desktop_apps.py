@@ -119,3 +119,16 @@ def test_constructing_with_scenario_id_matches_clicking_it(dpg_context, app_cls)
     assert {
         k: v for k, v in vars(from_click).items() if isinstance(v, (int, float, str, bool))
     } == scalars
+
+
+def test_isp_cfa_scenarios_load_the_named_qe_curves(dpg_context):
+    """RCCB/CMY scenarios have to change the spectral basis, not just the combo."""
+    app = _built(IspApp)
+    app._on_scenario_click(user_data="rccb")
+    assert app.camera_recipe_id == "default_rccb"
+    assert app.qe_paths["green"].endswith("QE_cyan.csv")
+    app._on_scenario_click(user_data="cmy")
+    assert app.camera_recipe_id == "default_cmy"
+    assert app.qe_paths["green"].endswith("QE_magenta.csv")
+    assert app.qe_paths["red"].endswith("QE_cyan.csv")
+    assert app.qe_paths["blue"].endswith("QE_yellow.csv")

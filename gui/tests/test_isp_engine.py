@@ -261,11 +261,18 @@ class TestSpectralOverlay:
             ie.load_chart(illuminant_id="A")).cct_k == pytest.approx(2856, rel=0.02)
 
 
+def _chart_for_scenario(sc):
+    return ie.load_chart(
+        illuminant_id=sc.illuminant_id,
+        qe_paths=ie.qe_paths_for_recipe(sc.camera_recipe_id),
+    )
+
+
 class TestScenarios:
     @pytest.mark.parametrize("sid", list(SCENARIOS))
     def test_every_scenario_runs(self, sid):
         sc = SCENARIOS[sid]
-        chart = ie.load_chart(illuminant_id=sc.illuminant_id)
+        chart = _chart_for_scenario(sc)
         result = ie.run_isp(chart, ie.IspConfig(
             enabled=set(sc.stages), demosaic_method=sc.demosaic_method,
             wb_method=sc.wb_method, bayer_pattern=sc.bayer_pattern))
@@ -273,10 +280,15 @@ class TestScenarios:
         assert np.all(np.isfinite(ie.colour_accuracy(chart, result).delta_e_2000))
 
     def test_scenarios_only_name_real_stages_and_methods(self):
+        from opencam_gui.core.catalog import list_camera_recipes
+
+        known_recipes = {r.id for r in list_camera_recipes()}
         for sc in SCENARIOS.values():
             assert set(sc.stages) <= set(ie.STAGES), sc.id
             assert sc.demosaic_method in ie.DEMOSAIC_METHODS, sc.id
             assert sc.wb_method in ie.WB_METHODS, sc.id
+            if sc.camera_recipe_id:
+                assert sc.camera_recipe_id in known_recipes, sc.id
 
     def test_the_raw_scenario_really_is_badly_wrong(self):
         sc = SCENARIOS["raw_is_not_a_colour_space"]
@@ -302,3 +314,16 @@ class TestCameraRecipes:
             "red_csv": "a.csv", "green_csv": "b.csv", "blue_csv": "c.csv"}}}
         paths = ie.qe_paths_from_model(model)
         assert (paths["red"], paths["green"], paths["blue"]) == ("a.csv", "b.csv", "c.csv")
+
+    def test_rccb_and_cmy_recipes_are_not_the_same_camera_as_bayer(self):
+        """The alternative-CFA scenarios only teach if they actually change the QE."""
+        bayer = ie.load_chart(qe_paths=ie.qe_paths_for_recipe("nikon_z6"))
+        rccb = ie.load_chart(qe_paths=ie.qe_paths_for_recipe("default_rccb"))
+        cmy = ie.load_chart(qe_paths=ie.qe_paths_for_recipe("default_cmy"))
+        assert not np.allclose(rccb.qe_rgb, bayer.qe_rgb)
+        assert not np.allclose(cmy.qe_rgb, bayer.qe_rgb)
+        assert not np.allclose(cmy.camera_rgb, bayer.camera_rgb)
+        assert rccb.luther_error != pytest.approx(bayer.luther_error, rel=1e-4, abs=1e-6)
+
+    def test_none_recipe_falls_back_to_the_default_curves(self):
+        assert ie.qe_paths_for_recipe(None)["red"] == ie.DEFAULT_QE_PATHS["red"]

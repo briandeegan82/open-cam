@@ -94,6 +94,10 @@ class IspApp(DemoApp):
         self.wb_method = sc.wb_method
         self.bayer_pattern = sc.bayer_pattern
         self.patch_index = sc.patch_index
+        # Alternative CFAs (RCCB, CMY) are different QE curves, so a scenario
+        # that names a recipe has to actually load it -- otherwise the combo
+        # would change and the spectra would not.
+        self.qe_paths = ie.qe_paths_for_recipe(sc.camera_recipe_id)
 
     # --- controls --------------------------------------------------
     def read_controls(self) -> None:

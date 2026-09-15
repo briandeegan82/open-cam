@@ -176,6 +176,40 @@ SCENARIOS: dict[str, Scenario] = {
         wb_method="white_patch",
         camera_recipe_id="nikon_z6",
     ),
+    "rccb": Scenario(
+        id="rccb",
+        title="RCCB: cyan in place of a green",
+        teaching_point=(
+            "An RCCB array puts cyan where Bayer puts green. Near-IR leaks through more "
+            "easily, and the Luther error grows because cyan is a worse match to the eye's "
+            "V(lambda) than green is. The same 3x3 cannot save a worse spectral basis."
+        ),
+        notes=(
+            "Compare the QE overlay and the Luther error against the D65 Bayer scenario. "
+            "The green curve is now cyan."
+        ),
+        illuminant_id="D65",
+        stages=ALL_STAGES,
+        wb_method="white_patch",
+        camera_recipe_id="default_rccb",
+    ),
+    "cmy": Scenario(
+        id="cmy",
+        title="CMY: complementary filters",
+        teaching_point=(
+            "Cyan, magenta and yellow filters pass two thirds of the spectrum each, so more "
+            "photons arrive -- and the three curves overlap more, which is exactly what "
+            "makes the Luther condition harder to meet."
+        ),
+        notes=(
+            "Look at the QE overlay: every channel is broad. Then read delta-E -- more "
+            "light did not buy more colour accuracy."
+        ),
+        illuminant_id="D65",
+        stages=ALL_STAGES,
+        wb_method="white_patch",
+        camera_recipe_id="default_cmy",
+    ),
 }
 
 

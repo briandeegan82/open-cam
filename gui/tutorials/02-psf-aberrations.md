@@ -1,10 +1,14 @@
-# Tutorial 01 -- Optics / Point-Spread Function
+# Tutorial 02 -- PSF, Diffraction and Aberrations
 
 **Demo:** `opencam-gui demo optics`
-**Audience:** graduate / advanced undergraduate, camera or imaging background helpful but not required
+**Audience:** graduate / advanced undergraduate; Tutorial 01 assumed
 **Goal:** connect lens f-number and pixel pitch to the actual post-render PSF stage in
-`tools/apply_spectral_psf.py` -- diffraction, geometric aberration, and lateral
-chromatic aberration.
+`tools/apply_spectral_psf.py` -- diffraction, geometric aberration, lateral
+chromatic aberration, and the stray light that destroys contrast without
+blurring anything.
+
+Tutorial 01 treated the lens as perfect: one object point, one image point.
+This one takes that point and spreads it.
 
 Every number and image in this demo comes from importing and calling the real
 functions in `tools/apply_spectral_psf.py` (`psf_sigma_chromatic`,
@@ -65,6 +69,34 @@ hardest channel to blur away aberration under) -- past that point, stopping
 down the aperture further or improving the lens design no longer buys
 sharpness; only a larger aperture (smaller *N*) or bigger pixels would.
 
+### 1.5 Stray light: contrast loss without blur
+
+Everything above is convolution: energy stays local, and the PSF describes
+exactly where it went. Stray light is the part that does not stay local --
+scattered off glass surfaces, off the barrel, off the sensor cover. It barely
+changes the PSF, and it destroys contrast anyway. `apply_stray_light` in
+`tools/apply_spectral_psf.py` models four mechanisms, and the demo exposes them
+separately:
+
+- **Veiling glare.** A uniform pedestal proportional to total scene flux, added
+  everywhere. It does not blur an edge at all -- it lifts the black level, so
+  local contrast falls while the *shape* of the edge is untouched. A 5% veil on
+  a 1000:1 scene leaves you with about 20:1.
+- **Halo.** A broad, low-amplitude Gaussian skirt around bright sources, from
+  wide-angle scatter. Same energy path as the PSF but with a sigma tens of times
+  larger.
+- **Ghost reflection.** Light bouncing between two element surfaces arrives back
+  at the sensor inverted through the optical axis, so a bright source in one
+  corner puts a faint copy of itself in the opposite one.
+- **Aperture diffraction spikes.** An *n*-blade iris diffracts a point source
+  into a starburst: `n` spikes for even *n*, `2n` for odd *n*, because an even
+  polygon's opposite edges are parallel and their spikes coincide. A 7-blade iris
+  gives 14 spikes; a 9-blade one gives 18.
+
+Contrast is measured here as Michelson contrast, `(max - min)/(max + min)`, on a
+profile across a high-contrast edge. It is the right metric because it is exactly
+what stray light attacks: the denominator survives, the numerator does not.
+
 ---
 
 ## 2. UI map
@@ -75,10 +107,16 @@ sharpness; only a larger aperture (smaller *N*) or bigger pixels would.
 | Radial PSF profile | Azimuthally-averaged intensity vs radius, one line per R/G/B |
 | 2-D PSF kernel | The actual convolution kernel (G channel) as a heatmap |
 | Lateral-CA test chart | A ring/spoke chart before and after per-channel `apply_lateral_ca` |
+| Stray light tab: before / after | The high-contrast test source with and without stray light |
+| Stray light tab: starburst kernel | The `n`-blade aperture diffraction PSF on its own |
+| Stray light tab: edge profile | A cut across the high-contrast edge, clean vs strayed |
+| Stray light tab: contrast readout | Michelson contrast before and after, and the loss in stops |
 | Status line | f-number, pixel pitch, mode, diffraction-limited verdict |
 
-**Core sliders:** f-number, pixel pitch, PSF mode.
-**Advanced:** geometric aberration sigma, lateral CA coefficient.
+**Core sliders:** f-number, pixel pitch, PSF mode, stray light on/off.
+**Advanced:** geometric aberration sigma, lateral CA coefficient, veiling glare fraction,
+halo strength and sigma, ghost reflection on/off and strength, aperture blade diffraction
+on/off, iris blade count, starburst strength, blade rotation.
 **Camera recipe dropdown:** loads f-number / pixel pitch / `post_psf` settings straight
 from a real `config/camera_recipes/*.yaml` via `tools/camera_model.load_camera_model`.
 
@@ -128,6 +166,37 @@ from a real `config/camera_recipes/*.yaml` via `tools/camera_model.load_camera_m
    falloff; `airy_disk` has a narrower central lobe plus small side lobes
    (rings) that the Gaussian approximation cannot represent.
 
+### Experiment F -- Veiling glare destroys contrast without blurring (~10 min)
+
+1. Switch to the **Stray light** tab and load **Uncoated lens: veiling glare
+   kills contrast**.
+2. Read the Michelson contrast before and after. Then look at the edge profile:
+   the transition is just as *steep* as before -- the black level has been lifted,
+   not the edge softened.
+3. Sweep the veiling glare fraction from 0 to 0.1 and watch contrast collapse
+   while the edge shape stays put.
+
+**Ask the room:** "If the PSF is unchanged, will an MTF measurement catch this?"
+(It will, as a scale factor on the whole curve -- which is why MTF is normally
+quoted after black-level correction, and why that convention hides veiling glare.)
+
+### Experiment G -- Sunstars and the blade count (~8 min)
+
+1. Load **Sunstars: blade count sets the spike count** and count the spikes on
+   the starburst kernel.
+2. Step the blade count from 6 to 9 and count again. Even counts give *n* spikes,
+   odd counts give 2*n*, because an even polygon's opposite edges are parallel and
+   their spikes land on top of each other.
+3. Rotate the blades and watch the whole pattern rotate with them.
+
+### Experiment H -- Ghosts are geometric, not random (~6 min)
+
+1. Load **Backlit shot: ghost reflection through the optical axis**.
+2. Find the ghost. It sits diametrically opposite the source through the frame
+   centre -- move the source and the ghost moves the other way.
+3. That predictability is why ghosts can sometimes be removed in software and
+   veiling glare essentially cannot.
+
 ---
 
 ## 4. Self-paced lab sheet
@@ -139,6 +208,10 @@ from a real `config/camera_recipes/*.yaml` via `tools/camera_model.load_camera_m
 | f/1.8 vs f/16, same pitch: `sigma_diff` ratio (blue channel) | dimensionless | |
 | `sigma_geometric` = 0.5 px: f-number at which blue becomes diffraction-limited | f/N | |
 | lateral CA = 0.04: at what radius does fringing become clearly visible? | qualitative | |
+| Veiling glare 0.05: Michelson contrast before and after | two values | |
+| Same, expressed as a loss | stops | |
+| 7-blade vs 8-blade iris: spike count | two integers | |
+| Halo sigma 4 px vs 40 px: which changes the edge profile more? | circle one | |
 
 ---
 
@@ -152,11 +225,19 @@ from a real `config/camera_recipes/*.yaml` via `tools/camera_model.load_camera_m
    appearing uniformly?
 4. A phone lens (small pitch) and a full-frame DSLR (large pitch) share the
    same f-number. Which is more likely diffraction-limited, and why?
+5. Veiling glare leaves the PSF essentially unchanged but ruins the picture.
+   What quantity is it attacking, and why does the PSF not describe it?
+6. An 8-blade iris gives 8 spikes and a 9-blade iris gives 18. Explain the
+   factor of two.
+7. Lens coatings cost money and add manufacturing steps. Which of the four
+   stray-light mechanisms do they address, and which survive regardless?
 
 ---
 
 ## 6. Bridge to the next tutorial
 
-The PSF you just explored blurs light *before* it reaches the sensor. The
-next tutorial picks up from there: how that same photon flux gets converted
-to electrons and then to noisy digital numbers via the EMVA1288 noise model.
+You have now seen the blur as a picture -- a kernel, a radial profile, a fringed
+test chart. What you cannot do yet is compare two lenses, or check either
+against theory, because "looks blurrier" is not a number. The next tutorial
+measures the same PSF the way the standards do: a slanted edge, an oversampled
+edge profile, and an MTF curve you can put a diffraction prediction on top of.

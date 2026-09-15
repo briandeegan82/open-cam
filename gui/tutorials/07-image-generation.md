@@ -1,10 +1,16 @@
-# Tutorial 03 -- Image Generation (Scene -> Sensor -> Image)
+# Tutorial 07 -- Image Generation (Scene -> Sensor -> Image)
 
 **Demo:** `opencam-gui demo image-generation`
-**Audience:** graduate / advanced undergraduate
+**Audience:** graduate / advanced undergraduate; Tutorials 01-06 assumed
 **Goal:** run the real Open Cam pipeline end to end -- scene, illumination,
-sensor -- and see how the choices from Tutorials 01 and 02 combine in an
-actual generated image.
+optics, sensor, ISP -- and see every parameter from the previous six tutorials
+acting on the same frame.
+
+The six demos before this one each isolated one stage so its behaviour could be
+seen on its own. This one takes the isolation away. Lens geometry sets the
+framing, the PSF blurs it, the sensor adds the noise you characterised, the
+defects distort the electrons, and the ISP turns them into colour -- all at once,
+on a real scene, where the interactions are the interesting part.
 
 This demo does not render anything itself. Every click on **Generate** builds
 a command plan and runs the real `tools/*.py` scripts (or the full
@@ -48,15 +54,26 @@ difference is where the pre-sensor spectral image comes from.
   Combined with **exposure time**, it is the same reciprocity relationship a
   real camera's exposure meter uses -- doubling either one doubles `mu_e`.
 
-### 1.3 Where Tutorial 01 and 02 show up here
+### 1.3 Where the earlier tutorials show up here
 
-- The camera recipe's `lens.post_psf` settings (Tutorial 01) apply during the
-  physically-accurate path's post-render stage -- or are already baked into
-  the ray-traced blur if `lens.camera: realistic`.
-- The camera recipe's `noise.emva` settings (Tutorial 02) are exactly what
-  `apply_emva_noise.py` uses to turn electrons into DN here. A low-lux,
-  small-pixel scenario should look exactly as noisy as the PTC from Tutorial
-  02 predicts for that camera at that signal level.
+Every parameter you have been moving on a slider is a key in the camera recipe
+this demo loads:
+
+- `lens.focal_length_mm`, `lens.f_number` and the sensor size (Tutorial 01) set
+  the framing and, on the `realistic` path, the depth of field.
+- `lens.post_psf` (Tutorial 02) applies during the physically-accurate path's
+  post-render stage, or is already baked into the ray-traced blur if
+  `lens.camera: realistic`. The stray-light block lives here too.
+- The resolution you would measure off a rendered slanted edge (Tutorial 03) is
+  set by those two together with the pixel pitch -- generate an IQ target here
+  and take it straight back to the MTF demo's rendered-edge source.
+- `noise.emva` (Tutorial 04) is exactly what `apply_emva_noise.py` uses to turn
+  electrons into DN. A low-lux, small-pixel scenario should look exactly as noisy
+  as the PTC predicts for that camera at that signal level.
+- The illuminance and integration time (Tutorial 05) place the scene on that PTC,
+  and the same defect models run underneath.
+- `noise.cfa`, the demosaic choice, the white-balance method and the CCM
+  (Tutorial 06) are the stages between those electrons and the PNG you see.
 
 ---
 
@@ -96,7 +113,7 @@ difference is where the pre-sensor spectral image comes from.
 
 1. Load **Low-light phone shot** (iPhone 8, 20 lux) and Generate.
 2. Compare against the Nikon Z6 baseline: visibly noisier, smaller sensor,
-   lower full well -- consistent with the PTC comparison from Tutorial 02.
+   lower full well -- consistent with the PTC comparison from Tutorial 04.
 3. Raise `Exposure time (s)` while keeping lux fixed and regenerate: SNR
    should improve the same way it would from raising illuminance instead
    (reciprocity).

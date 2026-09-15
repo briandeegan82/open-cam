@@ -275,7 +275,7 @@ venv/bin/python tools/munsell_mat_to_sqlite.py --summary
 ## Known Limitations
 
 - `pbrt_exr` sensor-forward mode expects multispectral EXR and currently supports `photon_counting` calibration mode.
-- `cfa.demosaic` currently implements bilinear demosaic only.
+- `cfa.demosaic` implements bilinear and Malvar-He-Cutler reconstruction.
 - Post-PSF is a simple Gaussian/stray-light approximation, not a full chromatic lens aberration model.
 - PBRT spectral sampling remains Monte Carlo based; use validation and repeated runs for sensitive comparisons.
 
@@ -288,10 +288,11 @@ venv/bin/python tools/munsell_mat_to_sqlite.py --summary
 
 ## Interactive GUI & Tutorials
 
-For an interactive, guided introduction to the optics, sensor, and image
-generation stages -- Dear PyGui demos with scripted lecture scenarios and a
-markdown tutorial per topic (in the style of the `teaching-sims` project) --
-see [`gui/README.md`](gui/README.md). It is a pure interface layer: every
+For an interactive seven-stage graduate course -- imaging geometry, PSF and
+aberrations, resolution/MTF, EMVA1288 sensor noise, exposure and defects,
+colour/ISP, then the full pipeline on a real scene -- see
+[`gui/README.md`](gui/README.md). Dear PyGui demos with scripted lecture
+scenarios and a markdown tutorial per topic; a pure interface layer, so every
 curve and generated image comes from importing or subprocess-calling the same
 `tools/*.py` scripts documented above.
 

@@ -1,7 +1,7 @@
-# Tutorial 02 -- Sensor Modelling (EMVA1288 Photon Transfer, DSNU, PRNU)
+# Tutorial 04 -- Sensor Noise Modelling (EMVA1288 Photon Transfer, DSNU, PRNU)
 
 **Demo:** `opencam-gui demo sensor`
-**Audience:** graduate / advanced undergraduate
+**Audience:** graduate / advanced undergraduate; Tutorial 03 assumed
 **Goal:** connect electron counts, shot noise, read noise, dark current, DSNU,
 and PRNU to the same closed-form model `tools/validate_emva_model.py` uses to
 check a camera config against its datasheet -- including the EMVA1288
@@ -268,8 +268,9 @@ requirement -- you do not measure DSNU on a clipped dark floor.
 
 ## 6. Bridge to the next tutorial
 
-You now have both halves of the imaging chain: the PSF that blurs the signal
-and the EMVA1288 model that turns it into noisy DN. The Image Generation
-tutorial runs both together on a real scene -- pick a light source, an
-illuminance, and a camera, and generate an actual image through the same
-`tools/*.py` scripts.
+This tutorial took the electron count `mu_e` as given and asked what noise sits
+on it. The next one asks where `mu_e` came from in the first place -- scene
+luminance, aperture, shutter and ISO -- and then goes underneath the clean
+Poisson-and-Gaussian model to the defects it does not describe: blooming, hot
+pixels, kTC reset noise, ADC non-linearity and readout banding. The photon
+transfer curve you just built becomes the map for reading an exposure.

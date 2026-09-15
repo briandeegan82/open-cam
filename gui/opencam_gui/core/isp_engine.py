@@ -71,6 +71,16 @@ def qe_paths_from_model(model: dict) -> dict[str, str]:
     return paths
 
 
+def qe_paths_for_recipe(recipe_id: str | None) -> dict[str, str]:
+    """Resolve a camera-recipe id to the QE CSV paths ``load_chart`` expects."""
+    if not recipe_id:
+        return dict(DEFAULT_QE_PATHS)
+    from opencam_gui.core.camera import load_camera_model
+    from opencam_gui.core.catalog import find_recipe
+
+    return qe_paths_from_model(load_camera_model(find_recipe(recipe_id).path))
+
+
 # =====================================================================
 # Scene: spectra -> camera RGB and reference colour
 # =====================================================================
