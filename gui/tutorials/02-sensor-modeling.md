@@ -1,14 +1,18 @@
-# Tutorial 02 -- Sensor Modelling (EMVA1288 Photon Transfer)
+# Tutorial 02 -- Sensor Modelling (EMVA1288 Photon Transfer, DSNU, PRNU)
 
 **Demo:** `opencam-gui demo sensor`
 **Audience:** graduate / advanced undergraduate
-**Goal:** connect electron counts, shot noise, read noise, and dark current to
-the same closed-form model `tools/validate_emva_model.py` uses to check a
-camera config against its datasheet.
+**Goal:** connect electron counts, shot noise, read noise, dark current, DSNU,
+and PRNU to the same closed-form model `tools/validate_emva_model.py` uses to
+check a camera config against its datasheet -- including the EMVA1288
+protocol that calculates DSNU and PRNU from stacks of dark and flat-field
+frames.
 
 Every curve in this demo is produced by `tools/emva_theory.py` -- the exact
-functions the EMVA validator calls, not a re-derivation. The dark-current
-temperature helper is a documented, read-only mirror of the formula inline in
+functions the EMVA validator calls, not a re-derivation. DSNU1288 and
+PRNU1288 on the second tab are the same spatial estimators (temporal
+averaging, residual-temporal correction). The dark-current temperature
+helper is a documented, read-only mirror of the formula inline in
 `tools/apply_emva_noise.py` (see `opencam_gui/core/dark_current.py` for the
 citation); the real image-generation pipeline always computes it itself.
 
@@ -60,6 +64,62 @@ the dark floor rather than a shifted mean.
 steeply through the read-noise-limited region, then flattens toward
 `10 log10(mu_e)` once photon shot noise dominates (a `sqrt(N)` law).
 
+### 1.5 DSNU and PRNU -- how EMVA1288 calculates them
+
+The photon transfer curve above is **temporal** noise: it is the variance of
+repeated readings of the *same* pixel. DSNU and PRNU are **spatial** (fixed
+pattern) noise: they are the same every frame, so they do not appear on the
+PTC. EMVA1288 isolates them by averaging `L` identical frames of a uniform
+field, then measuring the spatial standard deviation of that average image.
+
+**Temporal mean image.** For a stack `y_i[m,n]`, `i = 1..L`:
+
+```
+y_bar[m,n] = (1/L) * sum_i y_i[m,n]
+```
+
+Temporal noise in `y_bar` is reduced by `sqrt(L)`. The leftover spatial
+structure is the fixed pattern, plus a residual `sigma_temporal / sqrt(L)`.
+
+**Residual-temporal correction** (EMVA 1288 §7):
+
+```
+s^2_y.bar  = spatial variance of y_bar
+sigma^2_y  = mean over pixels of the per-pixel temporal variance
+s^2_y      = s^2_y.bar - sigma^2_y / L
+```
+
+**DSNU1288** from a stack of *dark* frames:
+
+```
+DSNU1288 = s_y.dark / K     (electrons)
+```
+
+DSNU is an **additive** per-pixel offset (dark-current variation). It is
+visible with the shutter closed and does not grow with signal.
+
+**PRNU1288** from a second stack at ~50% saturation (flat field), after
+removing the dark spatial variance:
+
+```
+PRNU1288 = sqrt(s^2_y.50 - s^2_y.dark) / (mu_y.50 - mu_y.dark)
+```
+
+PRNU is a **multiplicative** per-pixel gain (photodiode area, fill factor,
+microlens alignment). It is invisible in the dark and grows linearly with
+mean signal. After infinite averaging the two combine as
+
+```
+sigma_spatial(mu) = sqrt( DSNU^2 + (PRNU * mu)^2 )
+```
+
+The DSNU map generator matches `tools/apply_emva_noise.py`: Gaussian
+zero-mean offset (the textbook EMVA statistical model) or the pipeline's
+log-normal dark-current map (long positive tail = hot pixels). PRNU is
+`g = max(0, 1 + N(0, PRNU^2))`. The measurement stacks keep the dark
+histogram linear (an analog offset / optical black), which is an EMVA1288
+requirement -- you do not measure DSNU on a clipped dark floor.
+
 ---
 
 ## 2. UI map
@@ -68,11 +128,15 @@ steeply through the read-noise-limited region, then flattens toward
 | --- | --- |
 | Photon transfer curve | `Var(DN)` vs `mean(DN)`, log-log, with the dark floor marked |
 | SNR vs mean signal | Derived from the same curve arrays |
-| Status line | Gain, read noise, full well, shot/read crossover, dark floor |
+| DSNU / PRNU tab: maps | Live grayscale images (fixed scale so slider amplitude is visible) |
+| DSNU / PRNU tab: spatial std | `sqrt(DSNU^2 + (PRNU x mu)^2)` vs signal, plus measured points |
+| DSNU / PRNU tab: histograms | Pixel distribution -- Gaussian vs log-normal hot-pixel tail |
+| Status line | Gain, read noise, full well, shot/read crossover, dark floor, FPN |
 | Monte Carlo verification | One-click theory vs 20000-trial simulation at a chosen mu_e |
+| Measure DSNU1288 / PRNU1288 | Runs the EMVA protocol on simulated dark + 50% stacks |
 
-**Core sliders:** read noise sigma_d, gain K, full well, black level, Poisson toggle.
-**Advanced:** dark current rate, temperature, Arrhenius Ea, exposure time.
+**Core sliders:** read noise sigma_d, gain K, full well, black level, Poisson toggle, PRNU fraction, DSNU (e-), frames L to average.
+**Advanced:** dark current rate, temperature, Arrhenius Ea, exposure time, DSNU model (gaussian / lognormal).
 **Camera recipe dropdown:** loads all of the above from a real
 `config/camera_recipes/*.yaml` via `tools/camera_model.load_camera_model`.
 
@@ -123,6 +187,47 @@ steeply through the read-noise-limited region, then flattens toward
    simulation means/variances -- they should agree to a few percent, exactly
    the check `tools/validate_emva_model.py` performs automatically in CI.
 
+### Experiment F -- How DSNU is calculated (~8 min)
+
+1. Switch to the **DSNU / PRNU** tab. Load **No FPN: averaging kills spatial noise**.
+2. Both maps should be essentially flat (no frozen pattern). Click
+   **Measure DSNU1288 / PRNU1288**.
+3. Read the two dark numbers: the *uncorrected* spatial std of the mean image
+   is leftover read noise (`sigma_d / sqrt(L)`); **DSNU1288** after the
+   `s^2_y.bar - sigma^2 / L` correction should sit near zero.
+4. Drop `L` to 10 and measure again -- the uncorrected number grows, DSNU1288
+   stays near zero. That difference *is* the EMVA calculation.
+
+### Experiment G -- DSNU is additive (~8 min)
+
+1. Load **DSNU only: additive dark pattern**. The DSNU map is a frozen speckle;
+   the PRNU map is flat.
+2. Measure: DSNU1288 should recover the slider (~3 e-); PRNU1288 ~ 0.
+3. Raise `L` -- DSNU1288 does **not** fall as `1/sqrt(L)`. Averaging cannot
+   remove a pattern that is the same in every frame.
+4. The spatial-std curve is a horizontal line at the DSNU floor: the pattern
+   amplitude does not grow with signal.
+
+### Experiment H -- How PRNU is calculated (~8 min)
+
+1. Load **PRNU only: multiplicative gain map**. The DSNU map is now flat; the
+   PRNU map shows the gain field (percent from mean).
+2. The spatial-std curve starts at 0 and rises linearly (`PRNU x mu`).
+3. Measure: PRNU1288 should recover ~3%. The formula is
+   `sqrt(s^2_50 - s^2_dark) / (mu_50 - mu_dark)` -- dark spatial variance is
+   subtracted so leftover DSNU is not counted as PRNU.
+4. Drag PRNU down toward 0.5% (a typical consumer sensor) and watch the slope
+   flatten; the maps get quieter.
+
+### Experiment I -- Hot pixels and a real camera (~8 min)
+
+1. Load **Hot pixels: log-normal DSNU**. The histogram has a long positive
+   tail -- a few leaky pixels dominate DSNU. This is the generative model in
+   `tools/apply_emva_noise.py`, not the Gaussian textbook field.
+2. Load **Real camera: Nikon Z6** vs **iPhone 8** and compare PRNU (0.7% vs
+   1.8%) on the spatial-std curve: at the same electron count the phone's
+   multiplicative pattern is more than twice as strong.
+
 ---
 
 ## 4. Self-paced lab sheet
@@ -135,6 +240,11 @@ steeply through the read-noise-limited region, then flattens toward
 | Nikon Z6: mean DN at 50% full well | DN | |
 | iPhone 8: mean DN at 50% full well | DN | |
 | mu_e = full_well/2: theory vs Monte Carlo variance, percent difference | % | |
+| No-FPN, L=50, sigma_d=8 e-: uncorrected dark spatial std | e- (expect ~1.1) | |
+| Same, DSNU1288 after temporal correction | e- (expect ~0) | |
+| DSNU-only scenario: measured DSNU1288 | e- (expect ~3) | |
+| PRNU-only, 3%: measured PRNU1288 | % | |
+| Spatial std at 50% well: `sqrt(DSNU^2 + (PRNU * mu)^2)` | e- | |
 
 ---
 
@@ -147,6 +257,12 @@ steeply through the read-noise-limited region, then flattens toward
    curves change.
 4. Why is doubling the exposure time *not* equivalent to doubling the target
    illuminance for read noise, even though both double `mu_e`?
+5. Why does averaging more dark frames *not* reduce DSNU1288 the way it
+   reduces the uncorrected spatial std of the mean image?
+6. A colleague computes PRNU as `s_y.50 / mu_y.50` without subtracting the
+   dark spatial variance. When is that approximately OK, and when does it
+   over-estimate PRNU?
+7. Sketch `sigma_spatial` vs `mu` for (a) DSNU only, (b) PRNU only, (c) both.
 
 ---
 

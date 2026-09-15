@@ -23,6 +23,10 @@ class Scenario:
     dark_activation_energy_eV: float = 0.0
     integration_time_s: float = 0.01
     camera_recipe_id: str | None = None
+    prnu_std_fraction: float = 0.01
+    dsnu_std_e: float = 0.3
+    dsnu_model: str = "gaussian"
+    n_measure_frames: int = 50
 
 
 SCENARIOS: dict[str, Scenario] = {
@@ -79,6 +83,8 @@ SCENARIOS: dict[str, Scenario] = {
         black_level_DN=512.0,
         full_well_e=65000.0,
         camera_recipe_id="nikon_z6",
+        prnu_std_fraction=0.007,
+        dsnu_std_e=0.3,
     ),
     "real_iphone_8": Scenario(
         id="real_iphone_8",
@@ -93,6 +99,79 @@ SCENARIOS: dict[str, Scenario] = {
         black_level_DN=16.0,
         full_well_e=4800.0,
         camera_recipe_id="iphone_8",
+        prnu_std_fraction=0.018,
+        dsnu_std_e=0.16,
+    ),
+    "no_fpn": Scenario(
+        id="no_fpn",
+        title="No FPN: averaging kills spatial noise",
+        teaching_point=(
+            "With DSNU = PRNU = 0 the spatial std of a dark average is just leftover "
+            "read noise, sigma_d / sqrt(L). EMVA1288 subtracts that residual so DSNU1288 ~ 0."
+        ),
+        notes="Open the DSNU/PRNU tab, run the measurement at L=10 then L=50, and compare uncorrected vs corrected.",
+        sigma_d_e=8.0,
+        K_e_per_DN=1.0,
+        black_level_DN=0.0,
+        full_well_e=4000.0,
+        prnu_std_fraction=0.0,
+        dsnu_std_e=0.0,
+        n_measure_frames=50,
+    ),
+    "dsnu_only": Scenario(
+        id="dsnu_only",
+        title="DSNU only: additive dark pattern",
+        teaching_point=(
+            "DSNU is a frozen additive offset. Averaging more frames does not wash it out, "
+            "and the spatial-std curve stays flat versus signal (PRNU = 0)."
+        ),
+        notes="The DSNU map is the same pattern you would recover from a stack of dark frames.",
+        sigma_d_e=1.5,
+        K_e_per_DN=1.0,
+        black_level_DN=0.0,
+        full_well_e=4000.0,
+        prnu_std_fraction=0.0,
+        dsnu_std_e=3.0,
+        n_measure_frames=50,
+    ),
+    "prnu_only": Scenario(
+        id="prnu_only",
+        title="PRNU only: multiplicative gain map",
+        teaching_point=(
+            "PRNU is invisible in the dark (the DSNU map is flat) and grows linearly with "
+            "signal: sigma_spatial = PRNU x mu_e. EMVA1288 measures it from a 50% flat field "
+            "after subtracting the dark spatial variance."
+        ),
+        notes="Run the measurement and check PRNU1288 against the 3% slider value.",
+        sigma_d_e=1.5,
+        K_e_per_DN=1.0,
+        black_level_DN=0.0,
+        full_well_e=4000.0,
+        prnu_std_fraction=0.03,
+        dsnu_std_e=0.0,
+        n_measure_frames=50,
+    ),
+    "hot_pixels_lognormal": Scenario(
+        id="hot_pixels_lognormal",
+        title="Hot pixels: log-normal DSNU",
+        teaching_point=(
+            "The pipeline's DSNU is a log-normal dark-current map (long positive tail), "
+            "not a Gaussian. A few hot pixels dominate the spatial std  -  the histogram "
+            "is the giveaway."
+        ),
+        notes="Needs enough dark signal for the log-normal to be well-conditioned (1 s, 40 C).",
+        sigma_d_e=2.0,
+        K_e_per_DN=1.0,
+        black_level_DN=0.0,
+        full_well_e=8000.0,
+        dark_current_e_per_s=2.0,
+        temperature_c=40.0,
+        dark_activation_energy_eV=0.63,
+        integration_time_s=1.0,
+        prnu_std_fraction=0.0,
+        dsnu_std_e=4.0,
+        dsnu_model="lognormal",
+        n_measure_frames=50,
     ),
 }
 

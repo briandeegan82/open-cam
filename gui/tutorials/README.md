@@ -9,7 +9,7 @@ Open Cam camera-simulation pipeline instead of radar.
 | Tutorial | Demo command | Time (approx.) |
 | --- | --- | --- |
 | [01 -- Optics / PSF](01-optics.md) | `opencam-gui demo optics` | 40-55 min |
-| [02 -- Sensor Modelling (EMVA1288)](02-sensor-modeling.md) | `opencam-gui demo sensor` | 40-55 min |
+| [02 -- Sensor Modelling (EMVA1288)](02-sensor-modeling.md) | `opencam-gui demo sensor` | 55-75 min |
 | [03 -- Image Generation](03-image-generation.md) | `opencam-gui demo image-generation` | 45-60 min |
 
 ## Before you start

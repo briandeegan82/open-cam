@@ -27,3 +27,12 @@ def test_emva_summary_iphone_8_small_full_well():
     nikon = emva_summary(load_camera_model(find_recipe("nikon_z6").path))
     iphone = emva_summary(model)
     assert iphone.full_well_e < nikon.full_well_e
+
+
+def test_emva_summary_includes_prnu_and_dsnu():
+    nikon = emva_summary(load_camera_model(find_recipe("nikon_z6").path))
+    iphone = emva_summary(load_camera_model(find_recipe("iphone_8").path))
+    assert nikon.prnu_std_fraction == 0.007
+    assert nikon.dsnu_std_e == 0.3
+    assert iphone.prnu_std_fraction == 0.018
+    assert iphone.dsnu_std_e == 0.16

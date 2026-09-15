@@ -19,7 +19,7 @@ reuses.
 | # | Topic | Demo | Tutorial |
 | - | --- | --- | --- |
 | 1 | Optics / point-spread function | `opencam-gui demo optics` | [tutorials/01-optics.md](tutorials/01-optics.md) |
-| 2 | Sensor modelling (EMVA1288) | `opencam-gui demo sensor` | [tutorials/02-sensor-modeling.md](tutorials/02-sensor-modeling.md) |
+| 2 | Sensor modelling (EMVA1288 PTC, DSNU, PRNU) | `opencam-gui demo sensor` | [tutorials/02-sensor-modeling.md](tutorials/02-sensor-modeling.md) |
 | 3 | Image generation (scene -> sensor -> image) | `opencam-gui demo image-generation` | [tutorials/03-image-generation.md](tutorials/03-image-generation.md) |
 
 Start with Optics, then Sensor Modelling, then Image Generation -- each

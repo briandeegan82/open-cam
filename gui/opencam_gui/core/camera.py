@@ -54,6 +54,8 @@ class EmvaSummary:
     dark_current_doubling_per_c: float
     dark_activation_energy_eV: float
     integration_time_s: float
+    prnu_std_fraction: float
+    dsnu_std_e: float
 
 
 def emva_summary(model: dict) -> EmvaSummary:
@@ -72,4 +74,6 @@ def emva_summary(model: dict) -> EmvaSummary:
         dark_current_doubling_per_c=float(emva.get("dark_current_doubling_per_c", 6.0)),
         dark_activation_energy_eV=float(emva.get("dark_activation_energy_eV", 0.0)),
         integration_time_s=float(sensor.get("integration_time_s", 0.01)),
+        prnu_std_fraction=float(emva.get("prnu_std_fraction", 0.01)),
+        dsnu_std_e=float(emva.get("dsnu_std_e", 0.3)),
     )
