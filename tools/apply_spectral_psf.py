@@ -146,6 +146,10 @@ def psf_sigma_chromatic(
 # Airy disk helpers (2-D FFT, physically accurate)
 # ---------------------------------------------------------------------------
 
+#: First zero of the Bessel function J₁, where the Airy disk's first dark ring falls.
+_J1_FIRST_ZERO = 3.8317059702075125
+
+
 def _airy_first_zero_px(
     wavelength_nm: float,
     f_number: float,
@@ -172,9 +176,12 @@ def _airy_kernel_2d(rho0_px: float, n_zeros: float = 4.0) -> np.ndarray:
     gy, gx = np.mgrid[-half : half + 1, -half : half + 1].astype(np.float64)
     r = np.sqrt(gx**2 + gy**2)
 
-    # Airy disk: h(r) = [2 J₁(π r / ρ₀) / (π r / ρ₀)]²
-    # The function 2 J₁(x)/x is the jinc function (limit = 1 at x=0).
-    u = np.pi * r / rho0_px
+    # Airy disk: h(r) = [2 J₁(u) / u]², the jinc function squared (limit 1 at u=0).
+    # 2J₁(u)/u has its first zero at the first zero of J₁, u = 3.8317 — not at π —
+    # so the argument must be scaled by that constant for the kernel's first dark
+    # ring to land at rho0_px.  Using π here would make the disk 1.22× too wide
+    # and drop the diffraction MTF cutoff from 1.22/ρ₀ to 1/ρ₀.
+    u = _J1_FIRST_ZERO * r / rho0_px
     with np.errstate(invalid="ignore", divide="ignore"):
         jinc = np.where(u == 0.0, 1.0, 2.0 * j1(u) / u)
     h = jinc**2
