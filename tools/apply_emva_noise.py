@@ -705,6 +705,120 @@ def apply_blooming(shot_e: np.ndarray, full_well_e: float,
     return np.minimum(result, full_well_e).astype(np.float32)
 
 
+def iso_scaled_conversion(K_e_per_DN: float, full_well_e: float,
+                          iso_gain_factor: float) -> tuple[float, float]:
+    """Scale the ADC path by an ISO amplifier gain.
+
+    ISO is gain, not sensitivity: the analog amplifier sits after the photodiode,
+    so it changes how many electrons one DN is worth and how many fit below
+    clipping, while leaving the electrons themselves untouched.
+    ``K_eff = K / G`` and ``full_well_eff = full_well / G``.
+    """
+    if iso_gain_factor <= 0:
+        raise ValueError(f"iso_gain_factor must be positive, got {iso_gain_factor!r}")
+    if iso_gain_factor == 1.0:
+        return float(K_e_per_DN), float(full_well_e)
+    return float(K_e_per_DN) / iso_gain_factor, float(full_well_e) / iso_gain_factor
+
+
+def amplifier_read_noise_e(sigma_d_e: float, sigma_amp_e: float,
+                           iso_gain_factor: float) -> float:
+    """Read noise after the ISO amplifier contributes its own share.
+
+    ``sigma_amp_e`` is the amplifier's input-referred floor at unit gain; at gain
+    G it contributes ``sigma_amp_e * G`` electrons in quadrature. This is why
+    pushing ISO does not buy signal-to-noise indefinitely.
+    """
+    if sigma_amp_e > 0.0 and iso_gain_factor > 1.0:
+        return float(np.sqrt(sigma_d_e ** 2 + (sigma_amp_e * iso_gain_factor) ** 2))
+    return float(sigma_d_e)
+
+
+def ktc_sigma_e(*, temperature_c: float, K_e_per_DN: float, bit_depth: int,
+                node_capacitance_fF: float | None = None, vref_V: float = 1.8) -> float:
+    """kTC reset noise at the sense node, in electrons: ``sqrt(k*T*C)/q``.
+
+    Only meaningful for sensors without correlated double sampling; CDS cancels
+    it entirely, which is why the pipeline leaves it off by default. When the
+    node capacitance is not measured directly it is derived from the conversion
+    gain as ``C = q * K * (2^bits - 1) / V_ref``.
+    """
+    K_B_J = 1.380649e-23        # Boltzmann constant [J/K]
+    Q_E = 1.602176634e-19       # elementary charge [C]
+    T_K = temperature_c + 273.15
+    if node_capacitance_fF is not None:
+        C = float(node_capacitance_fF) * 1e-15
+    else:
+        C = K_e_per_DN * Q_E * float((1 << bit_depth) - 1) / float(vref_V)
+    return float(np.sqrt(K_B_J * T_K * C) / Q_E)
+
+
+def row_column_fpn_offsets(shape: tuple[int, ...], row_std_e: float, col_std_e: float,
+                           rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray]:
+    """Row and column offset patterns in electrons, broadcastable against ``shape``.
+
+    Rows are drawn before columns; callers sharing a generator depend on that
+    order for reproducibility.
+    """
+    ndim = len(shape)
+    if ndim == 2:
+        row_shape, col_shape = (shape[0], 1), (1, shape[1])
+    else:
+        row_shape, col_shape = (shape[0], 1, 1), (1, shape[1], 1)
+    row = rng.normal(0.0, row_std_e, size=row_shape).astype(np.float32)
+    col = rng.normal(0.0, col_std_e, size=col_shape).astype(np.float32)
+    return row, col
+
+
+def flicker_row_offsets(n_rows: int, std_e: float, rng: np.random.Generator) -> np.ndarray:
+    """1/f readout noise as a 1-D pink-spectrum offset per row, in electrons.
+
+    A rolling shutter reads rows out in time order, so amplifier drift with a
+    1/f temporal spectrum lands on the image as smooth horizontal banding rather
+    than the white row-to-row scatter of ordinary row FPN.
+    """
+    if std_e <= 0.0 or n_rows <= 0:
+        return np.zeros(max(n_rows, 0), dtype=np.float32)
+    fft_len = 1 << int(np.ceil(np.log2(max(n_rows, 2))))
+    freqs = np.fft.rfftfreq(fft_len)
+    freqs[0] = freqs[1]  # avoid the DC singularity; the DC offset cancels in CDS
+    weights = (1.0 / np.sqrt(freqs)).astype(np.float64)
+    white = (rng.normal(0.0, 1.0, size=fft_len // 2 + 1)
+             + 1j * rng.normal(0.0, 1.0, size=fft_len // 2 + 1))
+    pink = np.fft.irfft(white * weights)[:n_rows]
+    std = float(np.std(pink)) + 1e-12
+    return (pink * (std_e / std)).astype(np.float32)
+
+
+def apply_adc_inl(dn: np.ndarray, *, black_dn: float, max_dn: float,
+                  quadratic_fraction: float) -> np.ndarray:
+    """Integral non-linearity as a quadratic bow across the ADC range.
+
+    The deviation peaks mid-scale and vanishes at both endpoints, so INL shows up
+    as a tone-curve error rather than a black or white level shift.
+    """
+    if quadratic_fraction == 0.0:
+        return dn
+    x = np.clip((dn - black_dn) / max(1.0, max_dn - black_dn), 0.0, 1.0)
+    return np.clip(dn + (quadratic_fraction * max_dn) * (x * (1.0 - x)), 0.0, max_dn)
+
+
+def adc_dnl_table(max_dn: float, dnl_std_lsb: float, rng: np.random.Generator) -> np.ndarray:
+    """Per-code width errors for the ADC ladder, one offset per output code."""
+    return rng.normal(0.0, dnl_std_lsb, size=int(max_dn) + 1).astype(np.float32)
+
+
+def apply_adc_dnl(dn: np.ndarray, table: np.ndarray, max_dn: float) -> np.ndarray:
+    """Apply a DNL code table.
+
+    DNL is fixed, not random: the same code always lands the same way, so it is a
+    lookup rather than a noise draw. That is what makes it survive frame averaging
+    when read noise does not.
+    """
+    idx = np.clip(np.rint(dn).astype(np.int32), 0, table.size - 1)
+    return np.clip(dn + table[idx], 0.0, max_dn)
+
+
 def apply_hot_stuck_pixel_model(
     signal_e: np.ndarray,
     rng: np.random.Generator,
@@ -1149,15 +1263,8 @@ def main() -> None:
         raise ValueError(f"emva.iso_gain_factor must be positive, got {_iso_gain!r}")
     _K_base = K_e_per_DN
     _full_well_base = full_well_e
-    if _iso_gain != 1.0:
-        K_e_per_DN = K_e_per_DN / _iso_gain
-        full_well_e = full_well_e / _iso_gain
-    # Amplifier noise: at high ISO, the analog gain stage adds its own noise in quadrature.
-    # sigma_amp_e is the amplifier's input-referred noise floor at unit gain.  At iso_gain
-    # G the amplifier contributes sigma_amp_e × G electrons, added in quadrature to the
-    # base read noise.  Default 0 = no amplifier noise (backward-compatible).
-    if sigma_amp_e > 0.0 and _iso_gain > 1.0:
-        sigma_d_e = float(np.sqrt(sigma_d_e**2 + (sigma_amp_e * _iso_gain)**2))
+    K_e_per_DN, full_well_e = iso_scaled_conversion(K_e_per_DN, full_well_e, _iso_gain)
+    sigma_d_e = amplifier_read_noise_e(sigma_d_e, sigma_amp_e, _iso_gain)
     use_poisson = bool(emva.get("use_poisson_shot_noise", True))
     t_int_s = float(sensor.get("integration_time_s", 0.01))
     if args.integration_time_s is not None:
@@ -1474,36 +1581,18 @@ def main() -> None:
     # Fixed row/column FPN: column offset and row gain variation baked into the readout
     # circuit — the same pattern every frame from the same camera unit.  Drawn from
     # spatial_rng (fixed seed) after DSNU so PRNU/DSNU patterns are unaffected.
-    if signal_e.ndim == 2:
-        row_fpn_fixed = spatial_rng.normal(0.0, row_fpn_fixed_std_e, size=(signal_e.shape[0], 1)).astype(np.float32)
-        col_fpn_fixed = spatial_rng.normal(0.0, col_fpn_fixed_std_e, size=(1, signal_e.shape[1])).astype(np.float32)
-    else:
-        row_fpn_fixed = spatial_rng.normal(0.0, row_fpn_fixed_std_e, size=(signal_e.shape[0], 1, 1)).astype(np.float32)
-        col_fpn_fixed = spatial_rng.normal(0.0, col_fpn_fixed_std_e, size=(1, signal_e.shape[1], 1)).astype(np.float32)
+    row_fpn_fixed, col_fpn_fixed = row_column_fpn_offsets(
+        signal_e.shape, row_fpn_fixed_std_e, col_fpn_fixed_std_e, spatial_rng)
 
     # Row/column readout amplifier noise: temporal banding that changes every frame.
-    if signal_e.ndim == 2:
-        row_fpn = rng.normal(0.0, row_fpn_std_e, size=(signal_e.shape[0], 1)).astype(np.float32)
-        col_fpn = rng.normal(0.0, col_fpn_std_e, size=(1, signal_e.shape[1])).astype(np.float32)
-    else:
-        row_fpn = rng.normal(0.0, row_fpn_std_e, size=(signal_e.shape[0], 1, 1)).astype(np.float32)
-        col_fpn = rng.normal(0.0, col_fpn_std_e, size=(1, signal_e.shape[1], 1)).astype(np.float32)
+    row_fpn, col_fpn = row_column_fpn_offsets(
+        signal_e.shape, row_fpn_std_e, col_fpn_std_e, rng)
+
     # ---- 1/f (flicker) noise: pink-spectrum row offsets ----
-    # Models slow drift in the rolling-shutter readout amplifier.  Power spectrum ∝ 1/f
-    # in temporal frequency → pink noise across rows (temporal-to-spatial mapping in
-    # rolling-shutter readout).  Generated from temporal rng (different every frame).
+    # Drawn from the temporal rng, so it differs every frame.
     flicker_row_e = np.zeros(1, dtype=np.float32)
     if flicker_noise_std_e > 0.0:
-        _n_rows = signal_e.shape[0]
-        _fft_len = 1 << int(np.ceil(np.log2(max(_n_rows, 2))))  # next power of 2
-        _freqs = np.fft.rfftfreq(_fft_len)
-        _freqs[0] = _freqs[1]  # avoid DC singularity; DC offset cancels in CDS
-        _pink_weights = (1.0 / np.sqrt(_freqs)).astype(np.float64)
-        _white = rng.normal(0.0, 1.0, size=_fft_len // 2 + 1) + 1j * rng.normal(0.0, 1.0, size=_fft_len // 2 + 1)
-        _pink_fft = _white * _pink_weights
-        _pink = np.fft.irfft(_pink_fft)[:_n_rows]
-        _std = float(np.std(_pink)) + 1e-12
-        _pink = (_pink * (flicker_noise_std_e / _std)).astype(np.float32)
+        _pink = flicker_row_offsets(signal_e.shape[0], flicker_noise_std_e, rng)
         if signal_e.ndim == 2:
             flicker_row_e = _pink[:, np.newaxis]
         else:
@@ -1540,21 +1629,14 @@ def main() -> None:
     # disabled by default via noise.emva.ktc_noise.enabled: false.
     sigma_ktc_e = 0.0
     if ktc_enabled:
-        _K_B_J = 1.380649e-23       # Boltzmann constant [J/K]
-        _Q_E   = 1.602176634e-19    # elementary charge [C]
-        _T_K   = dark_temp_c + 273.15
-        if "node_capacitance_fF" in ktc_cfg:
-            # Preferred: directly measured sense-node capacitance.
-            _C = float(ktc_cfg["node_capacitance_fF"]) * 1e-15  # fF → F
-        else:
-            # Derive C from the conversion gain (electrons per volt) using the
-            # relationship C = q / CVF where CVF [V/e] = K_e_per_DN / DN_per_V.
-            # DN_per_V = (2^bits − 1) / V_swing.  V_swing ≈ V_ref for rail-to-rail ADC.
-            # Therefore: C = q × K_e_per_DN × (2^bits − 1) / V_ref
-            # (corrected from the previous 2^bits approximation).
-            _vref = float(ktc_cfg.get("vref_V", 1.8))
-            _C = K_e_per_DN * _Q_E * float((1 << bit_depth) - 1) / _vref
-        sigma_ktc_e = float(np.sqrt(_K_B_J * _T_K * _C) / _Q_E)
+        sigma_ktc_e = ktc_sigma_e(
+            temperature_c=dark_temp_c,
+            K_e_per_DN=K_e_per_DN,
+            bit_depth=bit_depth,
+            node_capacitance_fF=(float(ktc_cfg["node_capacitance_fF"])
+                                 if "node_capacitance_fF" in ktc_cfg else None),
+            vref_V=float(ktc_cfg.get("vref_V", 1.8)),
+        )
 
     # ---- Additive Gaussian readout noise (post-Poisson, includes kTC when enabled) ----
     read_e = rng.normal(0.0, sigma_d_e, size=signal_e.shape).astype(np.float32)
@@ -1572,18 +1654,13 @@ def main() -> None:
     else:
         dn_clean = np.clip(signal_e / K_e_per_DN + black_dn, 0.0, None)
         dn_noisy = np.clip(total_e / K_e_per_DN + black_dn, 0.0, None)
-    if adc_inl_quad_fraction != 0.0:
-        x = np.clip((dn_noisy - black_dn) / max(1.0, max_dn - black_dn), 0.0, 1.0)
-        bow = x * (1.0 - x)
-        dn_noisy = np.clip(dn_noisy + (adc_inl_quad_fraction * max_dn) * bow, 0.0, max_dn)
+    dn_noisy = apply_adc_inl(dn_noisy, black_dn=black_dn, max_dn=max_dn,
+                             quadratic_fraction=adc_inl_quad_fraction)
     if adc_dnl_std_lsb > 0.0:
-        # ADC DNL is a FIXED per-bin non-linearity (not temporal noise): every read of the
-        # same DN code produces the same offset.  Generate a fixed offset table from
-        # spatial_rng (seeded per camera unit) and look up the bin for each pixel.
-        _n_bins = int(max_dn) + 1
-        _dnl_table = spatial_rng.normal(0.0, adc_dnl_std_lsb, size=_n_bins).astype(np.float32)
-        _bin_idx = np.clip(np.rint(dn_noisy).astype(np.int32), 0, _n_bins - 1)
-        dn_noisy = np.clip(dn_noisy + _dnl_table[_bin_idx], 0.0, max_dn)
+        # The table comes from spatial_rng (seeded per camera unit) because DNL is a
+        # property of the converter, identical on every frame it ever produces.
+        dn_noisy = apply_adc_dnl(
+            dn_noisy, adc_dnl_table(max_dn, adc_dnl_std_lsb, spatial_rng), max_dn)
 
     if bayer_on:
         raw_u16 = np.rint(dn_noisy).astype(np.uint16)

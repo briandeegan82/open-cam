@@ -42,3 +42,124 @@ def cos4_vignetting_from_pinhole(
     r = np.sqrt(xw * xw + yw * yw + cam_dist * cam_dist)
     cos_t = np.abs(cam_dist) / np.maximum(1e-9, r)
     return cos_t**4
+
+
+# =====================================================================
+# Photometric exposure chain: scene luminance -> illuminance -> electrons
+# =====================================================================
+# Constants from the standard reflected-light metering model.
+METER_CALIBRATION_K = 12.5  # reflected-light meter constant used by Canon/Nikon/Sekonic
+DAYLIGHT_LUMINOUS_EFFICACY_LM_PER_W = 250.0  # luminous efficacy of daylight-ish radiation
+
+
+def image_plane_illuminance_lux(
+    scene_luminance_cd_m2: float | np.ndarray,
+    f_number: float | np.ndarray,
+    *,
+    transmission: float = 0.9,
+    relative_illumination: float = 1.0,
+) -> float | np.ndarray:
+    """Camera equation: ``E = pi/4 * T * L * RI / N^2`` [lux].
+
+    Illuminance falls as the square of the f-number, which is the whole reason
+    the f-number scale steps by sqrt(2): each stop halves the light.
+    """
+    N = np.asarray(f_number, dtype=np.float64)
+    if np.any(N <= 0):
+        raise ValueError("f_number must be positive")
+    return (np.pi / 4.0) * transmission * np.asarray(scene_luminance_cd_m2, dtype=np.float64) \
+        * relative_illumination / (N ** 2)
+
+
+def photons_per_second_per_pixel(
+    illuminance_lux: float | np.ndarray,
+    pixel_area_m2: float,
+    *,
+    luminous_efficacy_lm_per_W: float = DAYLIGHT_LUMINOUS_EFFICACY_LM_PER_W,
+    wavelength_nm: float = 550.0,
+) -> float | np.ndarray:
+    """Photon arrival rate at one pixel [photons/s].
+
+    Lux is a photometric unit -- it already has the eye's response folded in --
+    so getting back to photons needs the luminous efficacy of the particular
+    spectrum, not a universal constant.
+    """
+    if luminous_efficacy_lm_per_W <= 0:
+        raise ValueError("luminous_efficacy_lm_per_W must be positive")
+    irradiance_W_m2 = np.asarray(illuminance_lux, dtype=np.float64) / luminous_efficacy_lm_per_W
+    photon_energy_J = H_PLANCK * C_LIGHT / (wavelength_nm * 1e-9)
+    return irradiance_W_m2 * pixel_area_m2 / photon_energy_J
+
+
+def electrons_from_exposure(
+    scene_luminance_cd_m2: float | np.ndarray,
+    f_number: float | np.ndarray,
+    integration_time_s: float | np.ndarray,
+    *,
+    pixel_pitch_um: float,
+    quantum_efficiency: float,
+    fill_factor: float = 1.0,
+    transmission: float = 0.9,
+    relative_illumination: float = 1.0,
+    luminous_efficacy_lm_per_W: float = DAYLIGHT_LUMINOUS_EFFICACY_LM_PER_W,
+    wavelength_nm: float = 550.0,
+) -> float | np.ndarray:
+    """Mean signal electrons collected in one pixel over one integration.
+
+    The full chain the exposure triangle rests on: scene luminance through the
+    aperture to image-plane illuminance, into photons via the luminous efficacy,
+    onto the pixel's collecting area, through QE, for a length of time.
+    """
+    lux = image_plane_illuminance_lux(
+        scene_luminance_cd_m2, f_number,
+        transmission=transmission, relative_illumination=relative_illumination)
+    area_m2 = (pixel_pitch_um * 1e-6) ** 2 * fill_factor
+    rate = photons_per_second_per_pixel(
+        lux, area_m2,
+        luminous_efficacy_lm_per_W=luminous_efficacy_lm_per_W,
+        wavelength_nm=wavelength_nm)
+    return rate * quantum_efficiency * np.asarray(integration_time_s, dtype=np.float64)
+
+
+def exposure_value(f_number: float | np.ndarray,
+                   integration_time_s: float | np.ndarray) -> float | np.ndarray:
+    """``EV = log2(N^2 / t)``: the camera-side half of the exposure triangle.
+
+    Every (N, t) pair on one EV line delivers the same number of electrons, which
+    is exactly what leaves photographers free to trade depth of field for motion
+    blur at constant brightness.
+    """
+    N = np.asarray(f_number, dtype=np.float64)
+    t = np.asarray(integration_time_s, dtype=np.float64)
+    if np.any(N <= 0) or np.any(t <= 0):
+        raise ValueError("f_number and integration_time_s must be positive")
+    return np.log2(N ** 2 / t)
+
+
+def ev100_from_luminance(scene_luminance_cd_m2: float | np.ndarray,
+                         *, calibration_K: float = METER_CALIBRATION_K) -> float | np.ndarray:
+    """Scene-side EV at ISO 100: ``EV100 = log2(L * 100 / K)``."""
+    L = np.asarray(scene_luminance_cd_m2, dtype=np.float64)
+    if np.any(L <= 0):
+        raise ValueError("scene_luminance_cd_m2 must be positive")
+    return np.log2(L * 100.0 / calibration_K)
+
+
+def luminance_from_ev100(ev100: float | np.ndarray,
+                         *, calibration_K: float = METER_CALIBRATION_K) -> float | np.ndarray:
+    """Inverse of :func:`ev100_from_luminance`."""
+    return calibration_K * np.power(2.0, np.asarray(ev100, dtype=np.float64)) / 100.0
+
+
+def shutter_for_exposure_value(f_number: float | np.ndarray,
+                               ev: float | np.ndarray) -> float | np.ndarray:
+    """Integration time that puts ``f_number`` on the given EV line."""
+    N = np.asarray(f_number, dtype=np.float64)
+    return N ** 2 / np.power(2.0, np.asarray(ev, dtype=np.float64))
+
+
+def f_number_for_exposure_value(integration_time_s: float | np.ndarray,
+                                ev: float | np.ndarray) -> float | np.ndarray:
+    """F-number that puts ``integration_time_s`` on the given EV line."""
+    t = np.asarray(integration_time_s, dtype=np.float64)
+    return np.sqrt(t * np.power(2.0, np.asarray(ev, dtype=np.float64)))

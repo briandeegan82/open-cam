@@ -56,6 +56,7 @@ class EmvaSummary:
     integration_time_s: float
     prnu_std_fraction: float
     dsnu_std_e: float
+    bit_depth: int
 
 
 def emva_summary(model: dict) -> EmvaSummary:
@@ -76,4 +77,5 @@ def emva_summary(model: dict) -> EmvaSummary:
         integration_time_s=float(sensor.get("integration_time_s", 0.01)),
         prnu_std_fraction=float(emva.get("prnu_std_fraction", 0.01)),
         dsnu_std_e=float(emva.get("dsnu_std_e", 0.3)),
+        bit_depth=int(adc.get("bit_depth", 12)),
     )
