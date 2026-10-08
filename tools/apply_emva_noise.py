@@ -255,7 +255,8 @@ def write_png(path: Path, arr: np.ndarray) -> None:
     except ImportError as exc:
         raise RuntimeError("imageio is required to write PNG outputs.") from exc
     path.parent.mkdir(parents=True, exist_ok=True)
-    iio.imwrite(path, arr)
+    # PNG is lossless at any level; level 1 is ~5x faster than the default 6 for slightly larger files.
+    iio.imwrite(path, arr, compress_level=1)
 
 
 def write_raw16(path: Path, raw_u16: np.ndarray) -> None:
