@@ -1,3 +1,4 @@
+import pytest
 from opencam_gui.core import pipeline as pl
 from opencam_gui.core.catalog import find_recipe
 from opencam_gui.core.repo import pbrt_available
@@ -122,3 +123,28 @@ def test_run_steps_reports_nonzero_exit_and_stops(tmp_path):
     assert result.error == "boom failed (exit 3)"
     assert [s.returncode for s in result.steps] == [3]
     assert "oops" in seen and "should not run" not in seen
+
+
+def test_accurate_colorchecker_frames_chart_like_fast_mode():
+    import math
+
+    repo = pl.repo_root()
+    req = pl.GenerationRequest(
+        scene_id="colorchecker",
+        camera_model_config=repo / "config" / "camera_recipes" / "nikon_z6.yaml",
+        mode="pbrt_accurate",
+        illuminant_csv=None,
+        target_illuminance_lux=1000.0,
+        exposure_time_s=0.01,
+        xres=320,
+        yres=240,
+    )
+    d = pl._realistic_cam_dist_matching_fast_framing(req, {"lens_type_override": "realistic"})
+    # 50 mm lens on pbrt's 35 mm-diagonal film (21 mm short side at 4:3) vs 35 deg pinhole at 4.25.
+    expected = 4.25 * math.tan(math.radians(17.5)) / (10.5 / 50.0)
+    assert d == pytest.approx(expected, rel=1e-3)
+
+    pinhole_req = pl.GenerationRequest(
+        **{**req.__dict__, "camera_model_config": repo / "config" / "camera_recipes" / "default.yaml"}
+    )
+    assert pl._realistic_cam_dist_matching_fast_framing(pinhole_req, {"lens_type_override": None}) is None
