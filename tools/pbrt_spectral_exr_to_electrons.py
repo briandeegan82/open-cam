@@ -154,10 +154,7 @@ def spectral_radiance_to_electrons(
     ).lower()
     autocal_active = auto_cal_mode not in _AUTOCAL_OFF
     if autocal_active and auto_cal_mode != "mean_photopic_lux":
-        raise ValueError(
-            "model.pbrt_spectral_exr.radiometric_autocalibration must be "
-            '"off" or "mean_photopic_lux"'
-        )
+        raise ValueError('model.pbrt_spectral_exr.radiometric_autocalibration must be "off" or "mean_photopic_lux"')
 
     qe_cfg = sensor.get("quantum_efficiency", {}) or {}
     fill_factor = float(sensor.get("fill_factor", 1.0))
@@ -172,7 +169,7 @@ def spectral_radiance_to_electrons(
         rad_to_e = np.pi / (4.0 * max(1e-12, f_number**2) * mag)
     else:
         raise ValueError(
-            'model.pbrt_spectral_exr.radiance_to_irradiance must be '
+            "model.pbrt_spectral_exr.radiance_to_irradiance must be "
             '"thin_lens" or "pinhole" when radiance_to_irradiance_scale is unset'
         )
 
@@ -381,7 +378,9 @@ def main() -> None:
         exr_path=np.array(str(exr_path)),
         calibration_mode=np.array(cal_mode),
         **{
-            k: (np.array(json.dumps(v)) if isinstance(v, dict) else np.array(v) if isinstance(v, str) else np.float64(v))
+            k: (
+                np.array(json.dumps(v)) if isinstance(v, dict) else np.array(v) if isinstance(v, str) else np.float64(v)
+            )
             for k, v in meta.items()
         },
     )

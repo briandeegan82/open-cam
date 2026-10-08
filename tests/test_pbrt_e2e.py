@@ -15,11 +15,10 @@ import unittest
 from pathlib import Path
 
 import numpy as np
-from synthetic_data import REPO, run_tool_main
-
 import pbrt_spectral_exr_to_electrons as pbrt_tool
 from camera_model import load_camera_model
 from exr_multispectral import spectral_buckets_from_exr
+from synthetic_data import REPO, run_tool_main
 
 PBRT = Path(os.environ.get("OPENCAM_PBRT", REPO / "third_party" / "pbrt-v4" / "build" / "pbrt"))
 XRES, YRES, NBUCKETS = 96, 64, 16
@@ -56,22 +55,48 @@ class TestPbrtEndToEnd(unittest.TestCase):
         cls.exr = tmp / "cc.exr"
         subprocess.run(
             [
-                sys.executable, str(REPO / "tools" / "build_colorchecker_scene.py"),
-                "--out-dir", str(tmp / "scene"), "--film", "spectral", "--film-output", str(cls.exr),
-                "--xres", str(XRES), "--yres", str(YRES), "--pixelsamples", "16",
-                "--spectral-nbuckets", str(NBUCKETS), "--spectral-lambda-min", "400", "--spectral-lambda-max", "700",
+                sys.executable,
+                str(REPO / "tools" / "build_colorchecker_scene.py"),
+                "--out-dir",
+                str(tmp / "scene"),
+                "--film",
+                "spectral",
+                "--film-output",
+                str(cls.exr),
+                "--xres",
+                str(XRES),
+                "--yres",
+                str(YRES),
+                "--pixelsamples",
+                "16",
+                "--spectral-nbuckets",
+                str(NBUCKETS),
+                "--spectral-lambda-min",
+                "400",
+                "--spectral-lambda-max",
+                "700",
             ],
-            check=True, capture_output=True,
+            check=True,
+            capture_output=True,
         )
         cls.manifest_path = tmp / "scene" / "colorchecker_manifest.json"
         cls.manifest = json.loads(cls.manifest_path.read_text())
         cls.reference = dict(np.load(tmp / "scene" / "spectral_reference_1nm.npz"))
         subprocess.run([str(PBRT), "--quiet", "--seed", "1", str(tmp / "scene" / "colorchecker.pbrt")], check=True)
         out = tmp / "electrons.npz"
-        run_tool_main(pbrt_tool.main, [
-            "--exr", str(cls.exr), "--camera-model-config", str(CAMERA_MODEL),
-            "--scene-manifest-json", str(cls.manifest_path), "--out", str(out),
-        ])
+        run_tool_main(
+            pbrt_tool.main,
+            [
+                "--exr",
+                str(cls.exr),
+                "--camera-model-config",
+                str(CAMERA_MODEL),
+                "--scene-manifest-json",
+                str(cls.manifest_path),
+                "--out",
+                str(out),
+            ],
+        )
         cls.npz = dict(np.load(out))
 
     @classmethod
@@ -82,7 +107,7 @@ class TestPbrtEndToEnd(unittest.TestCase):
         planes, lam = spectral_buckets_from_exr(self.exr)
         self.assertEqual(planes.shape, (YRES, XRES, NBUCKETS))
         self.assertTrue(np.all(np.diff(lam) > 0))
-        self.assertTrue(400.0 < lam[0] and lam[-1] < 700.0)
+        self.assertTrue(lam[0] > 400.0 and lam[-1] < 700.0)
         self.assertTrue(np.all(np.isfinite(planes)) and np.all(planes >= 0.0))
 
     def test_electrons_are_physical(self) -> None:
@@ -94,7 +119,9 @@ class TestPbrtEndToEnd(unittest.TestCase):
     def test_patch_responses_match_spectral_reference(self) -> None:
         """Per-patch electrons ∝ ∫ E·R_i·QE_c·λ dλ: one scale factor for all 24 patches."""
         e = self.npz["electrons_rgb"].astype(np.float64)
-        rendered = np.array([e[r - 1 : r + 2, c - 1 : c + 2].mean(axis=(0, 1)) for r, c in _patch_centres_px(self.manifest)])
+        rendered = np.array(
+            [e[r - 1 : r + 2, c - 1 : c + 2].mean(axis=(0, 1)) for r, c in _patch_centres_px(self.manifest)]
+        )
 
         wl = self.reference["wavelength_nm"]
         band = (wl >= 400.0) & (wl <= 700.0)

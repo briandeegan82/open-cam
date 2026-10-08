@@ -7,13 +7,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-import numpy as np
-from synthetic_data import REPO, run_tool_main, write_flat_qe, write_yaml
-
 import exr_multispectral as em
+import numpy as np
 import pipeline_shell_env
 import spectral_sensor_forward as ssf
-from sensor_radiometry import H_PLANCK, C_LIGHT
+from sensor_radiometry import C_LIGHT, H_PLANCK
+from synthetic_data import REPO, run_tool_main, write_flat_qe, write_yaml
 
 XRES, YRES = 60, 40
 _trapz = getattr(np, "trapezoid", None) or np.trapz
@@ -121,7 +120,9 @@ class TestSpectralSensorForwardAnalytic(unittest.TestCase):
         out = self._run(model)
         np.testing.assert_allclose(out["patch_electrons_rgb"], 0.5 * base["patch_electrons_rgb"], rtol=1e-6)
         self.assertTrue(json.loads(str(out["optics_transmittance_spatial"]))["enabled"])
-        ratio = out["electrons_rgb"][..., 1] / np.where(base["electrons_rgb"][..., 1] > 0, base["electrons_rgb"][..., 1], 1)
+        ratio = out["electrons_rgb"][..., 1] / np.where(
+            base["electrons_rgb"][..., 1] > 0, base["electrons_rgb"][..., 1], 1
+        )
         self.assertLess(float(ratio[YRES // 2, 2]), float(ratio[YRES // 2, XRES // 2]))
 
     def test_cos4_vignetting_and_distortion_keep_patch_values(self) -> None:
@@ -152,21 +153,32 @@ class TestSpectralSensorForwardAnalytic(unittest.TestCase):
 
     def test_wrong_patch_count_rejected(self) -> None:
         gen = self.repo / "scenes" / "generated"
-        np.savez(gen / "spectral_reference_1nm.npz", wavelength_nm=self.wl, illuminant=self.wl, reflectance=np.ones((3, self.wl.size)))
+        np.savez(
+            gen / "spectral_reference_1nm.npz",
+            wavelength_nm=self.wl,
+            illuminant=self.wl,
+            reflectance=np.ones((3, self.wl.size)),
+        )
         with self.assertRaisesRegex(RuntimeError, "24 patch"):
             self._run()
 
 
 class TestSpatialTransmissionMap(unittest.TestCase):
     def test_disabled_is_unity(self) -> None:
-        m, meta = ssf.build_spatial_transmission_map(4, 5, {}, repo=REPO, wavelength_nm=np.arange(3.0), qe_rgb=np.ones((3, 3)))
+        m, meta = ssf.build_spatial_transmission_map(
+            4, 5, {}, repo=REPO, wavelength_nm=np.arange(3.0), qe_rgb=np.ones((3, 3))
+        )
         np.testing.assert_array_equal(m, 1.0)
         self.assertFalse(meta["enabled"])
 
     def test_radial_profile(self) -> None:
         m, _ = ssf.build_spatial_transmission_map(
-            9, 9, {"enabled": True, "edge_factor": 0.4, "exponent": 2.0},
-            repo=REPO, wavelength_nm=np.arange(3.0), qe_rgb=np.ones((3, 3)),
+            9,
+            9,
+            {"enabled": True, "edge_factor": 0.4, "exponent": 2.0},
+            repo=REPO,
+            wavelength_nm=np.arange(3.0),
+            qe_rgb=np.ones((3, 3)),
         )
         self.assertAlmostEqual(float(m[4, 4, 0]), 1.0, places=6)
         self.assertAlmostEqual(float(m[0, 0, 0]), 0.4, places=6)
@@ -179,15 +191,24 @@ class TestSpatialTransmissionMap(unittest.TestCase):
             wl = np.array([400.0, 700.0])
             qe = np.array([[1.0, 0.0], [1.0, 1.0], [0.0, 1.0]])
             _, meta = ssf.build_spatial_transmission_map(
-                3, 3, {"enabled": True, "spectral_edge_factors_csv": "edge.csv"},
-                repo=Path(d), wavelength_nm=wl, qe_rgb=qe,
+                3,
+                3,
+                {"enabled": True, "spectral_edge_factors_csv": "edge.csv"},
+                repo=Path(d),
+                wavelength_nm=wl,
+                qe_rgb=qe,
             )
         np.testing.assert_allclose(meta["edge_factor_rgb"], [0.2, 0.5, 0.8])
 
     def test_unknown_mode_rejected(self) -> None:
         with self.assertRaises(ValueError):
             ssf.build_spatial_transmission_map(
-                2, 2, {"enabled": True, "mode": "cos4"}, repo=REPO, wavelength_nm=np.arange(3.0), qe_rgb=np.ones((3, 3)),
+                2,
+                2,
+                {"enabled": True, "mode": "cos4"},
+                repo=REPO,
+                wavelength_nm=np.arange(3.0),
+                qe_rgb=np.ones((3, 3)),
             )
 
 
@@ -326,11 +347,14 @@ class TestValidateDemosaicLinear(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.tmp = Path(self._tmp.name)
-        self.noise = write_yaml(self.tmp / "noise.yaml", {
-            "bayer": {"enabled": True, "pattern": "RGGB"},
-            "adc": {"bit_depth": 16, "full_well_e": 1e6},
-            "emva": {"overall_system_gain_K_e_per_DN": 1.0, "black_level_DN": 0.0},
-        })
+        self.noise = write_yaml(
+            self.tmp / "noise.yaml",
+            {
+                "bayer": {"enabled": True, "pattern": "RGGB"},
+                "adc": {"bit_depth": 16, "full_well_e": 1e6},
+                "emva": {"overall_system_gain_K_e_per_DN": 1.0, "black_level_DN": 0.0},
+            },
+        )
 
     def tearDown(self) -> None:
         self._tmp.cleanup()
@@ -341,10 +365,20 @@ class TestValidateDemosaicLinear(unittest.TestCase):
         npz = self.tmp / "e.npz"
         np.savez(npz, electrons_rgb=electrons.astype(np.float32))
         out = self.tmp / "metrics.json"
-        run_tool_main(validate_demosaic_linear.main, [
-            "--repo-root", str(self.tmp), "--config", str(noise or self.noise), "--electrons-npz", str(npz),
-            "--json-out", str(out), *extra,
-        ])
+        run_tool_main(
+            validate_demosaic_linear.main,
+            [
+                "--repo-root",
+                str(self.tmp),
+                "--config",
+                str(noise or self.noise),
+                "--electrons-npz",
+                str(npz),
+                "--json-out",
+                str(out),
+                *extra,
+            ],
+        )
         return json.loads(out.read_text())
 
     def test_linear_ramp_is_reconstructed_exactly(self) -> None:
