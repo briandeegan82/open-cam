@@ -912,6 +912,7 @@ def integrate_exr_spectral_qe(
     strict_qe_validation: bool = False,
     lens_cfg: dict | None = None,
     model_cfg: dict | None = None,
+    scene: dict | None = None,
 ) -> np.ndarray:
     """HxWx3 electrons via full photon-counting physics on a PBRT spectral EXR.
 
@@ -930,6 +931,9 @@ def integrate_exr_spectral_qe(
     model_cfg:
         The full ``sensor_forward.model`` block (``calibration``, ``pbrt_spectral_exr``,
         ``optics_transmittance_spatial``). Its calibration is overridden by ``cal_cfg``.
+    scene:
+        From ``scene_radiometry_from_manifest``: calibrates ``target_illuminance_lux`` as
+        chart illuminance and skips the thin-lens factor for realistic-camera EXRs.
     """
     # Deferred import to avoid a circular-import risk at module load time.
     from pbrt_spectral_exr_to_electrons import spectral_radiance_to_electrons  # noqa: PLC0415
@@ -948,8 +952,23 @@ def integrate_exr_spectral_qe(
         lens_cfg=lens_cfg,
         strict_qe_validation=strict_qe_validation,
         tag="integrate_qe",
+        scene=scene,
     )
     return electrons
+
+
+def _scene_radiometry(manifest_path: Path | None, repo: Path) -> dict | None:
+    from pbrt_spectral_exr_to_electrons import scene_radiometry_from_manifest  # noqa: PLC0415
+
+    if manifest_path is None:
+        return None
+    path = manifest_path if manifest_path.is_absolute() else repo / manifest_path
+    if not path.is_file():
+        print(
+            f"warning [integrate_qe]: scene manifest {path} not found; using calibration CSV/autocal", file=sys.stderr
+        )
+        return None
+    return scene_radiometry_from_manifest(json.loads(path.read_text()))
 
 
 def main() -> None:
@@ -1029,6 +1048,12 @@ def main() -> None:
         "--strict-qe-validation",
         action="store_true",
         help="Fail on QE wavelength-axis auto-remap or likely R/B swap detection.",
+    )
+    ap.add_argument(
+        "--scene-manifest-json",
+        type=Path,
+        default=None,
+        help="Scene manifest of the rendered EXR; integrate_qe then calibrates target lux as chart illuminance.",
     )
     ap.add_argument(
         "--regenerate-defect-map",
@@ -1276,6 +1301,7 @@ def main() -> None:
                     strict_qe_validation=strict_qe_validation,
                     lens_cfg=camera_model.get("lens", {}) if camera_model else None,
                     model_cfg=_sf_model if camera_model else None,
+                    scene=_scene_radiometry(args.scene_manifest_json, repo),
                 )
             except ValueError as exc:
                 # Some renders are RGB EXRs even when integrate_qe is configured.

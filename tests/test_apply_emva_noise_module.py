@@ -201,6 +201,17 @@ class TestIntegrateQePath(_EmvaCase):
         self.assertEqual(stats["signal_source"], "linear_exr_integrate_qe")
         self.assertGreater(stats["signal_e_mean_rgb"][1], 0.0)
 
+    def test_scene_manifest_reaches_integrate_qe(self) -> None:
+        exr, _ = self._spectral_exr()
+        self._config(exr=exr, processing={"linear_exr_mode": "integrate_qe", "exposure_scale_e_per_unit": 1.0})
+        base, _ = self._run()
+        manifest = self.tmp / "manifest.json"
+        manifest.write_text(json.dumps({"camera": {"type": "realistic"}, "lighting": {"distant": {"scale": 1.0}}}))
+        realistic, _ = self._run("--scene-manifest-json", str(manifest))
+        # Realistic-camera EXR is already film irradiance: no π/(4N²) at f/2.8.
+        ratio = realistic["signal_e_mean_rgb"][1] / base["signal_e_mean_rgb"][1]
+        self.assertAlmostEqual(ratio, 4.0 * 2.8**2 / np.pi, places=3)
+
     def test_integrate_qe_falls_back_to_rgb_for_rgb_only_exr(self) -> None:
         self._config(processing={"linear_exr_mode": "integrate_qe"})
         stats, _ = self._run()

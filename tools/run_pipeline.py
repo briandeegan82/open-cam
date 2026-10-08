@@ -388,6 +388,9 @@ def main() -> None:
             str(noise.get("seed", 0)),
         ]
         noise_cmd.extend(["--linear-exr", str(exr_out)])
+        scene_manifest = scene_file.with_name("colorchecker_manifest.json")
+        if scene_builder.name == "build_colorchecker_scene.py":
+            noise_cmd.extend(["--scene-manifest-json", str(scene_manifest)])
         if bool(sensor_forward.get("enabled", False)):
             noise_cmd.extend(["--electrons-npz", str(sensor_forward_npz)])
         if noise.get("exposure_scale", None) is not None:

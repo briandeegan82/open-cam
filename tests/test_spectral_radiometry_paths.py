@@ -63,7 +63,7 @@ class TestSharedRadiometry(unittest.TestCase):
             "sensor_forward": {"model": model},
         }
 
-    def _both_paths(self, camera: dict) -> tuple[np.ndarray, np.ndarray, dict]:
+    def _both_paths(self, camera: dict, manifest: str = "manifest.json") -> tuple[np.ndarray, np.ndarray, dict]:
         cfg_path = write_yaml(self.tmp / "camera.yaml", camera)
         out = self.tmp / "e.npz"
         run_tool_main(
@@ -76,7 +76,7 @@ class TestSharedRadiometry(unittest.TestCase):
                 "--camera-model-config",
                 str(cfg_path),
                 "--scene-manifest-json",
-                str(self.tmp / "manifest.json"),
+                str(self.tmp / manifest),
                 "--out",
                 str(out),
             ],
@@ -91,8 +91,19 @@ class TestSharedRadiometry(unittest.TestCase):
             dict(model["calibration"]),
             lens_cfg=camera["lens"],
             model_cfg=model,
+            scene=apply_emva_noise._scene_radiometry(self.tmp / manifest, self.tmp),
         )
         return npz["electrons_rgb"], e_iq, dict(npz)
+
+    def _scene_manifest(self, camera_type: str, light_scale: float = 2.0) -> str:
+        name = f"manifest_{camera_type}.json"
+        manifest = {
+            "film": {"xresolution": W, "yresolution": H},
+            "camera": {"type": camera_type, "cam_dist": 4.0, "focus_distance": 0.1},
+            "lighting": {"distant": {"from": [0, 0, 3], "to": [0, 0, 0], "scale": light_scale}},
+        }
+        (self.tmp / name).write_text(json.dumps(manifest))
+        return name
 
     def test_paths_agree_with_every_factor_active(self) -> None:
         camera = self._camera({"optics_transmittance_csv": "tau.csv", "irradiance_scale_W_m2nm_per_unit": 2e-3})
@@ -143,6 +154,34 @@ class TestSharedRadiometry(unittest.TestCase):
                 camera["sensor"],
                 camera["sensor_forward"]["model"]["calibration"],
             )
+
+    def test_scene_manifest_calibrates_chart_lux_in_both_paths(self) -> None:
+        cal = {"target_illuminance_lux": 500.0, "illuminant_override_csv": "illum.csv"}
+        camera = self._camera(cal, {"radiometric_autocalibration": "mean_photopic_lux"}, spatial=False)
+        e_pbrt, e_iq, npz = self._both_paths(camera, self._scene_manifest("pinhole"))
+        np.testing.assert_allclose(e_iq, e_pbrt, rtol=1e-6)
+        self.assertEqual(str(npz["photometric_calibration"]), "scene_chart_lux")
+        expected = 500.0 / (683.0 * pbrt_tool.PBRT_CIE_Y_INTEGRAL * 2.0)
+        self.assertAlmostEqual(float(npz["photometry_calibration_scale"]), expected, places=12)
+        # Focus distance comes from the scene (0.1 m → m = 1), not lens.realistic_focus_distance.
+        camera["lens"] = {"focal_length_mm": 50.0, "realistic_focus_distance": 1000.0}
+        e_pbrt_far_lens, e_iq_far_lens, _ = self._both_paths(camera, self._scene_manifest("pinhole"))
+        np.testing.assert_allclose(e_iq_far_lens, e_pbrt, rtol=1e-6)
+        np.testing.assert_allclose(e_pbrt_far_lens, e_pbrt, rtol=1e-6)
+
+    def test_realistic_scene_skips_thin_lens_factor_in_both_paths(self) -> None:
+        cal = {"target_illuminance_lux": 500.0}
+        pinhole_pbrt, _, pin = self._both_paths(self._camera(cal, spatial=False), self._scene_manifest("pinhole"))
+        e_pbrt, e_iq, npz = self._both_paths(self._camera(cal, spatial=False), self._scene_manifest("realistic"))
+        np.testing.assert_allclose(e_iq, e_pbrt, rtol=1e-6)
+        self.assertEqual(float(npz["radiance_to_irradiance"]), 1.0)
+        rad_to_e = float(pin["radiance_to_irradiance"]) / float(pin["magnification_factor"])
+        np.testing.assert_allclose(pinhole_pbrt, e_pbrt * float(pin["radiance_to_irradiance"]), rtol=1e-6)
+        self.assertLess(rad_to_e, 1.0)
+
+    def test_missing_scene_manifest_falls_back(self) -> None:
+        self.assertIsNone(apply_emva_noise._scene_radiometry(None, self.tmp))
+        self.assertIsNone(apply_emva_noise._scene_radiometry(Path("nope.json"), self.tmp))
 
 
 if __name__ == "__main__":
