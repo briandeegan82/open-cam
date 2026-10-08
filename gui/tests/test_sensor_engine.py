@@ -1,5 +1,4 @@
 import numpy as np
-
 from opencam_gui.core import sensor_engine as se
 
 

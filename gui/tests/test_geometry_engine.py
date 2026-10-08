@@ -11,7 +11,6 @@ import math
 
 import numpy as np
 import pytest
-
 from opencam_gui.core import geometry_engine as ge
 from opencam_gui.topics.geometry.scenarios import SCENARIOS
 

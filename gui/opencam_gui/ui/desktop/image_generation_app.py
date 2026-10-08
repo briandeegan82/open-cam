@@ -13,8 +13,8 @@ import queue
 import threading
 from pathlib import Path
 
-import numpy as np
 import dearpygui.dearpygui as dpg
+import numpy as np
 from PIL import Image
 
 from opencam_gui.core import pipeline as pl

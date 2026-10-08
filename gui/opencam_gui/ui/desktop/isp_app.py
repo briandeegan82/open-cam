@@ -10,8 +10,8 @@ and becomes a picture.
 
 from __future__ import annotations
 
-import numpy as np
 import dearpygui.dearpygui as dpg
+import numpy as np
 
 from opencam_gui.core import isp_engine as ie
 from opencam_gui.topics.isp.scenarios import SCENARIOS, get_scenario
@@ -239,9 +239,8 @@ class IspApp(DemoApp):
             ("spd", (240, 200, 90)),
             ("refl", (200, 200, 200)),
         ):
-            with dpg.theme() as theme:
-                with dpg.theme_component(dpg.mvLineSeries):
-                    dpg.add_theme_color(dpg.mvPlotCol_Line, colour, category=dpg.mvThemeCat_Plots)
+            with dpg.theme() as theme, dpg.theme_component(dpg.mvLineSeries):
+                dpg.add_theme_color(dpg.mvPlotCol_Line, colour, category=dpg.mvThemeCat_Plots)
             self._curve_themes[name] = theme
 
     def register_textures(self) -> None:

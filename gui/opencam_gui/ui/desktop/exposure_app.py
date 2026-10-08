@@ -11,8 +11,8 @@ rather than as part of a general mush of noise.
 
 from __future__ import annotations
 
-import numpy as np
 import dearpygui.dearpygui as dpg
+import numpy as np
 
 from opencam_gui.core import exposure_engine as ee
 from opencam_gui.core.camera import emva_summary, optics_summary
@@ -276,14 +276,12 @@ class ExposureApp(DemoApp):
 
     # --- layout -----------------------------------------------------
     def register_themes(self) -> None:
-        with dpg.theme() as current:
-            with dpg.theme_component(dpg.mvScatterSeries):
-                dpg.add_theme_color(dpg.mvPlotCol_MarkerFill, (255, 210, 90), category=dpg.mvThemeCat_Plots)
+        with dpg.theme() as current, dpg.theme_component(dpg.mvScatterSeries):
+            dpg.add_theme_color(dpg.mvPlotCol_MarkerFill, (255, 210, 90), category=dpg.mvThemeCat_Plots)
         self._current_theme = current
 
-        with dpg.theme() as warn:
-            with dpg.theme_component(dpg.mvLineSeries):
-                dpg.add_theme_color(dpg.mvPlotCol_Line, (240, 110, 110), category=dpg.mvThemeCat_Plots)
+        with dpg.theme() as warn, dpg.theme_component(dpg.mvLineSeries):
+            dpg.add_theme_color(dpg.mvPlotCol_Line, (240, 110, 110), category=dpg.mvThemeCat_Plots)
         self._warn_theme = warn
 
     def register_textures(self) -> None:

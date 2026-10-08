@@ -53,7 +53,7 @@ def p(repo: Path, v: str) -> Path:
 
 
 def pick_override(overrides: dict, key: str, default):
-    v = overrides.get(key, None)
+    v = overrides.get(key)
     return default if v is None else v
 
 
@@ -69,7 +69,7 @@ def parse_render_pbrt_args(render: dict) -> list[str]:
 
 
 def resolve_illuminant_rel(render: dict) -> str:
-    illuminant = render.get("illuminant", None)
+    illuminant = render.get("illuminant")
     if illuminant is None:
         return DEFAULT_ILLUMINANT_CSV
     illum_s = str(illuminant).strip()
@@ -89,7 +89,7 @@ def resolve_camera_model_path(repo: Path, paths: dict, cli_path: Path | None) ->
     if cli_path is not None:
         return cli_path.resolve()
     model_name = paths.get("camera_model_name")
-    model_cfg = paths.get("camera_model_config", None)
+    model_cfg = paths.get("camera_model_config")
     if model_name and model_cfg:
         raise ValueError("set only one of paths.camera_model_name or paths.camera_model_config")
     if model_name:

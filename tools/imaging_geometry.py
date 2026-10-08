@@ -24,7 +24,6 @@ import math
 from dataclasses import dataclass
 
 import numpy as np
-
 from sensor_radiometry import cos4_vignetting_from_pinhole
 
 # 36 x 24 mm reference format that "full frame" and crop factor are defined against.

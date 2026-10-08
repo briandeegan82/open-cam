@@ -51,8 +51,8 @@ def photometry_calibration_scale(
     silently skipped.
     """
     irr_scale = float(cal.get("irradiance_scale_W_m2nm_per_unit", 1.0e-3))
-    target_lux = cal.get("target_illuminance_lux", None)
-    illum_csv = cal.get("illuminant_override_csv", None)
+    target_lux = cal.get("target_illuminance_lux")
+    illum_csv = cal.get("illuminant_override_csv")
     illuminance_scale = 1.0
     if target_lux is not None and illum_csv:
         e_wl, e_v = read_csv_curve((repo / illum_csv).resolve())

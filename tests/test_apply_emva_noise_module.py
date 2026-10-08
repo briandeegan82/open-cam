@@ -7,8 +7,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import apply_emva_noise  # noqa: E402  (synthetic_data puts tools/ on sys.path)
 import numpy as np
-
+from exr_multispectral import trapezoid_weights_nm  # noqa: E402
+from sensor_radiometry import C_LIGHT, H_PLANCK  # noqa: E402
 from synthetic_data import (
     SPECTRAL_LAMBDAS_NM,
     colour_bars,
@@ -19,10 +21,6 @@ from synthetic_data import (
     write_spectral_exr,
     write_yaml,
 )
-
-import apply_emva_noise  # noqa: E402  (synthetic_data puts tools/ on sys.path)
-from exr_multispectral import trapezoid_weights_nm  # noqa: E402
-from sensor_radiometry import C_LIGHT, H_PLANCK  # noqa: E402
 
 H, W = 24, 32
 BIT_DEPTH = 12

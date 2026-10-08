@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-
 from opencam_gui.core import isp_engine as ie
 from opencam_gui.topics.isp.scenarios import SCENARIOS
 

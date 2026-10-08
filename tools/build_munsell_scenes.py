@@ -16,7 +16,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-
 from munsell_mat import load_joensuu_mat, parse_munsell_label, sanitize_filename
 
 HUE_FAMILY_ORDER = ("R", "YR", "Y", "GY", "G", "BG", "B", "PB", "P", "RP", "N")

@@ -12,8 +12,8 @@ helper is a documented read-only mirror of the formula in
 
 from __future__ import annotations
 
-import numpy as np
 import dearpygui.dearpygui as dpg
+import numpy as np
 
 from opencam_gui.core import dark_current as dc
 from opencam_gui.core import sensor_engine as se
@@ -350,16 +350,14 @@ class SensorApp(DemoApp):
 
     # --- layout -----------------------------------------------------
     def register_themes(self) -> None:
-        with dpg.theme() as dark_point_theme:
-            with dpg.theme_component(dpg.mvScatterSeries):
-                dpg.add_theme_color(dpg.mvPlotCol_MarkerFill, (255, 190, 60), category=dpg.mvThemeCat_Plots)
-                dpg.add_theme_color(dpg.mvPlotCol_Line, (255, 190, 60), category=dpg.mvThemeCat_Plots)
+        with dpg.theme() as dark_point_theme, dpg.theme_component(dpg.mvScatterSeries):
+            dpg.add_theme_color(dpg.mvPlotCol_MarkerFill, (255, 190, 60), category=dpg.mvThemeCat_Plots)
+            dpg.add_theme_color(dpg.mvPlotCol_Line, (255, 190, 60), category=dpg.mvThemeCat_Plots)
         self._dark_point_theme = dark_point_theme
 
-        with dpg.theme() as measured_theme:
-            with dpg.theme_component(dpg.mvScatterSeries):
-                dpg.add_theme_color(dpg.mvPlotCol_MarkerFill, (90, 200, 255), category=dpg.mvThemeCat_Plots)
-                dpg.add_theme_color(dpg.mvPlotCol_Line, (90, 200, 255), category=dpg.mvThemeCat_Plots)
+        with dpg.theme() as measured_theme, dpg.theme_component(dpg.mvScatterSeries):
+            dpg.add_theme_color(dpg.mvPlotCol_MarkerFill, (90, 200, 255), category=dpg.mvThemeCat_Plots)
+            dpg.add_theme_color(dpg.mvPlotCol_Line, (90, 200, 255), category=dpg.mvThemeCat_Plots)
         self._measured_theme = measured_theme
 
     def register_textures(self) -> None:

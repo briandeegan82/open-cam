@@ -233,9 +233,9 @@ def mtf_from_lsf(
     ``sinc(f * bin_width)``; dividing it out is what lets the recovered MTF match
     theory instead of drooping at high frequency.
     """
-    l = np.asarray(lsf, dtype=np.float64)
-    n = l.size
-    spectrum = np.abs(np.fft.rfft(l))
+    lsf_arr = np.asarray(lsf, dtype=np.float64)
+    n = lsf_arr.size
+    spectrum = np.abs(np.fft.rfft(lsf_arr))
     dc = spectrum[0]
     if dc <= 0:
         raise ValueError("LSF has no DC component; the ROI probably contains no edge")

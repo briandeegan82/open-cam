@@ -18,7 +18,6 @@ import sys
 from pathlib import Path
 
 import numpy as np
-
 from camera_model import load_camera_model, noise_config_from_camera_model
 
 _TOOLS = Path(__file__).resolve().parent

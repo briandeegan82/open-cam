@@ -7,8 +7,8 @@ module and draws the results.
 
 from __future__ import annotations
 
-import numpy as np
 import dearpygui.dearpygui as dpg
+import numpy as np
 
 from opencam_gui.core import optics_engine as oe
 from opencam_gui.core.camera import optics_summary
@@ -240,9 +240,8 @@ class OpticsApp(DemoApp):
     # --- layout -----------------------------------------------------
     def register_themes(self) -> None:
         for ch, rgb in _RGB_HEX.items():
-            with dpg.theme() as th:
-                with dpg.theme_component(dpg.mvLineSeries):
-                    dpg.add_theme_color(dpg.mvPlotCol_Line, rgb, category=dpg.mvThemeCat_Plots)
+            with dpg.theme() as th, dpg.theme_component(dpg.mvLineSeries):
+                dpg.add_theme_color(dpg.mvPlotCol_Line, rgb, category=dpg.mvThemeCat_Plots)
             self._line_themes[ch] = th
 
     def register_textures(self) -> None:

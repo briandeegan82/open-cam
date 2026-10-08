@@ -12,8 +12,8 @@ from __future__ import annotations
 
 import math
 
-import numpy as np
 import dearpygui.dearpygui as dpg
+import numpy as np
 
 from opencam_gui.core import mtf_engine as me
 from opencam_gui.core.camera import optics_summary
@@ -215,14 +215,12 @@ class MtfApp(DemoApp):
 
     # --- layout -----------------------------------------------------
     def register_themes(self) -> None:
-        with dpg.theme() as measured:
-            with dpg.theme_component(dpg.mvLineSeries):
-                dpg.add_theme_color(dpg.mvPlotCol_Line, (110, 200, 255), category=dpg.mvThemeCat_Plots)
+        with dpg.theme() as measured, dpg.theme_component(dpg.mvLineSeries):
+            dpg.add_theme_color(dpg.mvPlotCol_Line, (110, 200, 255), category=dpg.mvThemeCat_Plots)
         self._measured_theme = measured
 
-        with dpg.theme() as nyquist:
-            with dpg.theme_component(dpg.mvLineSeries):
-                dpg.add_theme_color(dpg.mvPlotCol_Line, (240, 110, 110), category=dpg.mvThemeCat_Plots)
+        with dpg.theme() as nyquist, dpg.theme_component(dpg.mvLineSeries):
+            dpg.add_theme_color(dpg.mvPlotCol_Line, (240, 110, 110), category=dpg.mvThemeCat_Plots)
         self._nyquist_theme = nyquist
 
     def register_textures(self) -> None:

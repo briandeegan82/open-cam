@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-
 from opencam_gui.core import mtf_engine as me
 from opencam_gui.core.repo import import_tool
 from opencam_gui.topics.mtf.scenarios import SCENARIOS
@@ -36,7 +35,7 @@ class TestSyntheticEdge:
     def test_the_roi_is_square_and_bounded(self):
         roi = me.synthetic_edge(size=128)
         assert roi.shape == (128, 128)
-        assert -0.01 <= roi.min() and roi.max() <= 1.01
+        assert roi.min() >= -0.01 and roi.max() <= 1.01
 
     def test_the_edge_is_slanted_rather_than_axis_aligned(self):
         """ISO 12233 needs a slant: it is what supplies the sub-pixel phases the

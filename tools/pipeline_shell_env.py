@@ -22,7 +22,7 @@ DEFAULT_ILLUMINANT_CSV = "spectra/illuminant/interpolated/D55.csv"
 
 def resolve_camera_model_path(repo: Path, paths: dict) -> tuple[str, Path]:
     model_name = paths.get("camera_model_name")
-    model_cfg = paths.get("camera_model_config", None)
+    model_cfg = paths.get("camera_model_config")
     if model_name and model_cfg:
         raise ValueError("set only one of paths.camera_model_name or paths.camera_model_config")
     if model_name:

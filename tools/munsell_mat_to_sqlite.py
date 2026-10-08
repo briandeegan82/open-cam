@@ -27,7 +27,6 @@ import sqlite3
 import sys
 from pathlib import Path
 
-
 from munsell_mat import load_joensuu_mat, parse_munsell_label, sanitize_filename
 
 

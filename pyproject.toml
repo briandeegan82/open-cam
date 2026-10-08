@@ -11,6 +11,11 @@ target-version = "py310"
 extend-exclude = ["third_party", "venv", "out", "scenes/generated"]
 
 [tool.ruff.lint]
-# Gate on real errors (undefined names, unused imports, syntax); style rules can be
-# tightened incrementally once the existing line-length debt is paid down.
-select = ["F", "E9"]
+select = ["F", "E", "W", "I", "UP", "B", "SIM"]
+# E501: ruff format wraps code at line-length; remaining overruns are long string literals.
+# UP031 / SIM108 / B905: legacy style, rewriting %-formats, if/else blocks and zip() calls has no payoff.
+ignore = ["E501", "UP031", "SIM108", "B905"]
+
+[tool.ruff.lint.per-file-ignores]
+# Scripts insert tools/ on sys.path before importing sibling modules.
+"tools/*.py" = ["E402"]

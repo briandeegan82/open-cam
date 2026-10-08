@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import dearpygui.dearpygui as dpg
 import pytest
-
 from opencam_gui.ui.desktop.base import CUSTOM_RECIPE
 from opencam_gui.ui.desktop.exposure_app import ExposureApp
 from opencam_gui.ui.desktop.geometry_app import GeometryApp

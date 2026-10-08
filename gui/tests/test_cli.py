@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from opencam_gui.ui import cli
 
 BUILT_TOPICS = tuple(t.id for t in cli.TOPICS)

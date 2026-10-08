@@ -34,14 +34,12 @@ import sys
 from pathlib import Path
 from typing import NamedTuple
 
-
 _TOOLS = Path(__file__).resolve().parent
 if str(_TOOLS) not in sys.path:
     sys.path.insert(0, str(_TOOLS))
 
 from camera_model import load_camera_model
 from emva_theory import compare_config_to_datasheet
-
 
 # ---------------------------------------------------------------------------
 # Issue severity levels

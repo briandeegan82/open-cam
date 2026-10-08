@@ -954,8 +954,8 @@ def integrate_exr_spectral_qe(
     irr_scale = float(cal_cfg.get("irradiance_scale_W_m2nm_per_unit", 1.0e-3))
 
     # ---- Optional photometric calibration (match target_illuminance_lux) ----
-    target_lux = cal_cfg.get("target_illuminance_lux", None)
-    illum_csv = cal_cfg.get("illuminant_override_csv", None)
+    target_lux = cal_cfg.get("target_illuminance_lux")
+    illum_csv = cal_cfg.get("illuminant_override_csv")
     auto_cal_mode = str(cal_cfg.get("radiometric_autocalibration", "off")).lower()
     lux_scale = 1.0
 

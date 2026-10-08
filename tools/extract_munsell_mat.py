@@ -20,7 +20,6 @@ import sys
 from pathlib import Path
 
 import numpy as np
-
 from munsell_mat import load_joensuu_mat, sanitize_filename
 
 

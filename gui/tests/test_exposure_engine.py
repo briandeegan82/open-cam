@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-
 from opencam_gui.core import exposure_engine as ee
 from opencam_gui.topics.exposure.scenarios import SCENARIOS
 

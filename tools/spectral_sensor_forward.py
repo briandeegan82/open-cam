@@ -191,7 +191,7 @@ def build_spatial_transmission_map(
     edge_factor = float(cfg.get("edge_factor", 0.9))
     exponent = float(cfg.get("exponent", 2.0))
     edge_rgb = np.full(3, float(np.clip(edge_factor, 0.0, 1.0)), dtype=np.float64)
-    spectral_csv = cfg.get("spectral_edge_factors_csv", None)
+    spectral_csv = cfg.get("spectral_edge_factors_csv")
     if spectral_csv:
         s_wl, s_v = read_csv_curve((repo / str(spectral_csv)).resolve())
         edge_lambda = np.clip(np.interp(wavelength_nm, s_wl, s_v, left=0.0, right=0.0), 0.0, 1.0)

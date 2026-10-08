@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import math
 
-import numpy as np
 import dearpygui.dearpygui as dpg
+import numpy as np
 
 from opencam_gui.core import geometry_engine as ge
 from opencam_gui.core.camera import optics_summary
@@ -294,14 +294,12 @@ class GeometryApp(DemoApp):
 
     # --- layout -----------------------------------------------------
     def register_themes(self) -> None:
-        with dpg.theme() as ray_theme:
-            with dpg.theme_component(dpg.mvLineSeries):
-                dpg.add_theme_color(dpg.mvPlotCol_Line, (255, 200, 90), category=dpg.mvThemeCat_Plots)
+        with dpg.theme() as ray_theme, dpg.theme_component(dpg.mvLineSeries):
+            dpg.add_theme_color(dpg.mvPlotCol_Line, (255, 200, 90), category=dpg.mvThemeCat_Plots)
         self._ray_theme = ray_theme
 
-        with dpg.theme() as limit_theme:
-            with dpg.theme_component(dpg.mvLineSeries):
-                dpg.add_theme_color(dpg.mvPlotCol_Line, (240, 110, 110), category=dpg.mvThemeCat_Plots)
+        with dpg.theme() as limit_theme, dpg.theme_component(dpg.mvLineSeries):
+            dpg.add_theme_color(dpg.mvPlotCol_Line, (240, 110, 110), category=dpg.mvThemeCat_Plots)
         self._limit_theme = limit_theme
 
     def register_textures(self) -> None:

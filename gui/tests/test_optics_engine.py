@@ -1,6 +1,5 @@
-import pytest
 import numpy as np
-
+import pytest
 from opencam_gui.core import optics_engine as oe
 
 
