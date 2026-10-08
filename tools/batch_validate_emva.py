@@ -50,6 +50,20 @@ INFO = "INFO"
 
 _SEVERITY_RANK = {FAIL: 2, WARN: 1, INFO: 0}
 
+_CSV_PARAM_COLUMNS = (
+    "K_e_per_DN",
+    "sigma_d_e",
+    "sigma_d_dn",
+    "full_well_e",
+    "black_level_DN",
+    "bit_depth",
+    "dynamic_range_stops",
+    "f_number",
+    "pixel_pitch_um",
+)
+# CSV column -> key in validate_camera()["params"] where the names differ.
+_CSV_PARAM_KEYS = {"K_e_per_DN": "K_effective_e_per_DN", "full_well_e": "full_well_effective_e"}
+
 
 class Issue(NamedTuple):
     severity: str  # FAIL | WARN | INFO
@@ -479,20 +493,7 @@ def main() -> None:
                     "name": r["name"],
                     "display_name": r.get("display_name", r["name"]),
                     "status": r["status"],
-                    **{
-                        k: p.get(k, "")
-                        for k in (
-                            "K_e_per_DN",
-                            "sigma_d_e",
-                            "sigma_d_dn",
-                            "full_well_e",
-                            "black_level_DN",
-                            "bit_depth",
-                            "dynamic_range_stops",
-                            "f_number",
-                            "pixel_pitch_um",
-                        )
-                    },
+                    **{col: p.get(_CSV_PARAM_KEYS.get(col, col), "") for col in _CSV_PARAM_COLUMNS},
                     "issues": " | ".join(i["message"] for i in r.get("issues", [])),
                 }
             )

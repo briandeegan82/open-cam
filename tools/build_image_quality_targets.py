@@ -19,6 +19,13 @@ LEGACY_REALISTIC_LENSFILE = "scenes/lenses/wide_22mm.dat"
 DEFAULT_REALISTIC_LENSFILE = "config/lenses/wide_22mm.dat"
 
 
+def _rel(repo: Path, p: Path) -> str:
+    try:
+        return str(p.resolve().relative_to(repo.resolve()))
+    except ValueError:
+        return str(p.resolve())
+
+
 def resolve_lensfile(repo: Path, lensfile_rel: str) -> Path:
     lens_path = (repo / lensfile_rel).resolve()
     if lens_path.is_file():
@@ -264,7 +271,7 @@ def write_target_scene(args: argparse.Namespace, repo: Path, out_dir: Path, targ
     scene_path.write_text("\n".join(lines) + "\n")
     return {
         "target": target,
-        "scene": str(scene_path.relative_to(repo)),
+        "scene": _rel(repo, scene_path),
         "film_output": film_output,
     }
 
@@ -325,7 +332,7 @@ def main() -> None:
     manifest_items = [write_target_scene(args, repo, out_dir, t) for t in targets]
     manifest = {
         "generator": "tools/build_image_quality_targets.py",
-        "out_dir": str(out_dir.relative_to(repo)),
+        "out_dir": _rel(repo, out_dir),
         "targets": manifest_items,
     }
     manifest_path = out_dir / "manifest.json"
