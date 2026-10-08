@@ -95,7 +95,7 @@ measured daylight and skylight spectra. The CIE table (`spectra/illuminant/origi
 CIE_illum_Dxx_comp.csv`, doi:10.25039/CIE.DS.w7zunnny, CC BY-SA 4.0) is in the repo. The
 three basis SPDs are vertices of the region where the daylight model is non-negative over
 360-830 nm (so each basis SPD is physical); their triangle contains the daylight locus from
-~3300 K to infinity. Each pixel is given the daylight-model spectrum with the **same CIE XYZ**
+~3800 K to infinity. Each pixel is given the daylight-model spectrum with the **same CIE XYZ**
 (exact for colours inside the triangle; outside it the negative weight is clamped and the
 luminance kept; the manifest reports `out_of_gamut_luminance_fraction`).
 
@@ -120,18 +120,20 @@ clear-sky fit for `hosek`/`analytic`. Hosek's own absolute diffuse illuminance i
 
 | sun elevation | Hosek E_diffuse / IESNA fit | sky CCT (horizontal) | sun + sky CCT |
 |---|---|---|---|
-| 10 deg | 1.24 | 8.8 kK | 5.3 kK |
-| 30 deg | 1.21 | 12.5 kK | 5.5 kK |
+| 10 deg | 1.24 | 9.3 kK | 5.4 kK |
+| 30 deg | 1.21 | 12.9 kK | 5.5 kK |
 | 45 deg | 1.13 | 15.5 kK | 5.6 kK |
-| 60 deg | 1.07 | 19 kK | 5.7 kK |
+| 60 deg | 1.07 | 17.7 kK | 5.7 kK |
+| 70 deg | 1.05 | 17.5 kK | 5.7 kK |
 
 - Luminance: Hosek's absolute diffuse horizontal illuminance is within 30 % of the IESNA
   clear-sky fit used by the builder, and its relative luminance distribution correlates with
   the CIE S 011 / ISO 15469 standard clear sky type 12 (log-luminance r > 0.85 at 20-45 deg,
   outside 10 deg of the sun).
-- Colour: horizontal skylight is 8-25 kK, slightly above the Planckian locus like the CIE
-  daylight locus (Duv ~ +0.006 vs +0.003), with a bluer zenith; sun + sky on a horizontal
-  plane is 5.0-6.6 kK, i.e. typical daylight between D50 and D65 (CIE 015:2018). The
+- Colour: horizontal skylight is 9-18 kK, slightly above the Planckian locus like the CIE
+  daylight locus (Duv +0.005 to +0.008 vs +0.003), with a bluer zenith for sun elevations up
+  to ~60 deg; sun + sky on a horizontal plane is 5.4-5.7 kK, i.e. typical daylight between
+  D50 and D65 (CIE 015:2018). The
   `kloofendal_43d_clear` HDRI converted with `--sky-spectrum daylight` gives 11.3 kK
   horizontal / 17 kK zenith, consistent with Hosek at the same sun elevation (14.6 kK).
 - The manifest records `horizontal_cct_k`, `zenith_cct_k` and Duv for every spectral sky.
