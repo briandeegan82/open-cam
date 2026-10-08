@@ -9,14 +9,16 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
-import sys
 from pathlib import Path
 
 import numpy as np
 import yaml
-
-from camera_model import load_camera_model, sensor_forward_config_from_camera_model
+from camera_model import (
+    effective_f_number,
+    load_camera_model,
+    sensor_forward_config_from_camera_model,
+)
+from qe_curves import load_qe_curves_rgb, read_csv_curve
 from sensor_radiometry import (
     cos4_vignetting_from_pinhole,
     cosine_illuminance_factor,
@@ -117,89 +119,6 @@ _V_5NM = np.array(
     ],
     dtype=np.float64,
 )
-
-
-def read_csv_curve(path: Path, *, strict_wavelength_axis: bool = False) -> tuple[np.ndarray, np.ndarray]:
-    wl: list[float] = []
-    val: list[float] = []
-    for line in path.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        parts = re.split(r",\s*", line, maxsplit=1)
-        if len(parts) != 2:
-            continue
-        wl.append(float(parts[0]))
-        val.append(float(parts[1]))
-    if not wl:
-        raise ValueError(f"no data in {path}")
-    w = np.asarray(wl, dtype=np.float64)
-    v = np.asarray(val, dtype=np.float64)
-
-    ok = np.isfinite(w) & np.isfinite(v)
-    w = w[ok]
-    v = v[ok]
-    if w.size == 0:
-        raise ValueError(f"no finite samples in {path}")
-
-    # Some imported camera QE CSVs are stored in a normalized x-domain (roughly 0..1)
-    # instead of nanometers. Detect and map to visible wavelengths for stable integration.
-    if float(np.max(w)) <= 10.0:
-        wmin = float(np.min(w))
-        wmax = float(np.max(w))
-        if wmax - wmin <= 1e-12:
-            raise ValueError(f"invalid wavelength axis in {path}: near-constant normalized domain")
-        if strict_wavelength_axis:
-            raise ValueError(
-                "strict QE validation: normalized wavelength axis detected "
-                f"in {path}; provide explicit wavelength-in-nm CSV"
-            )
-        w = 380.0 + (w - wmin) * (450.0 / (wmax - wmin))
-        print(f"warning: mapped normalized wavelength axis to 380..830 nm for {path}", file=sys.stderr)
-
-    idx = np.argsort(w)
-    w = w[idx]
-    v = v[idx]
-    return w, v
-
-
-def load_qe_curves_rgb(
-    repo: Path,
-    qe_cfg: dict,
-    *,
-    strict_qe_validation: bool = False,
-) -> tuple[tuple[np.ndarray, np.ndarray], tuple[np.ndarray, np.ndarray], tuple[np.ndarray, np.ndarray]]:
-    """Load QE curves and auto-correct known import artifact (R/B swapped)."""
-    r = read_csv_curve((repo / qe_cfg["red_csv"]).resolve(), strict_wavelength_axis=strict_qe_validation)
-    g = read_csv_curve((repo / qe_cfg["green_csv"]).resolve(), strict_wavelength_axis=strict_qe_validation)
-    b = read_csv_curve((repo / qe_cfg["blue_csv"]).resolve(), strict_wavelength_axis=strict_qe_validation)
-    r_peak = float(r[0][int(np.argmax(r[1]))])
-    g_peak = float(g[0][int(np.argmax(g[1]))])
-    b_peak = float(b[0][int(np.argmax(b[1]))])
-    # Expected Bayer-like ordering: blue peak < green peak < red peak.
-    # Some imported model CSVs are inverted between R/B.
-    if r_peak < g_peak and b_peak > g_peak:
-        if strict_qe_validation:
-            raise ValueError(
-                "strict QE validation: detected likely QE red/blue inversion; "
-                "fix channel assignments in QE CSVs"
-            )
-        print(
-            "warning: detected likely QE red/blue inversion; swapping channels "
-            f"(red_peak={r_peak:.1f}nm, green_peak={g_peak:.1f}nm, blue_peak={b_peak:.1f}nm)",
-            file=sys.stderr,
-        )
-        r, b = b, r
-    _COVERAGE_WARN_NM = 780.0
-    for _ch, (_wl, _v) in (("red", r), ("green", g), ("blue", b)):
-        _last_nonzero = float(_wl[_v > 1e-4][-1]) if np.any(_v > 1e-4) else 0.0
-        if _last_nonzero > 0 and _last_nonzero < _COVERAGE_WARN_NM:
-            print(
-                f"warning: {_ch} QE curve last non-zero value at {_last_nonzero:.0f} nm "
-                f"(< {_COVERAGE_WARN_NM:.0f} nm); verify IRCF covers the gap or extend the QE CSV.",
-                file=sys.stderr,
-            )
-    return r, g, b
 
 
 def illuminance_lux_from_irradiance(
@@ -390,22 +309,11 @@ def main() -> None:
     t_int = float(sensor.get("integration_time_s", 0.01))
     if args.integration_time_s is not None:
         t_int = float(args.integration_time_s)
-    f_number = float(sensor.get("f_number", 2.8))
-    # For realistic camera recipes, derive effective f-number from the lens prescription
-    # rather than using the nominal sensor.f_number label.
-    if args.camera_model_config is not None:
-        _lens_cfg = camera_model.get("lens", {})
-        if str(_lens_cfg.get("camera", "pinhole")).lower() == "realistic":
-            _fl = _lens_cfg.get("focal_length_mm")
-            _ap = _lens_cfg.get("realistic_aperture_diameter_mm")
-            if _fl is not None and _ap is not None and float(_ap) > 0:
-                f_number = float(_fl) / float(_ap)
-            else:
-                print(
-                    "warning [sensor_forward]: realistic camera missing focal_length_mm — "
-                    f"falling back to sensor.f_number={f_number}.",
-                    file=sys.stderr,
-                )
+    f_number = effective_f_number(
+        sensor,
+        camera_model.get("lens", {}) if args.camera_model_config is not None else None,
+        tag="sensor_forward",
+    )
     pixel_pitch_um = float(sensor.get("pixel_pitch_um", 3.45))
 
     ircf_csv = qe_cfg.get("ircf_csv")

@@ -6,105 +6,23 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import re
 import sys
 from pathlib import Path
 
 import numpy as np
 import yaml
-
-from camera_model import load_camera_model, noise_config_from_camera_model
+from camera_model import (
+    effective_f_number,
+    load_camera_model,
+    noise_config_from_camera_model,
+)
 from exr_multispectral import (
     linear_rgb_from_exr,
     spectral_buckets_from_exr,
     trapezoid_weights_nm,
 )
-from sensor_radiometry import photon_flux_density_from_irradiance
-
-
-def read_csv_curve(path: Path, *, strict_wavelength_axis: bool = False) -> tuple[np.ndarray, np.ndarray]:
-    wl: list[float] = []
-    val: list[float] = []
-    for line in path.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        parts = re.split(r",\s*", line, maxsplit=1)
-        if len(parts) != 2:
-            continue
-        wl.append(float(parts[0]))
-        val.append(float(parts[1]))
-    if not wl:
-        raise ValueError(f"no data in CSV curve: {path}")
-    w = np.asarray(wl, dtype=np.float64)
-    v = np.asarray(val, dtype=np.float64)
-
-    ok = np.isfinite(w) & np.isfinite(v)
-    w = w[ok]
-    v = v[ok]
-    if w.size == 0:
-        raise ValueError(f"no finite samples in CSV curve: {path}")
-
-    # Some imported camera QE CSVs are normalized-domain traces (0..1-ish) rather than nm.
-    # Map them into a visible wavelength domain so interpolation onto spectral buckets is valid.
-    if float(np.max(w)) <= 10.0:
-        wmin = float(np.min(w))
-        wmax = float(np.max(w))
-        if wmax - wmin <= 1e-12:
-            raise ValueError(f"invalid wavelength axis in CSV curve: {path}")
-        if strict_wavelength_axis:
-            raise ValueError(
-                "strict QE validation: normalized wavelength axis detected "
-                f"in {path}; provide explicit wavelength-in-nm CSV"
-            )
-        w = 380.0 + (w - wmin) * (450.0 / (wmax - wmin))
-        print(f"warning: mapped normalized wavelength axis to 380..830 nm for {path}", file=sys.stderr)
-
-    idx = np.argsort(w)
-    return w[idx], v[idx]
-
-
-def load_qe_curves_rgb(
-    repo: Path,
-    qe_cfg: dict,
-    *,
-    strict_qe_validation: bool = False,
-) -> tuple[tuple[np.ndarray, np.ndarray], tuple[np.ndarray, np.ndarray], tuple[np.ndarray, np.ndarray]]:
-    """Load QE curves and auto-correct likely imported red/blue inversion."""
-    r = read_csv_curve((repo / qe_cfg["red_csv"]).resolve(), strict_wavelength_axis=strict_qe_validation)
-    g = read_csv_curve((repo / qe_cfg["green_csv"]).resolve(), strict_wavelength_axis=strict_qe_validation)
-    b = read_csv_curve((repo / qe_cfg["blue_csv"]).resolve(), strict_wavelength_axis=strict_qe_validation)
-    r_peak = float(r[0][int(np.argmax(r[1]))])
-    g_peak = float(g[0][int(np.argmax(g[1]))])
-    b_peak = float(b[0][int(np.argmax(b[1]))])
-    if r_peak < g_peak and b_peak > g_peak:
-        if strict_qe_validation:
-            raise ValueError(
-                "strict QE validation: detected likely QE red/blue inversion; "
-                "fix channel assignments in QE CSVs"
-            )
-        print(
-            "warning: detected likely QE red/blue inversion; swapping channels "
-            f"(red_peak={r_peak:.1f}nm, green_peak={g_peak:.1f}nm, blue_peak={b_peak:.1f}nm)",
-            file=sys.stderr,
-        )
-        r, b = b, r
-    # Warn if any QE curve's measured range ends below 780 nm with non-negligible signal.
-    # Above the curve's max wavelength, np.interp returns right=0.0, silently dropping
-    # any spectral energy in that band.  If the last non-zero sample is before 780 nm and
-    # the IRCF is not responsible for cutting it (IRCF check is left to the caller), the
-    # channel response is likely truncated.
-    _COVERAGE_WARN_NM = 780.0
-    for _ch, (_wl, _v) in (("red", r), ("green", g), ("blue", b)):
-        _last_nonzero = float(_wl[_v > 1e-4][-1]) if np.any(_v > 1e-4) else 0.0
-        if _last_nonzero > 0 and _last_nonzero < _COVERAGE_WARN_NM:
-            print(
-                f"warning: {_ch} QE curve last non-zero value at {_last_nonzero:.0f} nm "
-                f"(< {_COVERAGE_WARN_NM:.0f} nm); spectral energy above this wavelength "
-                "is set to zero by extrapolation — verify IRCF covers the gap or extend the QE CSV.",
-                file=sys.stderr,
-            )
-    return r, g, b
+from qe_curves import load_qe_curves_rgb, read_csv_curve
+from sensor_radiometry import integrate_spectral_planes, spectral_electron_weights
 
 
 def mean_effective_qe(curve_csv: Path, ircf_csv: Path | None) -> float:
@@ -285,6 +203,29 @@ def fit_diag_ccm(src_rgb: np.ndarray, tgt_rgb: np.ndarray, mask: np.ndarray | No
     # Clamp to keep preview corrections stable.
     g = np.clip(g, 0.25, 4.0)
     return np.diag(g.astype(np.float32))
+
+
+def fit_preview_ccm(dn_rgb: np.ndarray, ref_linear: np.ndarray, black_dn: float, method: str) -> np.ndarray:
+    """Fit and sanitize a preview CCM mapping black-subtracted DN onto the EXR reference.
+
+    The darkest 5 % and brightest 0.5 % of reference pixels are excluded so the
+    background and specular clipping do not dominate the fit.
+    """
+    src = np.clip(dn_rgb - black_dn, 0.0, None).astype(np.float32)
+    yl = np.mean(ref_linear, axis=2)
+    lo = np.percentile(yl, 5.0)
+    hi = np.percentile(yl, 99.5)
+    fit_mask = (yl >= lo) & (yl <= hi)
+    if method == "lstsq_exr_reference":
+        ccm = fit_ccm_lstsq(src, ref_linear, fit_mask)
+    else:
+        ccm = fit_diag_ccm(src, ref_linear, fit_mask)
+    return sanitize_ccm(ccm)
+
+
+def apply_preview_ccm_dn(dn_rgb: np.ndarray, black_dn: float, ccm: np.ndarray) -> np.ndarray:
+    """Apply a CCM in the signal domain (DN above black), preserving the black pedestal."""
+    return np.clip(apply_ccm(np.clip(dn_rgb - black_dn, 0.0, None), ccm) + black_dn, 0.0, None)
 
 
 def to_png8_preview(
@@ -535,12 +476,12 @@ def bayer_sample_rgb(rgb: np.ndarray, pattern: str) -> np.ndarray:
         raise ValueError(f"unknown Bayer pattern {pattern!r}; use one of {sorted(_BAYER_PHASE)}")
     if rgb.ndim != 3 or rgb.shape[2] < 3:
         raise ValueError(f"expected HxWx3 for Bayer sampling, got {rgb.shape}")
-    lut = np.array(_BAYER_PHASE[p], dtype=np.intp)
-    h, w = rgb.shape[0], rgb.shape[1]
-    jj, ii = np.meshgrid(np.arange(h, dtype=np.intp), np.arange(w, dtype=np.intp), indexing="ij")
-    tid = (jj & 1) * 2 + (ii & 1)
-    ch = lut[tid]
-    return rgb[jj, ii, ch]
+    lut = _BAYER_PHASE[p]
+    out = np.empty(rgb.shape[:2], dtype=rgb.dtype)
+    for phase, ch in enumerate(lut):
+        r, c = phase >> 1, phase & 1
+        out[r::2, c::2] = rgb[r::2, c::2, ch]
+    return out
 
 
 def apply_cfa_spatial_crosstalk(cfa_e: np.ndarray, cfg: dict, pattern: str = "RGGB") -> np.ndarray:
@@ -989,18 +930,7 @@ def integrate_exr_spectral_qe(
     # For realistic cameras use the effective f-number derived from the lens prescription
     # (focal_length_mm / aperture_diameter_mm).  Falls back to sensor.f_number with a
     # warning when focal_length_mm is absent from the lens model.
-    f_number = float(sensor_cfg.get("f_number", 2.8))
-    if lens_cfg is not None and str(lens_cfg.get("camera", "pinhole")).lower() == "realistic":
-        _fl = lens_cfg.get("focal_length_mm", None)
-        _ap = lens_cfg.get("realistic_aperture_diameter_mm", None)
-        if _fl is not None and _ap is not None and float(_ap) > 0:
-            f_number = float(_fl) / float(_ap)
-        else:
-            print(
-                "warning [integrate_qe]: realistic camera lens model missing focal_length_mm — "
-                f"falling back to sensor.f_number={f_number}.",
-                file=sys.stderr,
-            )
+    f_number = effective_f_number(sensor_cfg, lens_cfg, tag="integrate_qe")
     rad_to_irr = np.pi / (4.0 * max(1e-12, f_number**2))
 
     # ---- Scalar optics transmittance ----
@@ -1044,10 +974,6 @@ def integrate_exr_spectral_qe(
             )
 
     global_scale = rad_to_irr * optics_t * irr_scale * lux_scale
-    E = spec.astype(np.float64) * global_scale  # [W / m² / nm] per pixel
-
-    # ---- Energy irradiance → spectral photon flux density ----
-    phi = photon_flux_density_from_irradiance(E, lam)  # [ph / m² / s / nm]
 
     # ---- Geometry factor: pixel area × integration time × fill factor ----
     pixel_pitch_um = float(sensor_cfg.get("pixel_pitch_um", 1.4))
@@ -1074,10 +1000,9 @@ def integrate_exr_spectral_qe(
         q_g = np.clip(q_g * ir_i, 0.0, 1.0)
         q_b = np.clip(q_b * ir_i, 0.0, 1.0)
 
-    acc_r = np.sum(phi * (q_r * w), axis=2) * geom
-    acc_g = np.sum(phi * (q_g * w), axis=2) * geom
-    acc_b = np.sum(phi * (q_b * w), axis=2) * geom
-    return np.clip(np.stack([acc_r, acc_g, acc_b], axis=2), 0.0, None).astype(np.float32)
+    weights = spectral_electron_weights(lam, np.stack([q_r, q_g, q_b], axis=1), w, global_scale, geom)
+    electrons = integrate_spectral_planes(spec, weights)
+    return np.clip(electrons, 0.0, None).astype(np.float32)
 
 
 def main() -> None:
@@ -1208,22 +1133,15 @@ def main() -> None:
         qe_cfg,
         strict_qe_validation=strict_qe_validation,
     )
-    qe_r = 0.0
-    qe_g = 0.0
-    qe_b = 0.0
-    for i, (q_wl, q_v) in enumerate((q_r_src, q_g_src, q_b_src)):
+    ircf_curve = read_csv_curve(ircf_path) if ircf_path is not None else None
+    qe_means = []
+    for q_wl, q_v in (q_r_src, q_g_src, q_b_src):
         q = np.clip(np.asarray(q_v, dtype=np.float64), 0.0, 1.0)
-        if ircf_path is not None:
-            ir_wl, ir = read_csv_curve(ircf_path)
-            ir_i = np.interp(q_wl, ir_wl, ir, left=0.0, right=0.0)
-            q = np.clip(q * ir_i, 0.0, 1.0)
-        if i == 0:
-            qe_r = float(np.mean(q))
-        elif i == 1:
-            qe_g = float(np.mean(q))
-        else:
-            qe_b = float(np.mean(q))
-    qe_vec = np.array([qe_r, qe_g, qe_b], dtype=np.float32)
+        if ircf_curve is not None:
+            ir_i = np.clip(np.interp(q_wl, ircf_curve[0], ircf_curve[1], left=0.0, right=0.0), 0.0, 1.0)
+            q = q * ir_i
+        qe_means.append(float(np.mean(q)))
+    qe_vec = np.array(qe_means, dtype=np.float32)
     qe_max = float(np.max(qe_vec))
     if not np.isfinite(qe_max) or qe_max <= 0.0:
         raise ValueError(
@@ -1686,19 +1604,9 @@ def main() -> None:
         dn_clean = apply_preview_wb_dn(dn_clean, black_dn, wb_gains)
         dn_noisy = apply_preview_wb_dn(dn_noisy, black_dn, wb_gains)
     if ccm_enabled and not bayer_on and ref_linear is not None and ref_linear.shape == dn_clean.shape:
-        src = np.clip(dn_clean - black_dn, 0.0, None).astype(np.float32)
-        # Ignore very dark pixels so background does not dominate fit.
-        yl = np.mean(ref_linear, axis=2)
-        lo = np.percentile(yl, 5.0)
-        hi = np.percentile(yl, 99.5)
-        fit_mask = (yl >= lo) & (yl <= hi)
-        if ccm_method == "lstsq_exr_reference":
-            ccm = fit_ccm_lstsq(src, ref_linear, fit_mask)
-        else:
-            ccm = fit_diag_ccm(src, ref_linear, fit_mask)
-        ccm = sanitize_ccm(ccm)
-        dn_clean = np.clip(apply_ccm(src, ccm) + black_dn, 0.0, None)
-        dn_noisy = np.clip(apply_ccm(np.clip(dn_noisy - black_dn, 0.0, None), ccm) + black_dn, 0.0, None)
+        ccm = fit_preview_ccm(dn_clean, ref_linear, black_dn, ccm_method)
+        dn_clean = apply_preview_ccm_dn(dn_clean, black_dn, ccm)
+        dn_noisy = apply_preview_ccm_dn(dn_noisy, black_dn, ccm)
         ccm_source = ccm_method
 
     preview_no_normalize = bool(args.preview_no_normalize)
@@ -1731,22 +1639,9 @@ def main() -> None:
             dn_clean_rgb = apply_preview_wb_dn(dn_clean_rgb, black_dn, wb_gains)
             dn_noisy_rgb = apply_preview_wb_dn(dn_noisy_rgb, black_dn, wb_gains)
         if ccm_enabled and ref_linear is not None and ref_linear.shape == dn_clean_rgb.shape:
-            src = np.clip(dn_clean_rgb - black_dn, 0.0, None).astype(np.float32)
-            yl = np.mean(ref_linear, axis=2)
-            lo = np.percentile(yl, 5.0)
-            hi = np.percentile(yl, 99.5)
-            fit_mask = (yl >= lo) & (yl <= hi)
-            if ccm_method == "lstsq_exr_reference":
-                ccm = fit_ccm_lstsq(src, ref_linear, fit_mask)
-            else:
-                ccm = fit_diag_ccm(src, ref_linear, fit_mask)
-            ccm = sanitize_ccm(ccm)
-            dn_clean_rgb = np.clip(apply_ccm(src, ccm) + black_dn, 0.0, None)
-            dn_noisy_rgb = np.clip(
-                apply_ccm(np.clip(dn_noisy_rgb - black_dn, 0.0, None), ccm) + black_dn,
-                0.0,
-                None,
-            )
+            ccm = fit_preview_ccm(dn_clean_rgb, ref_linear, black_dn, ccm_method)
+            dn_clean_rgb = apply_preview_ccm_dn(dn_clean_rgb, black_dn, ccm)
+            dn_noisy_rgb = apply_preview_ccm_dn(dn_noisy_rgb, black_dn, ccm)
             ccm_source = ccm_method
         pw_d_clean = None if preview_no_normalize else float(np.percentile(dn_clean_rgb, args.preview_percentile))
         pw_d_noisy = None if preview_no_normalize else float(np.percentile(dn_noisy_rgb, args.preview_percentile))
@@ -1828,7 +1723,7 @@ def main() -> None:
         "preview_white_dn_value_noisy": preview_white_noisy,
         "bayer_enabled": bayer_on,
         "bayer_pattern": bayer_pat if bayer_on else None,
-        "demosaic": ("bilinear" if demosaic_on else None),
+        "demosaic": (demosaic_alg if demosaic_on else None),
         "demosaic_srgb_preview": bool(demosaic_srgb) if demosaic_on else None,
     }
     if bayer_on:

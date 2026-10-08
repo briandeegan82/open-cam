@@ -18,82 +18,18 @@ from pathlib import Path
 
 import numpy as np
 import yaml
-
-from camera_model import load_camera_model, sensor_forward_config_from_camera_model
+from camera_model import (
+    effective_f_number,
+    load_camera_model,
+    sensor_forward_config_from_camera_model,
+)
 from exr_multispectral import spectral_buckets_from_exr, trapezoid_weights_nm
-from sensor_radiometry import photon_flux_density_from_irradiance
-from spectral_sensor_forward import illuminance_lux_from_irradiance, load_qe_curves_rgb, read_csv_curve
-
-
-def _radial_map(yres: int, xres: int, edge_factor: float, exponent: float) -> np.ndarray:
-    edge_factor = float(np.clip(edge_factor, 0.0, 1.0))
-    exponent = max(1e-6, float(exponent))
-    yy, xx = np.meshgrid(
-        np.arange(yres, dtype=np.float64),
-        np.arange(xres, dtype=np.float64),
-        indexing="ij",
-    )
-    cx = 0.5 * (xres - 1)
-    cy = 0.5 * (yres - 1)
-    rr = np.sqrt((xx - cx) ** 2 + (yy - cy) ** 2)
-    rmax = float(np.max(rr)) if rr.size else 1.0
-    rn = rr / max(1e-12, rmax)
-    m = edge_factor + (1.0 - edge_factor) * (1.0 - np.power(np.clip(rn, 0.0, 1.0), exponent))
-    return np.clip(m, 0.0, 1.0).astype(np.float32)
-
-
-def build_spatial_transmission_map(
-    yres: int,
-    xres: int,
-    cfg: dict,
-    *,
-    repo: Path,
-    wavelength_nm: np.ndarray,
-    qe_rgb: np.ndarray,
-) -> tuple[np.ndarray, dict]:
-    """Build per-channel center-to-edge radial transmission maps in [0,1]."""
-    enabled = bool(cfg.get("enabled", False))
-    if not enabled:
-        return np.ones((yres, xres, 3), dtype=np.float32), {
-            "enabled": False,
-            "mode": "off",
-            "edge_factor": 1.0,
-            "exponent": 2.0,
-        }
-    mode = str(cfg.get("mode", "radial_power")).lower().strip()
-    if mode != "radial_power":
-        raise ValueError('optics_transmittance_spatial.mode must be "radial_power"')
-    edge_factor = float(cfg.get("edge_factor", 0.9))
-    exponent = float(cfg.get("exponent", 2.0))
-    edge_rgb = np.full(3, float(np.clip(edge_factor, 0.0, 1.0)), dtype=np.float64)
-    spectral_csv = cfg.get("spectral_edge_factors_csv", None)
-    if spectral_csv:
-        s_wl, s_v = read_csv_curve((repo / str(spectral_csv)).resolve())
-        edge_lambda = np.clip(np.interp(wavelength_nm, s_wl, s_v, left=0.0, right=0.0), 0.0, 1.0)
-        qe = np.asarray(qe_rgb, dtype=np.float64)
-        if qe.shape[0] != 3:
-            raise ValueError(f"expected QE stack [3,K], got {qe.shape}")
-        for c in range(3):
-            w = np.clip(qe[c], 0.0, None)
-            sw = float(np.sum(w))
-            if sw > 0.0:
-                edge_rgb[c] = float(np.sum(w * edge_lambda) / sw)
-        edge_source = "spectral_edge_factors_csv"
-    else:
-        edge_source = "scalar_edge_factor"
-    maps = np.stack([_radial_map(yres, xres, float(edge_rgb[c]), exponent) for c in range(3)], axis=2)
-    return maps, {
-        "enabled": True,
-        "mode": mode,
-        "edge_factor": edge_factor,
-        "edge_factor_rgb": edge_rgb.tolist(),
-        "edge_source": edge_source,
-        "spectral_edge_factors_csv": str(spectral_csv) if spectral_csv else None,
-        "exponent": exponent,
-        "min": float(np.min(maps)),
-        "max": float(np.max(maps)),
-        "mean": float(np.mean(maps)),
-    }
+from qe_curves import load_qe_curves_rgb, read_csv_curve
+from sensor_radiometry import integrate_spectral_planes, spectral_electron_weights
+from spectral_sensor_forward import (
+    build_spatial_transmission_map,
+    illuminance_lux_from_irradiance,
+)
 
 
 def photometry_calibration_scale(
@@ -249,7 +185,6 @@ def main() -> None:
     t_int = float(sensor.get("integration_time_s", 0.01))
     if args.integration_time_s is not None:
         t_int = float(args.integration_time_s)
-    f_number = float(sensor.get("f_number", 2.8))
     pixel_pitch_um = float(sensor.get("pixel_pitch_um", 3.45))
 
     # For realistic cameras, derive the effective f-number from the lens prescription
@@ -257,27 +192,17 @@ def main() -> None:
     # The PBRT realistic camera traces rays through the actual multi-element lens, so
     # the solid-angle factor in radiance→irradiance must match the lens geometry, not
     # the nominal f-stop label which may differ from the optical system in the .dat file.
-    if args.camera_model_config is not None:
-        _lens_cfg = camera_model.get("lens", {})
-        if str(_lens_cfg.get("camera", "pinhole")).lower() == "realistic":
-            _fl = _lens_cfg.get("focal_length_mm", None)
-            _ap = _lens_cfg.get("realistic_aperture_diameter_mm", None)
-            if _fl is not None and _ap is not None and float(_ap) > 0:
-                _eff_fn = float(_fl) / float(_ap)
-                print(
-                    f"info: realistic camera — effective f/{_eff_fn:.3f} "
-                    f"(focal_length_mm={float(_fl):.1f} / aperture_diameter_mm={float(_ap):.1f}) "
-                    f"replaces sensor.f_number={f_number} for radiance→irradiance conversion.",
-                    file=sys.stderr,
-                )
-                f_number = _eff_fn
-            else:
-                print(
-                    "warning: realistic camera lens model is missing focal_length_mm — "
-                    f"falling back to sensor.f_number={f_number}. "
-                    "Add focal_length_mm to the lens model YAML for accurate radiometry.",
-                    file=sys.stderr,
-                )
+    f_number = effective_f_number(
+        sensor,
+        camera_model.get("lens", {}) if args.camera_model_config is not None else None,
+        tag="pbrt_exr",
+    )
+    if f_number != float(sensor.get("f_number", 2.8)):
+        print(
+            f"info: realistic camera — effective f/{f_number:.3f} from the lens prescription "
+            "replaces sensor.f_number for radiance→irradiance conversion.",
+            file=sys.stderr,
+        )
     optics_t = float(cal.get("optics_transmittance", 1.0))
     optics_t_csv = cal.get("optics_transmittance_csv", None)
     spatial_cfg = cal.get("optics_transmittance_spatial", {}) or {}
@@ -330,7 +255,6 @@ def main() -> None:
         )
 
     photometry_scale = photometry_calibration_scale(repo, cal, auto_cal_mode=auto_cal_mode)
-    E_raw = L.astype(np.float64) * (rad_to_e * extra_scale)
     lam = lambdas.astype(np.float64)
     w = trapezoid_weights_nm(lam).astype(np.float64)
     if optics_t_csv:
@@ -341,7 +265,8 @@ def main() -> None:
     else:
         tau_lambda = np.full_like(lam, float(np.clip(optics_t, 0.0, 1.0)))
         optics_mode = "scalar"
-    E_raw = E_raw * tau_lambda[np.newaxis, np.newaxis, :]
+    # Per-wavelength radiance → irradiance factor [W/m²/nm per EXR unit].
+    irr_per_lambda = (rad_to_e * extra_scale) * tau_lambda
 
     exr_autocal_scale = 1.0
     if auto_cal_mode not in ("off", "none", "disabled", "false", "0"):
@@ -358,7 +283,7 @@ def main() -> None:
                 file=sys.stderr,
             )
         else:
-            E_scene_mean = np.mean(E_raw, axis=(0, 1))
+            E_scene_mean = np.mean(L, axis=(0, 1), dtype=np.float64) * irr_per_lambda
             scene_lux = illuminance_lux_from_irradiance(lam, E_scene_mean)
             if scene_lux > 0:
                 exr_autocal_scale = float(target_lux) / float(scene_lux)
@@ -368,7 +293,7 @@ def main() -> None:
                     file=sys.stderr,
                 )
 
-    E_e = E_raw * (photometry_scale * exr_autocal_scale)
+    irr_per_lambda = irr_per_lambda * (photometry_scale * exr_autocal_scale)
 
     qe = qe_stack_on_lambdas(
         repo,
@@ -377,16 +302,11 @@ def main() -> None:
         strict_qe_validation=bool(args.strict_qe_validation or qe_cfg.get("strict_validation", False)),
     )
 
-    phi = photon_flux_density_from_irradiance(E_e.astype(np.float64), lam)
-
     pixel_area = (pixel_pitch_um * 1e-6) ** 2
     geom = t_int * fill_factor * pixel_area
 
-    contrib = np.zeros((yres, xres, 3), dtype=np.float64)
-    for c in range(3):
-        contrib[:, :, c] = np.sum(phi * (qe[c][np.newaxis, np.newaxis, :] * w[np.newaxis, np.newaxis, :]), axis=2)
-
-    electrons = np.clip(contrib * float(geom), 0.0, None).astype(np.float32)
+    weights = spectral_electron_weights(lam, qe.T, w, irr_per_lambda, geom)
+    electrons = np.clip(integrate_spectral_planes(L, weights), 0.0, None).astype(np.float32)
     spatial_map, spatial_meta = build_spatial_transmission_map(
         yres,
         xres,

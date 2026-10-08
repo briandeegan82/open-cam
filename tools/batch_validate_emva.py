@@ -34,7 +34,6 @@ import sys
 from pathlib import Path
 from typing import NamedTuple
 
-import numpy as np
 
 _TOOLS = Path(__file__).resolve().parent
 if str(_TOOLS) not in sys.path:

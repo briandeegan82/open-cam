@@ -13,7 +13,6 @@ from pathlib import Path
 
 import numpy as np
 
-from opencam_gui.core import optics_engine as oe
 from opencam_gui.core.repo import import_tool, repo_root
 
 

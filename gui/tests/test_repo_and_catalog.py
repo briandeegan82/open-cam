@@ -1,4 +1,3 @@
-from pathlib import Path
 
 from opencam_gui.core import catalog
 from opencam_gui.core.repo import config_dir, repo_root, tools_dir

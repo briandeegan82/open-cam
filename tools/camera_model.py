@@ -27,6 +27,7 @@ base is identical to using the override alone).
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import yaml
@@ -175,3 +176,26 @@ def sensor_forward_config_from_camera_model(
         "model": camera_model.get("sensor_forward", {}).get("model", {}),
         "output": {"electrons_npz": electrons_npz},
     }
+
+
+def effective_f_number(sensor_cfg: dict, lens_cfg: dict | None, *, default: float = 2.8, tag: str = "") -> float:
+    """f-number for radiance-to-irradiance conversion.
+
+    For PBRT ``realistic`` cameras the solid angle is set by the traced lens, so the
+    f-number comes from ``focal_length_mm / realistic_aperture_diameter_mm`` rather
+    than the nominal ``sensor.f_number`` label.
+    """
+    f_number = float(sensor_cfg.get("f_number", default))
+    if not lens_cfg or str(lens_cfg.get("camera", "pinhole")).lower() != "realistic":
+        return f_number
+    fl = lens_cfg.get("focal_length_mm")
+    ap = lens_cfg.get("realistic_aperture_diameter_mm")
+    if fl is not None and ap is not None and float(ap) > 0:
+        return float(fl) / float(ap)
+    prefix = f"warning [{tag}]" if tag else "warning"
+    print(
+        f"{prefix}: realistic camera lens model missing focal_length_mm — "
+        f"falling back to sensor.f_number={f_number}.",
+        file=sys.stderr,
+    )
+    return f_number
