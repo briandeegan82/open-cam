@@ -48,12 +48,9 @@ def summarize_exr(path: Path, imgtool: Path | None) -> None:
                 if "resolution" in line or "avg" in line or "samples per pixel" in line:
                     print(line.strip())
             return
-    try:
-        import imageio.v3 as iio
-    except ImportError:
-        print("install imageio or build pbrt imgtool for EXR stats", file=sys.stderr)
-        return
-    img = iio.imread(path)
+    from exr_multispectral import linear_rgb_from_exr
+
+    img = linear_rgb_from_exr(path)
     if img.ndim == 2:
         img = img[:, :, np.newaxis]
     flat = np.reshape(img, (-1, img.shape[-1]))

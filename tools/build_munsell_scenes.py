@@ -582,6 +582,7 @@ def main() -> None:
         "hues_requested": hue_list,
         "hues_generated": [h for h in hue_list if (args.out_dir / sanitize_filename(h)).is_dir()],
     }
+    args.out_dir.mkdir(parents=True, exist_ok=True)
     (args.out_dir / "index.json").write_text(json.dumps(index, indent=2) + "\n")
 
 
