@@ -1,0 +1,345 @@
+diff --git a/src/pbrt/base/bxdf.h b/src/pbrt/base/bxdf.h
+index e94b135..bc7e5e7 100644
+--- a/src/pbrt/base/bxdf.h
++++ b/src/pbrt/base/bxdf.h
+@@ -161,12 +161,14 @@ class ConductorBxDF;
+ class NormalizedFresnelBxDF;
+ class CoatedDiffuseBxDF;
+ class CoatedConductorBxDF;
++class RetroreflectiveBxDF;
+ 
+ // BxDF Definition
+ class BxDF
+     : public TaggedPointer<DiffuseTransmissionBxDF, DiffuseBxDF, CoatedDiffuseBxDF,
+                            CoatedConductorBxDF, DielectricBxDF, ThinDielectricBxDF,
+-                           HairBxDF, MeasuredBxDF, ConductorBxDF, NormalizedFresnelBxDF> {
++                           HairBxDF, MeasuredBxDF, ConductorBxDF, NormalizedFresnelBxDF,
++                           RetroreflectiveBxDF> {
+   public:
+     // BxDF Interface
+     PBRT_CPU_GPU inline BxDFFlags Flags() const;
+diff --git a/src/pbrt/base/material.h b/src/pbrt/base/material.h
+index e78435a..1cae7ed 100644
+--- a/src/pbrt/base/material.h
++++ b/src/pbrt/base/material.h
+@@ -30,13 +30,15 @@ class MeasuredMaterial;
+ class SubsurfaceMaterial;
+ class ThinDielectricMaterial;
+ class MixMaterial;
++class RetroreflectiveMaterial;
+ 
+ // Material Definition
+ class Material
+     : public TaggedPointer<  // Material Types
+           CoatedDiffuseMaterial, CoatedConductorMaterial, ConductorMaterial,
+           DielectricMaterial, DiffuseMaterial, DiffuseTransmissionMaterial, HairMaterial,
+-          MeasuredMaterial, SubsurfaceMaterial, ThinDielectricMaterial, MixMaterial
++          MeasuredMaterial, SubsurfaceMaterial, ThinDielectricMaterial, MixMaterial,
++          RetroreflectiveMaterial
+ 
+           > {
+   public:
+diff --git a/src/pbrt/bxdfs.cpp b/src/pbrt/bxdfs.cpp
+index ce74b51..61508b0 100644
+--- a/src/pbrt/bxdfs.cpp
++++ b/src/pbrt/bxdfs.cpp
+@@ -59,6 +59,11 @@ std::string ToString(TransportMode mode) {
+ }
+ 
+ // BxDF Method Definitions
++std::string RetroreflectiveBxDF::ToString() const {
++    return StringPrintf("[ RetroreflectiveBxDF R: %s ra: %s alpha0: %f width: %f q: %f ]", R,
++                        ra, alpha0, width, q);
++}
++
+ std::string DiffuseBxDF::ToString() const {
+     return StringPrintf("[ DiffuseBxDF R: %s ]", R);
+ }
+diff --git a/src/pbrt/bxdfs.h b/src/pbrt/bxdfs.h
+index 1871f17..0d3957a 100644
+--- a/src/pbrt/bxdfs.h
++++ b/src/pbrt/bxdfs.h
+@@ -81,6 +81,159 @@ class DiffuseBxDF {
+     SampledSpectrum R;
+ };
+ 
++// RetroreflectiveBxDF Definition
++// Lambertian base plus a retroreflective lobe centred on the incident direction,
++// parameterised by the coefficient of retroreflection R_A [cd lx^-1 m^-2]
++// (ASTM E808 / E810, CIE 54.2). With I = R_A E_perp A and L = I / (A cos(theta_o)),
++// the lobe BRDF is f = R_A / (cos(theta_i) cos(theta_o)), where
++//   R_A(alpha, theta_i, theta_o) = ra exp(-(alpha - alpha0) / width) (cos_i cos_o)^(q/2)
++// alpha is the observation angle (between wi and wo), alpha0 the reference observation
++// angle at which ra is specified (normal entrance) and q the entrance-angle exponent.
++// R_L of road markings (EN 1436) maps to q = 0, ra = R_L cos(theta_o).
++class RetroreflectiveBxDF {
++  public:
++    // RetroreflectiveBxDF Public Methods
++    RetroreflectiveBxDF() = default;
++    PBRT_CPU_GPU
++    RetroreflectiveBxDF(SampledSpectrum R, SampledSpectrum ra, Float alpha0, Float width,
++                        Float q)
++        : R(R), ra(ra), alpha0(alpha0), width(width), q(q) {}
++
++    PBRT_CPU_GPU
++    static Float ObservationAngle(Vector3f wo, Vector3f wi) {
++        // Chord form: accurate for the sub-degree angles of retroreflection.
++        return 2 * SafeASin(Length(wo - wi) / 2);
++    }
++
++    // Lobe albedo bound for an effective cosine c (small-angle integral of the lobe),
++    // used to scale the lobe so that the BRDF never reflects more than 1 - max(R).
++    PBRT_CPU_GPU
++    Float EnergyScale(Float c) const {
++        Float peak = ra.MaxComponentValue() * std::exp(alpha0 / width);
++        Float albedo = peak * 2 * Pi * Sqr(width) * std::pow(std::max(c, Float(1e-4)), q - 1);
++        Float budget = std::max<Float>(0, 1 - R.MaxComponentValue());
++        return albedo > budget ? budget / albedo : 1;
++    }
++
++    PBRT_CPU_GPU
++    SampledSpectrum Lobe(Vector3f wo, Vector3f wi) const {
++        Float ci = CosTheta(wi), co = CosTheta(wo);
++        if (ci <= 0 || co <= 0 || width <= 0 || !ra)
++            return SampledSpectrum(0.f);
++        Float alpha = ObservationAngle(wo, wi);
++        Float c = ci * co;
++        Float g = std::exp(-(alpha - alpha0) / width) * std::pow(c, q / 2 - 1);
++        return ra * (g * EnergyScale(std::sqrt(c)));
++    }
++
++    PBRT_CPU_GPU
++    Float LobeProbability(Vector3f wo) const {
++        if (width <= 0 || !ra || CosTheta(wo) <= 0)
++            return 0;
++        Float co = CosTheta(wo);
++        Float peak = ra.Average() * std::exp(alpha0 / width);
++        Float albedo = peak * 2 * Pi * Sqr(width) * std::pow(co, q - 1) * EnergyScale(co);
++        Float d = R.Average();
++        if (albedo + d <= 0)
++            return 0;
++        if (d <= 0)
++            return 1;
++        // Narrow lobes are found almost only by BSDF sampling; give them a floor.
++        return std::max<Float>(0.25f, albedo / (albedo + d));
++    }
++
++    PBRT_CPU_GPU
++    Float LobePDF(Vector3f wo, Vector3f wi) const {
++        // alpha ~ Gamma(2, width): p(alpha) = alpha e^{-alpha/width} / width^2,
++        // uniform azimuth about wo.
++        Float alpha = ObservationAngle(wo, wi);
++        Float s = std::sin(alpha);
++        if (s <= 0)
++            return 0;
++        return alpha * std::exp(-alpha / width) / (Sqr(width) * 2 * Pi * s);
++    }
++
++    PBRT_CPU_GPU
++    SampledSpectrum f(Vector3f wo, Vector3f wi, TransportMode mode) const {
++        if (!SameHemisphere(wo, wi))
++            return SampledSpectrum(0.f);
++        if (wo.z < 0) {
++            wo = -wo;
++            wi = -wi;
++        }
++        return R * InvPi + Lobe(wo, wi);
++    }
++
++    PBRT_CPU_GPU
++    pstd::optional<BSDFSample> Sample_f(
++        Vector3f wo, Float uc, Point2f u, TransportMode mode,
++        BxDFReflTransFlags sampleFlags = BxDFReflTransFlags::All) const {
++        if (!(sampleFlags & BxDFReflTransFlags::Reflection))
++            return {};
++        bool flip = wo.z < 0;
++        Vector3f w = flip ? -wo : wo;
++        Float pr = LobeProbability(w);
++        Vector3f wi;
++        if (uc < pr) {
++            Float u0 = std::max<Float>(uc / pr, 1e-7f);
++            Float alpha = -width * std::log(std::max<Float>(u0 * u[0], 1e-12f));
++            if (alpha >= Pi)
++                return {};
++            Float phi = 2 * Pi * u[1];
++            Frame frame = Frame::FromZ(w);
++            wi = frame.FromLocal(SphericalDirection(std::sin(alpha), std::cos(alpha), phi));
++            if (wi.z <= 0)
++                return {};
++        } else {
++            wi = SampleCosineHemisphere(u);
++        }
++        Float pdf = PDF(w, wi, mode, sampleFlags);
++        if (pdf <= 0)
++            return {};
++        SampledSpectrum fv = R * InvPi + Lobe(w, wi);
++        if (flip)
++            wi = -wi;
++        return BSDFSample(fv, wi, pdf, R ? BxDFFlags::DiffuseReflection
++                                         : BxDFFlags::GlossyReflection);
++    }
++
++    PBRT_CPU_GPU
++    Float PDF(Vector3f wo, Vector3f wi, TransportMode mode,
++              BxDFReflTransFlags sampleFlags = BxDFReflTransFlags::All) const {
++        if (!(sampleFlags & BxDFReflTransFlags::Reflection) || !SameHemisphere(wo, wi))
++            return 0;
++        if (wo.z < 0) {
++            wo = -wo;
++            wi = -wi;
++        }
++        Float pr = LobeProbability(wo);
++        return (1 - pr) * CosineHemispherePDF(AbsCosTheta(wi)) +
++               (pr > 0 ? pr * LobePDF(wo, wi) : 0);
++    }
++
++    PBRT_CPU_GPU
++    static constexpr const char *Name() { return "RetroreflectiveBxDF"; }
++
++    std::string ToString() const;
++
++    PBRT_CPU_GPU
++    void Regularize() {}
++
++    PBRT_CPU_GPU
++    BxDFFlags Flags() const {
++        BxDFFlags flags = BxDFFlags::Unset;
++        if (R)
++            flags = flags | BxDFFlags::DiffuseReflection;
++        if (ra && width > 0)
++            flags = flags | BxDFFlags::GlossyReflection;
++        return flags;
++    }
++
++  private:
++    SampledSpectrum R, ra;
++    Float alpha0, width, q;
++};
++
+ // DiffuseTransmissionBxDF Definition
+ class DiffuseTransmissionBxDF {
+   public:
+diff --git a/src/pbrt/materials.cpp b/src/pbrt/materials.cpp
+index 450b982..2388f3d 100644
+--- a/src/pbrt/materials.cpp
++++ b/src/pbrt/materials.cpp
+@@ -183,6 +183,39 @@ HairMaterial *HairMaterial::Create(const TextureParameterDictionary &parameters,
+                                           beta_m, beta_n, alpha);
+ }
+ 
++// RetroreflectiveMaterial Method Definitions
++std::string RetroreflectiveMaterial::ToString() const {
++    return StringPrintf("[ RetroreflectiveMaterial displacement: %s normalMap: %s "
++                        "reflectance: %s ra: %s alpha0: %f width: %f q: %f ]",
++                        displacement,
++                        normalMap ? normalMap->ToString() : std::string("(nullptr)"),
++                        reflectance, ra, alpha0, width, q);
++}
++
++RetroreflectiveMaterial *RetroreflectiveMaterial::Create(
++    const TextureParameterDictionary &parameters, Image *normalMap, const FileLoc *loc,
++    Allocator alloc) {
++    SpectrumTexture reflectance = parameters.GetSpectrumTexture(
++        "reflectance", nullptr, SpectrumType::Albedo, alloc);
++    if (!reflectance)
++        reflectance = alloc.new_object<SpectrumConstantTexture>(
++            alloc.new_object<ConstantSpectrum>(0.f));
++    // Coefficient of retroreflection [cd lx^-1 m^-2] at "observationangle", normal entrance.
++    SpectrumTexture ra =
++        parameters.GetSpectrumTexture("ra", nullptr, SpectrumType::Unbounded, alloc);
++    if (!ra)
++        ra = alloc.new_object<SpectrumConstantTexture>(
++            alloc.new_object<ConstantSpectrum>(0.f));
++    Float alpha0 = Radians(parameters.GetOneFloat("observationangle", 0.2f));
++    Float width = Radians(parameters.GetOneFloat("lobewidth", 0.31f));
++    Float q = parameters.GetOneFloat("entranceexponent", 2.7f);
++    if (width <= 0)
++        ErrorExit(loc, "\"lobewidth\" must be positive.");
++    FloatTexture displacement = parameters.GetFloatTextureOrNull("displacement", alloc);
++    return alloc.new_object<RetroreflectiveMaterial>(reflectance, ra, alpha0, width, q,
++                                                     displacement, normalMap);
++}
++
+ // DiffuseMaterial Method Definitions
+ std::string DiffuseMaterial::ToString() const {
+     return StringPrintf(
+@@ -659,6 +692,8 @@ Material Material::Create(const std::string &name,
+         material = ConductorMaterial::Create(parameters, normalMap, loc, alloc);
+     else if (name == "measured")
+         material = MeasuredMaterial::Create(parameters, normalMap, loc, alloc);
++    else if (name == "retroreflective")
++        material = RetroreflectiveMaterial::Create(parameters, normalMap, loc, alloc);
+     else if (name == "subsurface")
+         material = SubsurfaceMaterial::Create(parameters, normalMap, loc, alloc);
+     else if (name == "mix") {
+diff --git a/src/pbrt/materials.h b/src/pbrt/materials.h
+index 5a86cf1..1721701 100644
+--- a/src/pbrt/materials.h
++++ b/src/pbrt/materials.h
+@@ -475,6 +475,66 @@ class DiffuseMaterial {
+     SpectrumTexture reflectance;
+ };
+ 
++// RetroreflectiveMaterial Definition
++class RetroreflectiveMaterial {
++  public:
++    // RetroreflectiveMaterial Type Definitions
++    using BxDF = RetroreflectiveBxDF;
++    using BSSRDF = void;
++
++    // RetroreflectiveMaterial Public Methods
++    static const char *Name() { return "RetroreflectiveMaterial"; }
++
++    PBRT_CPU_GPU
++    FloatTexture GetDisplacement() const { return displacement; }
++    PBRT_CPU_GPU
++    const Image *GetNormalMap() const { return normalMap; }
++
++    static RetroreflectiveMaterial *Create(const TextureParameterDictionary &parameters,
++                                           Image *normalMap, const FileLoc *loc,
++                                           Allocator alloc);
++
++    template <typename TextureEvaluator>
++    PBRT_CPU_GPU void GetBSSRDF(TextureEvaluator texEval, MaterialEvalContext ctx,
++                                SampledWavelengths &lambda, void *) const {}
++
++    PBRT_CPU_GPU static constexpr bool HasSubsurfaceScattering() { return false; }
++
++    std::string ToString() const;
++
++    RetroreflectiveMaterial(SpectrumTexture reflectance, SpectrumTexture ra, Float alpha0,
++                            Float width, Float q, FloatTexture displacement,
++                            Image *normalMap)
++        : normalMap(normalMap),
++          displacement(displacement),
++          reflectance(reflectance),
++          ra(ra),
++          alpha0(alpha0),
++          width(width),
++          q(q) {}
++
++    template <typename TextureEvaluator>
++    PBRT_CPU_GPU bool CanEvaluateTextures(TextureEvaluator texEval) const {
++        return texEval.CanEvaluate({}, {reflectance, ra});
++    }
++
++    template <typename TextureEvaluator>
++    PBRT_CPU_GPU RetroreflectiveBxDF GetBxDF(TextureEvaluator texEval,
++                                             MaterialEvalContext ctx,
++                                             SampledWavelengths &lambda) const {
++        SampledSpectrum r = Clamp(texEval(reflectance, ctx, lambda), 0, 1);
++        SampledSpectrum a = ClampZero(texEval(ra, ctx, lambda));
++        return RetroreflectiveBxDF(r, a, alpha0, width, q);
++    }
++
++  private:
++    // RetroreflectiveMaterial Private Members
++    Image *normalMap;
++    FloatTexture displacement;
++    SpectrumTexture reflectance, ra;
++    Float alpha0, width, q;
++};
++
+ // ConductorMaterial Definition
+ class ConductorMaterial {
+   public:
