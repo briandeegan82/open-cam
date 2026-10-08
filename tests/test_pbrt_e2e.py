@@ -22,7 +22,7 @@ from synthetic_data import REPO, run_tool_main
 
 PBRT = Path(os.environ.get("OPENCAM_PBRT", REPO / "third_party" / "pbrt-v4" / "build" / "pbrt"))
 XRES, YRES, NBUCKETS = 96, 64, 16
-CAMERA_MODEL = REPO / "config" / "camera_models" / "default.yaml"
+CAMERA_MODEL = REPO / "config" / "camera_recipes" / "default.yaml"
 
 if not PBRT.is_file() and os.environ.get("OPENCAM_REQUIRE_PBRT") == "1":
     raise RuntimeError(f"OPENCAM_REQUIRE_PBRT=1 but pbrt binary not found at {PBRT}")
