@@ -258,6 +258,18 @@ venv/bin/python tools/validate_emva_model.py \
   --json-out out/emva_validation_report.json
 ```
 
+## Highway / Automotive Scenes (Optional)
+
+Spectral highway scene for ADAS-style renders: road with markings, CC0 cars, barriers, signs,
+vegetation, and an absolutely calibrated sun + sky. Large assets are fetched on demand
+(pinned URLs + checksums, gitignored cache); see `docs/HIGHWAY_SCENES.md`.
+
+```bash
+venv/bin/python tools/fetch_highway_assets.py
+venv/bin/python tools/build_highway_scene.py --camera realistic
+third_party/pbrt-v4/build/pbrt scenes/generated/highway/highway.pbrt
+```
+
 ## Munsell Dataset Tools (Optional)
 
 Optional scripts for Joensuu Munsell matte data:

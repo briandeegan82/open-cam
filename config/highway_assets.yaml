@@ -1,0 +1,163 @@
+# Third-party assets for tools/build_highway_scene.py, fetched on demand by
+# tools/fetch_highway_assets.py into scenes/assets/highway/ (gitignored).
+# Every entry records where it comes from, its licence and a pinned checksum
+# (sha256 per file, or a pinned git commit for repository subtrees).
+# Only CC0 assets are listed; nothing here is committed to this repository.
+schema_version: 1
+cache_dir: scenes/assets/highway
+
+assets:
+  # --- Sky (Poly Haven "pure sky" HDRIs: unclipped sun, no ground) ---------
+  sky_kloofendal_43d_clear:
+    kind: hdri
+    title: Kloofendal 43d Clear (Pure Sky)
+    source: https://polyhaven.com/a/kloofendal_43d_clear_puresky
+    author: Greg Zaal
+    license: CC0-1.0
+    files:
+      - url: https://dl.polyhaven.org/file/ph-assets/HDRIs/exr/2k/kloofendal_43d_clear_puresky_2k.exr
+        path: kloofendal_43d_clear_puresky_2k.exr
+        sha256: 9659c5650ac535adbb99c2ae38a0950cda3b8ea5ffed8292f9fbc89152392571
+  sky_kloofendal_48d_partly_cloudy:
+    kind: hdri
+    title: Kloofendal 48d Partly Cloudy (Pure Sky)
+    source: https://polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky
+    author: Greg Zaal
+    license: CC0-1.0
+    files:
+      - url: https://dl.polyhaven.org/file/ph-assets/HDRIs/exr/2k/kloofendal_48d_partly_cloudy_puresky_2k.exr
+        path: kloofendal_48d_partly_cloudy_puresky_2k.exr
+        sha256: e56997073870b6c1afec424cbc7f9fc307dd96ac70b975defacac091926a03e6
+  sky_syferfontein_6d_clear:
+    kind: hdri
+    title: Syferfontein 6d Clear (Pure Sky), low sun
+    source: https://polyhaven.com/a/syferfontein_6d_clear_puresky
+    author: Greg Zaal, Jarod Guest
+    license: CC0-1.0
+    files:
+      - url: https://dl.polyhaven.org/file/ph-assets/HDRIs/exr/2k/syferfontein_6d_clear_puresky_2k.exr
+        path: syferfontein_6d_clear_puresky_2k.exr
+        sha256: 0947f291930e34efec84697db085e54e366d9dab12dc568954de82052b09e665
+
+  # --- Surface textures (ambientCG, 2K JPG packs) ---------------------------
+  tex_asphalt031:
+    kind: texture
+    title: Asphalt 031 (fine-aggregate highway asphalt)
+    source: https://ambientcg.com/view?id=Asphalt031
+    author: ambientCG (Lennart Demes)
+    license: CC0-1.0
+    tile_size_m: 2.0
+    files:
+      - url: https://ambientcg.com/get?file=Asphalt031_2K-JPG.zip
+        path: Asphalt031_2K-JPG.zip
+        sha256: f2a02ea9ea1fd97d2a6d27f46ebac069a5851e3ae7c73fa991abf563b97786c7
+        extract: Asphalt031
+    maps: {color: Asphalt031/Asphalt031_2K-JPG_Color.jpg, normal: Asphalt031/Asphalt031_2K-JPG_NormalGL.jpg,
+           roughness: Asphalt031/Asphalt031_2K-JPG_Roughness.jpg}
+  tex_asphalt026c:
+    kind: texture
+    title: Asphalt 026C (aged, cracked asphalt)
+    source: https://ambientcg.com/view?id=Asphalt026C
+    author: ambientCG (Lennart Demes)
+    license: CC0-1.0
+    tile_size_m: 2.0
+    files:
+      - url: https://ambientcg.com/get?file=Asphalt026C_2K-JPG.zip
+        path: Asphalt026C_2K-JPG.zip
+        sha256: 957e37e07fa7631c4172fadb2445c0a75ac39b80595b9b7813e81ee0e121eebb
+        extract: Asphalt026C
+    maps: {color: Asphalt026C/Asphalt026C_2K-JPG_Color.jpg, normal: Asphalt026C/Asphalt026C_2K-JPG_NormalGL.jpg,
+           roughness: Asphalt026C/Asphalt026C_2K-JPG_Roughness.jpg}
+  tex_grass004:
+    kind: texture
+    title: Grass 004
+    source: https://ambientcg.com/view?id=Grass004
+    author: ambientCG (Lennart Demes)
+    license: CC0-1.0
+    tile_size_m: 1.5
+    files:
+      - url: https://ambientcg.com/get?file=Grass004_2K-JPG.zip
+        path: Grass004_2K-JPG.zip
+        sha256: d7d3f08e8bb1e59aed0c3dbb85ea0b46d5308481f89b6a3fd62c0ec9e862245b
+        extract: Grass004
+    maps: {color: Grass004/Grass004_2K-JPG_Color.jpg, normal: Grass004/Grass004_2K-JPG_NormalGL.jpg}
+
+  # --- Cars (already pbrt-v4 scenes with physically based materials) --------
+  # Model axes after import: y up, front of the car towards -x.
+  car_bmw_m6:
+    kind: car_pbrt
+    title: BMW M6 (pbrt-v4-scenes, from Blend Swap)
+    source: https://github.com/mmp/pbrt-v4-scenes/tree/30cf4a0346ae5a80a2d7a530a3ef7d0fa4f70572/bmw-m6
+    author: Blend Swap user tyrant_monkey (pbrt conversion by Matt Pharr)
+    license: CC0-1.0
+    license_file: bmw-m6/BLENDSWAP_LICENSE.txt
+    git:
+      repo: https://github.com/mmp/pbrt-v4-scenes.git
+      commit: 30cf4a0346ae5a80a2d7a530a3ef7d0fa4f70572
+      paths: [bmw-m6/bmw-m6.pbrt, bmw-m6/BLENDSWAP_LICENSE.txt, bmw-m6/geometry]
+    scene_file: bmw-m6/bmw-m6.pbrt
+    length_m: 4.89
+    exclude_materials: [floor, mattefloor]
+    roles: {paint: [CarPaint], glass: [WindscreenGlass, HeadLightGlass, HeadLightGlass01, LightGlass],
+            tire: [tire, tiresidewall]}
+  car_pontiac_gto:
+    kind: car_pbrt
+    title: Pontiac GTO 67 (Bitterli rendering resources)
+    source: https://benedikt-bitterli.me/resources/
+    author: thecali (Blend Swap), scene by Benedikt Bitterli
+    license: CC0-1.0
+    license_file: car2/LICENSE.txt
+    license_note: "Only the car is CC0; the bundled textures/envmap.pfm is not and is never used."
+    files:
+      - url: https://benedikt-bitterli.me/resources/pbrt-v4/car2.zip
+        path: car2.zip
+        sha256: 767e56592fffd7a835058d5f38808d534d07a2b01976e7a5ec0053be18b1b32c
+        extract: "."
+    scene_file: car2/scene-v4.pbrt
+    length_m: 5.17
+    exclude_materials: [Ground]
+    roles: {paint: [CarPaint], glass: [WindowGlass], tire: [BlackRubber]}
+  car_vintage:
+    kind: car_pbrt
+    title: Old vintage car (Bitterli rendering resources)
+    source: https://benedikt-bitterli.me/resources/
+    author: piopis (Blend Swap), scene by Benedikt Bitterli
+    license: CC0-1.0
+    license_file: car/LICENSE.txt
+    license_note: "Only the car is CC0; the bundled textures/envmap.pfm is not and is never used."
+    files:
+      - url: https://benedikt-bitterli.me/resources/pbrt-v4/car.zip
+        path: car.zip
+        sha256: e969f20c52e8923f66e9b9dfbd8bea0b22289166ac4e916d23cf7f49bdeeb528
+        extract: "."
+    scene_file: car/scene-v4.pbrt
+    length_m: 4.2
+    exclude_materials: [Ground]
+    exclude_meshes: [models/Mesh027.ply]
+    roles: {paint: [CarPaint], glass: [WindowGlass], tire: [DarkRubber]}
+
+  # --- Vegetation (Poly Haven glTF, converted to PLY + pbrt) ----------------
+  veg_island_tree_02:
+    kind: gltf
+    title: Island Tree 02
+    source: https://polyhaven.com/a/island_tree_02
+    author: Poly Haven
+    license: CC0-1.0
+    gltf: island_tree_02/island_tree_02_1k.gltf
+    files:
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/island_tree_02/island_tree_02_1k.gltf, path: island_tree_02/island_tree_02_1k.gltf, sha256: d8c5d9ead41cdbef91a648f40ff60470faa19eb3a7010e59e44cb1a01250f75d}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/island_tree_02/island_tree_02.bin, path: island_tree_02/island_tree_02.bin, sha256: 427d69ccc1ea12d1fb9c6af89691563b4a097f39a6f34c15be6e45ef5e5fd4ce}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/island_tree_02/island_tree_02_diff_1k.jpg, path: island_tree_02/textures/island_tree_02_diff_1k.jpg, sha256: 8fc20397ab5d514c119d7a025868414d78e436138d3867a4b7ba12334a72ec3a}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/island_tree_02/island_tree_02_leaves_diff_1k.jpg, path: island_tree_02/textures/island_tree_02_leaves_diff_1k.jpg, sha256: f56d762a1507754752abf164cc12acbc1e87ce87fa609ac44b98a1b0037c89d8}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/island_tree_02/island_tree_02_branches_diff_1k.jpg, path: island_tree_02/textures/island_tree_02_branches_diff_1k.jpg, sha256: bee5ec22196e9e31ad0c95a5a9b4636571cc0124d5bb27a92f1e307d289cc60d}
+  veg_shrub_02:
+    kind: gltf
+    title: Shrub 02
+    source: https://polyhaven.com/a/shrub_02
+    author: Poly Haven
+    license: CC0-1.0
+    gltf: shrub_02/shrub_02_1k.gltf
+    files:
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/shrub_02/shrub_02_1k.gltf, path: shrub_02/shrub_02_1k.gltf, sha256: 99de0a70fe88ad414615cc8d8e020617c8512e2abfe08b911b153a6fcc40d93e}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/shrub_02/shrub_02.bin, path: shrub_02/shrub_02.bin, sha256: 5c1b79da1cfdbac90599542ccd1f75ba433a3a4d356b1ea03655adb39b0e2c96}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/shrub_02/shrub_02_diff_1k.jpg, path: shrub_02/textures/shrub_02_diff_1k.jpg, sha256: 9956eff294034d70516d867e9668428a23d782feb3d4c34061dce5e44bacd5a8}

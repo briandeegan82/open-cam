@@ -6,6 +6,7 @@ venv/
 out/
 third_party/pbrt-v4/build/
 scenes/generated/
+scenes/assets/
 .DS_Store
 .idea/
 .vscode/

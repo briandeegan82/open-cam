@@ -51,9 +51,15 @@ def scene_radiometry_from_manifest(manifest: dict) -> dict:
     focus = cam.get("focus_distance", cam.get("focal_distance", cam.get("cam_dist")))
     if focus is not None:
         out["focus_distance_m"] = float(focus)
-    light = (manifest.get("lighting") or {}).get("distant") or {}
+    lighting = manifest.get("lighting") or {}
+    light = lighting.get("distant") or {}
     if light.get("scale") is not None:
         out["chart_illuminance_exr_lux"] = 683.0 * PBRT_CIE_Y_INTEGRAL * float(light["scale"])
+    # Physically calibrated outdoor scenes (build_highway_scene.py): horizontal illuminance at
+    # ground level, both in lux and in EXR units; it plays the role of the chart illuminance.
+    if lighting.get("reference_illuminance_exr_lux") is not None:
+        out["chart_illuminance_exr_lux"] = float(lighting["reference_illuminance_exr_lux"])
+        out["scene_illuminance_lux"] = float(lighting["reference_illuminance_lux"])
     return out
 
 
@@ -388,6 +394,10 @@ def main() -> None:
     manifest = json.loads(manifest_path.read_text())
     xres = int(manifest["film"]["xresolution"])
     yres = int(manifest["film"]["yresolution"])
+    scene_radiometry = scene_radiometry_from_manifest(manifest)
+    if scene_radiometry.get("scene_illuminance_lux") is not None and args.target_illuminance_lux is None:
+        # Absolute scene: its own illuminance replaces the recipe's chart target.
+        model.setdefault("calibration", {})["target_illuminance_lux"] = scene_radiometry["scene_illuminance_lux"]
 
     L, lambdas = spectral_buckets_from_exr(exr_path)
     if L.shape[:2] != (yres, xres):
@@ -402,7 +412,7 @@ def main() -> None:
         lens_cfg=lens_cfg,
         integration_time_s=args.integration_time_s,
         strict_qe_validation=args.strict_qe_validation,
-        scene=scene_radiometry_from_manifest(manifest),
+        scene=scene_radiometry,
     )
     if meta["radiance_to_irradiance_mode"] != "pbrt_film_irradiance" and meta["f_number"] != float(
         sensor.get("f_number", 2.8)
