@@ -138,6 +138,55 @@ class TestPbrtEndToEnd(unittest.TestCase):
         self.assertTrue(np.all(np.diff(neutral) < 0), f"neutral row not monotonic: {neutral}")
 
 
+@unittest.skipUnless(PBRT.is_file(), f"pbrt binary not built ({PBRT}); see docs/BUILD_PBRT.txt")
+class TestPbrtHighwayHaze(unittest.TestCase):
+    """The manifest's road illuminance under fog matches what pbrt's volpath delivers to the road."""
+
+    def _probe(self, tmp: Path, name: str, *haze: str) -> tuple[float, dict]:
+        """Radiance of an infinite Lambertian ground (albedo = the MC model's) under the scene's lights."""
+        import re
+
+        import yaml
+        from highway_sky import LUMA, read_rgb_exr
+
+        m = yaml.safe_load((REPO / "config" / "highway_assets.yaml").read_text())
+        m["cache_dir"] = str(tmp / "empty_cache")
+        (tmp / "assets.yaml").write_text(yaml.safe_dump(m))
+        scene = tmp / name
+        cmd = [sys.executable, str(REPO / "tools" / "build_highway_scene.py"), "--out-dir", str(scene)]
+        cmd += ["--asset-manifest", str(tmp / "assets.yaml"), "--allow-missing-assets", *haze]
+        subprocess.run(cmd, check=True, capture_output=True)
+        txt = (scene / "highway.pbrt").read_text()
+        head = txt[: txt.index("AttributeEnd", txt.index('LightSource "infinite"')) + len("AttributeEnd")]
+        exr = tmp / f"{name}.exr"
+        head = re.sub(r"^LookAt .*$", "LookAt 0 0.05 0  0 0 0  0 0 1", head, flags=re.M)
+        head = re.sub(r"^Camera .*$", 'Camera "perspective" "float fov" [20]', head, flags=re.M)
+        head = re.sub(r'"string filename" \[".*?"\]', f'"string filename" ["{exr}"]', head, count=1)
+        head = re.sub(r'"integer xresolution" \[\d+\]', '"integer xresolution" [8]', head)
+        head = re.sub(r'"integer yresolution" \[\d+\]', '"integer yresolution" [8]', head)
+        head = re.sub(r'"integer pixelsamples" \[\d+\]', '"integer pixelsamples" [2048]', head)
+        rho = json.loads((scene / "highway_manifest.json").read_text())
+        albedo = (rho["atmosphere"] or {}).get("road_illuminance", {}).get("ground_albedo", 0.15)
+        w = 150_000
+        (scene / "probe.pbrt").write_text(
+            head
+            + f'\nMaterial "diffuse" "spectrum reflectance" [300 {albedo} 900 {albedo}]\n'
+            + f'Shape "bilinearmesh" "point3 P" [{-w} 0 {-w} {w} 0 {-w} {-w} 0 {w} {w} 0 {w}]\n'
+        )
+        subprocess.run([str(PBRT), "--quiet", "--seed", "1", str(scene / "probe.pbrt")], check=True)
+        return float((read_rgb_exr(exr) @ LUMA).mean()), rho
+
+    def test_fog_road_illuminance_matches_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            l_clear, plain = self._probe(tmp, "plain")
+            l_fog, fog = self._probe(tmp, "fog", "--haze", "fog")
+        rendered = l_fog / l_clear
+        expected = fog["lighting"]["reference_illuminance_lux"] / plain["lighting"]["reference_illuminance_lux"]
+        self.assertLess(expected, 0.85)
+        self.assertAlmostEqual(rendered, expected, delta=0.05 * expected)
+
+
 if __name__ == "__main__":
     unittest.main()
 
