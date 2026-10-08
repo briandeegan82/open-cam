@@ -22,7 +22,7 @@ from synthetic_data import REPO
 from test_pbrt_e2e import PBRT
 
 XRES, YRES = 96, 64
-CAMERA_MODEL = REPO / "config" / "camera_models" / "iphone_8.yaml"
+CAMERA_MODEL = REPO / "config" / "camera_recipes" / "iphone_8.yaml"
 TOOLS = REPO / "tools"
 
 
@@ -67,10 +67,12 @@ class TestPbrtFullPipeline(unittest.TestCase):
         cls.e_npz = electrons(cls.t_s)
         cls.e_clean = np.load(cls.e_npz)["electrons_rgb"].astype(np.float64)
 
+        noise_cfg = noise_config_from_camera_model(camera_model, str(exr), str(tmp / "noisy.raw16"))
+        # Spatial crosstalk mixes neighbouring CFA channels, so per-pixel residuals would no longer
+        # follow the pure EMVA model; it has its own unit tests.
+        noise_cfg["bayer"]["spatial_crosstalk"] = {"enabled": False}
         cls.noise_cfg = tmp / "noise.yaml"
-        cls.noise_cfg.write_text(
-            yaml.safe_dump(noise_config_from_camera_model(camera_model, str(exr), str(tmp / "noisy.raw16")))
-        )
+        cls.noise_cfg.write_text(yaml.safe_dump(noise_cfg))
         cls.raw = cls._noise(seed=0)
         cls.stats = json.loads((tmp / "noisy_png" / "run_stats.json").read_text())
         cls.pattern = cls.stats["bayer_pattern"]
