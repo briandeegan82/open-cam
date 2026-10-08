@@ -18,8 +18,8 @@ windscreen height (1.35 m, middle lane, looking down the road):
 ## Assets
 
 Nothing third-party is committed. `config/highway_assets.yaml` lists every asset with its
-source, author, licence (all CC0) and a pinned sha256 (or pinned git commit). Fetch and
-prepare them (about 0.55 GB into the gitignored `scenes/assets/highway/`):
+source, author, licence (CC0, except the heavy vehicles: CC-BY-4.0 with attribution) and a pinned sha256 (or pinned git commit). Fetch and
+prepare them (about 1 GB into the gitignored `scenes/assets/highway/`):
 
 ```bash
 venv/bin/python tools/fetch_highway_assets.py --list
@@ -140,12 +140,68 @@ It is procedural, so no new assets are fetched; `--seed` changes the skyline.
 
 1280×720, 256 spp, same camera view, 8-thread VM, pbrt-v4 CPU build. Haze presets also switch on the distant hills (64×720-vertex ring, ~92 k triangles); the time is the total for medium + hills.
 
+## Scene variety (`--seed`)
+
+`tools/highway_variety.py` turns the fixed scene into a reproducible family of scenes for
+datasets. Without `--seed` the scene is the reference one (fixed traffic, straight level road,
+vegetation placed with seed 7); the only change is the textured barrier materials below
+(`--barrier-materials flat` restores the old ones). `--seed N` draws, from one generator in a
+fixed order, so the same N always gives the same `highway.pbrt` and manifest:
+
+- **Traffic** in all six lanes (lanes < 0 are the oncoming carriageway): per-lane density
+  4-22 veh/km (HCM LOS A-C), exponential headways with a 10 m minimum gap, ego-lane traffic
+  starting 14 m ahead, up to 320 m. Heavy-vehicle share 5-25 % (HCM default 10-25 %), weighted
+  to the right-hand lanes: articulated trucks (DAF CF tractor + box trailer), rigid box trucks,
+  vans (also 8 % of light vehicles) and buses; cars are the three CC0 car models.
+- **Paint**: car basecoats drawn from the DuPont 2012 Global Automotive Color Popularity Report
+  world shares (white 23 %, black 21 %, silver 18 %, grey 14 %, red 8 %, blue 6 %, beige/brown
+  6 %, green 1 %, yellow/orange 3 %); vans and box trucks use a white-dominated fleet mix. Each
+  vehicle gets its own spectral SPD (`spd/carpaint_<colour>_<nn>.spd`, lightness x0.9-1.08)
+  under the existing clear coat. Bus and tractor liveries are the authors' textures.
+- **Alignment**: tangent -> clothoid -> circular arc -> clothoid -> tangent (radius 700-2500 m
+  either way, spiral 60-180 m or none, total turn 30 deg; AASHTO Green Book minimum radius
+  ~600-700 m at 110-120 km/h) and a grade of up to +/-4 % between two 250 m parabolic vertical
+  curves, back to level after ~1.3 km. Geometry is built in a straight frame and every mesh
+  (refined along the road so chords stay within millimetres) is bent onto the alignment; terrain
+  on the inside of the bend is compressed laterally so it never folds. Instances (vehicles,
+  trees) are placed with the local heading and pitch. The camera stays at chainage 0, before
+  the curve/grade starts.
+- **Structures**: 12 m twin-arm lamp columns on the median every 36-50 m (BS 5489-1 /
+  EN 13201 spacing ~3.5-4x mounting height; head positions are recorded in the manifest
+  `variety.lamp_posts.heads` for night lighting), an overhead sign gantry (5.6 m clearance,
+  three seeded guide-sign legends) and an overpass (5.3 m headroom, median pier, abutments).
+- **Vegetation**: 1-3 tree species (Poly Haven island tree, Searsia lucida, fir and pine
+  saplings) and 1-3 shrub species, scaled to plausible heights, with the per-species spacing
+  stretched so the total density is unchanged.
+
+Individual flags override the seeded draw: `--curve-radius` (m, + bends right, 0 straight),
+`--clothoid-length`, `--grade` (%), `--lamp-posts/--gantry/--overpass on|off`. Every draw is
+recorded in the manifest under `variety`. Lighting is untouched: the sun/sky `illuminance`
+values and `reference_illuminance_lux` are identical for every seed (the reference is the
+unoccluded horizontal illuminance, so shadows from new structures do not change it).
+
+**Barrier materials**: the median barrier is weathered grey concrete (spectral reflectance
+0.22-0.28, Levinson & Akbari 2002 weathered concrete 0.2-0.3) modulated by the ambientCG
+Concrete031 luminance map; W-beam rails, posts, lamp columns and the gantry are weathered
+hot-dip galvanised steel, a pbrt `mix` of a rough zinc conductor (n, k from Werner et al.,
+J. Phys. Chem. Ref. Data 38, 1013 (2009)) and a diffuse zinc-carbonate patina (0.27-0.30),
+with the patina fraction (mean ~0.7) taken from the ambientCG Metal032 roughness map. Both use
+world-space planar texture mapping, so they need no UVs and survive the alignment warp.
+
+**Heavy vehicles** (CC-BY-4.0, from Sketchfab via the public Objaverse mirror, so no login is
+needed; attribution in `config/highway_assets.yaml`): "Truck DAF CF 75.310" and "Mercedes-Benz
+Sprinter 2006" by Max-5532, a box trailer by cmitche1, a box truck by roy.gearloft.in and a town
+bus by own.guest. The fetcher unpacks the `.glb` files (`kind: glb`), drops vertices outside
+the glTF accessor bounds (some exports contain corrupt ones), and the builder scales each model
+to its real length (robust bounding box) and maps materials by name: paint -> spectral
+basecoat, glass -> thin dielectric, tyres -> rubber, others -> the authors' textures/colours.
+
 ## Known approximations
 
 - No retroreflective BSDF in pbrt: markings use a glass-bead-like rough clear coat over a
   spectral binder; sign sheeting is diffuse. Night/headlight retroreflection is not modelled.
 - The sky radiance is RGB, upsampled by pbrt; only the sun is spectral.
-- No wet road or road curvature; texture colour maps only modulate luminance.
+- No wet road; texture colour maps only modulate luminance.
 - Haze: one HG phase function per medium (Rayleigh folded into g), horizontally uniform
   medium, flat Earth for the medium (the backdrop has curvature); without `--haze` the horizon
   is sharp and aerial perspective comes only from the sky map.
