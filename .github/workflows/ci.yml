@@ -32,3 +32,42 @@ jobs:
         run: python -m pytest -q
       - name: Pipeline dry run
         run: python tools/run_pipeline.py --config config/pipeline.yaml --dry-run
+
+  pbrt-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+      - name: Resolve pbrt-v4 revision
+        id: pbrt
+        run: echo "sha=$(git rev-parse HEAD:third_party/pbrt-v4)" >> "$GITHUB_OUTPUT"
+      - name: Cache pbrt binary
+        id: pbrt-cache
+        uses: actions/cache@v4
+        with:
+          path: third_party/pbrt-v4/build/pbrt
+          key: pbrt-v4-cpu-${{ runner.os }}-${{ steps.pbrt.outputs.sha }}
+      - name: Install runtime libraries
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev \
+            libxi-dev libgl-dev libwayland-dev libxkbcommon-dev wayland-protocols pkg-config cmake
+      - name: Build pbrt-v4 (CPU)
+        if: steps.pbrt-cache.outputs.cache-hit != 'true'
+        run: |
+          cmake -S third_party/pbrt-v4 -B third_party/pbrt-v4/build -DCMAKE_BUILD_TYPE=Release
+          cmake --build third_party/pbrt-v4/build -j"$(nproc)" --target pbrt_exe
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      - name: End-to-end render test
+        env:
+          OPENCAM_REQUIRE_PBRT: "1"
+        run: python -m pytest tests/test_pbrt_e2e.py -v

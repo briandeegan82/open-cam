@@ -16,6 +16,7 @@ These are the same checks CI runs (`.github/workflows/ci.yml`):
   (`PYTHONPATH=tools:. venv/bin/python -m unittest discover -s tests` also works)
 - GUI tests: `cd gui && ../venv/bin/python -m pytest`
 - Pipeline dry-run: `venv/bin/python tools/run_pipeline.py --config config/pipeline.yaml --dry-run`
+- Real render test (needs `third_party/pbrt-v4/build/pbrt`, see `docs/BUILD_PBRT.txt`; skipped otherwise): `venv/bin/python -m pytest tests/test_pbrt_e2e.py`
 - Keep generated artifacts (`out/`, `scenes/generated/`) out of commits.
 
 ## Tests
