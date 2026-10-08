@@ -1,0 +1,118 @@
+{
+  "anchor_scale_e_per_unit": 3.0406535632490794e-16,
+  "anchor_ratio_cv_over_24_patches": 4.22740906441322e-08,
+  "sigma_d_e": 2.6,
+  "full_well_e": 4800.0,
+  "cyan_proxy_over_clear_normalised_to_white": {
+    "min": 0.43196548703912896,
+    "max": 1.3439147251618073,
+    "argmin_patch": 15,
+    "argmax_patch": 13
+  },
+  "cfas": {
+    "Bayer RGGB": {
+      "luma_channel": "G",
+      "mu_e_patch22_500lux": 282.47601290777806,
+      "snr_db_patch22_10lux": 4.102681482098317,
+      "white_patch_fraction_of_full_well": 0.2284395401148916,
+      "luma_over_G_D65_patch22": 1.0,
+      "luma_over_G_A_patch22": 1.0,
+      "snr_gain_db_vs_bayer_10lux": 0.0
+    },
+    "Quad Bayer": {
+      "luma_channel": "G",
+      "mu_e_patch22_500lux": 282.47601290777806,
+      "snr_db_patch22_10lux": 4.102681482098317,
+      "white_patch_fraction_of_full_well": 0.2284395401148916,
+      "luma_over_G_D65_patch22": 1.0,
+      "luma_over_G_A_patch22": 1.0,
+      "snr_gain_db_vs_bayer_10lux": 0.0
+    },
+    "RGBW": {
+      "luma_channel": "W",
+      "mu_e_patch22_500lux": 740.6888670880076,
+      "snr_db_patch22_10lux": 10.074054332555669,
+      "white_patch_fraction_of_full_well": 0.5924896875532737,
+      "luma_over_G_D65_patch22": 2.6221301393468246,
+      "luma_over_G_A_patch22": 2.6662735082282856,
+      "snr_gain_db_vs_bayer_10lux": 5.971372850457351
+    },
+    "RCCB (clear=W)": {
+      "luma_channel": "W",
+      "mu_e_patch22_500lux": 740.6888670880076,
+      "snr_db_patch22_10lux": 10.074054332555669,
+      "white_patch_fraction_of_full_well": 0.5924896875532737,
+      "luma_over_G_D65_patch22": 2.6221301393468246,
+      "luma_over_G_A_patch22": 2.6662735082282856,
+      "snr_gain_db_vs_bayer_10lux": 5.971372850457351
+    },
+    "RCCB (repo proxy C=Cy)": {
+      "luma_channel": "Cy",
+      "mu_e_patch22_500lux": 464.97421752686097,
+      "snr_db_patch22_10lux": 7.311861393064431,
+      "white_patch_fraction_of_full_well": 0.3670670747126278,
+      "luma_over_G_D65_patch22": 1.646066201304903,
+      "luma_over_G_A_patch22": 1.1127982009122093,
+      "snr_gain_db_vs_bayer_10lux": 3.209179910966114
+    },
+    "RYYCy": {
+      "luma_channel": "Ye",
+      "mu_e_patch22_500lux": 438.0213692923891,
+      "snr_db_patch22_10lux": 6.941469120656053,
+      "white_patch_fraction_of_full_well": 0.35890175127640783,
+      "luma_over_G_D65_patch22": 1.5506497871569473,
+      "luma_over_G_A_patch22": 2.123462601250592,
+      "snr_gain_db_vs_bayer_10lux": 2.8387876385577355
+    }
+  },
+  "neutral_patch_means_D65": {
+    "R": [
+      684.6091092917051,
+      497.58573976138257,
+      324.62771272310084,
+      172.14692415338254,
+      74.93765835047004,
+      24.088135517397358
+    ],
+    "G": [
+      1096.5097925514797,
+      809.8341942631714,
+      529.8660081844614,
+      282.47601290777806,
+      123.95507374811707,
+      38.89373151870847
+    ],
+    "B": [
+      980.8119619391819,
+      745.6917669781249,
+      491.74544226538984,
+      263.24604560545,
+      116.62532942453632,
+      36.893114661160524
+    ],
+    "W": [
+      2843.950500255714,
+      2116.3150784545555,
+      1388.6531202862866,
+      740.6888670880076,
+      325.7635199696678,
+      103.10138105374047
+    ],
+    "Ye": [
+      1722.7284061267576,
+      1261.166058119835,
+      823.6482144115328,
+      438.0213692923891,
+      191.53999905038305,
+      60.56551710249722
+    ],
+    "Cy": [
+      1761.9219586206134,
+      1323.8109076076673,
+      869.9450407273317,
+      464.97421752686097,
+      205.2344497467072,
+      64.67907385376746
+    ]
+  }
+}
