@@ -12,17 +12,14 @@ from pathlib import Path
 import numpy as np
 import yaml
 from camera_model import (
-    effective_f_number,
     load_camera_model,
     noise_config_from_camera_model,
 )
 from exr_multispectral import (
     linear_rgb_from_exr,
     spectral_buckets_from_exr,
-    trapezoid_weights_nm,
 )
 from qe_curves import load_qe_curves_rgb, read_csv_curve
-from sensor_radiometry import integrate_spectral_planes, spectral_electron_weights
 
 
 def mean_effective_qe(curve_csv: Path, ircf_csv: Path | None) -> float:
@@ -899,110 +896,45 @@ def integrate_exr_spectral_qe(
     *,
     strict_qe_validation: bool = False,
     lens_cfg: dict | None = None,
+    model_cfg: dict | None = None,
 ) -> np.ndarray:
     """HxWx3 electrons via full photon-counting physics on a PBRT spectral EXR.
 
-    Applies the same radiometric chain as ``pbrt_spectral_exr_to_electrons.py``:
-
-        E_λ  = L_λ · (π / 4N²) · τ_optics · irr_scale · lux_scale   [W / m² / nm]
-        φ(λ) = E_λ · λ / (h c)                                        [ph / m² / s / nm]
-        e_c  = ∫ φ(λ) · QE_c(λ) dλ · (A_pixel · t_int · fill_factor) [electrons]
+    Delegates to ``pbrt_spectral_exr_to_electrons.spectral_radiance_to_electrons`` so
+    both paths share one radiometric chain (thin-lens + close-focus magnification,
+    scalar or spectral optics transmittance, photometric calibration, QE/IRCF and the
+    radial transmission map).
 
     Parameters
     ----------
     sensor_cfg:
-        The ``sensor`` sub-dict from the camera model (provides ``f_number``,
-        ``pixel_pitch_um``, ``integration_time_s``, ``fill_factor``).
+        The ``sensor`` sub-dict from the camera model.
     cal_cfg:
-        The ``sensor_forward.model.calibration`` sub-dict (provides
-        ``irradiance_scale_W_m2nm_per_unit``, ``optics_transmittance``,
-        ``target_illuminance_lux``, ``illuminant_override_csv``,
-        ``radiometric_autocalibration``).  Pass ``{}`` to use physical defaults.
+        The ``sensor_forward.model.calibration`` sub-dict. Used when ``model_cfg`` is
+        not given; pass ``{}`` for physical defaults.
+    model_cfg:
+        The full ``sensor_forward.model`` block (``calibration``, ``pbrt_spectral_exr``,
+        ``optics_transmittance_spatial``). Its calibration is overridden by ``cal_cfg``.
     """
     # Deferred import to avoid a circular-import risk at module load time.
-    from spectral_sensor_forward import illuminance_lux_from_irradiance  # noqa: PLC0415
+    from pbrt_spectral_exr_to_electrons import spectral_radiance_to_electrons  # noqa: PLC0415
 
     spec, lam = spectral_buckets_from_exr(exr_path.resolve())
-    lam = lam.astype(np.float64)
-    w = trapezoid_weights_nm(lam).astype(np.float64)
-
-    # ---- Radiance → sensor-plane irradiance ----
-    # For realistic cameras use the effective f-number derived from the lens prescription
-    # (focal_length_mm / aperture_diameter_mm).  Falls back to sensor.f_number with a
-    # warning when focal_length_mm is absent from the lens model.
-    f_number = effective_f_number(sensor_cfg, lens_cfg, tag="integrate_qe")
-    rad_to_irr = np.pi / (4.0 * max(1e-12, f_number**2))
-
-    # ---- Scalar optics transmittance ----
-    optics_t = float(cal_cfg.get("optics_transmittance", 1.0))
-
-    # ---- Absolute irradiance scale (scene-unit → W/m²/nm) ----
-    irr_scale = float(cal_cfg.get("irradiance_scale_W_m2nm_per_unit", 1.0e-3))
-
-    # ---- Optional photometric calibration (match target_illuminance_lux) ----
-    target_lux = cal_cfg.get("target_illuminance_lux", None)
-    illum_csv = cal_cfg.get("illuminant_override_csv", None)
-    auto_cal_mode = str(cal_cfg.get("radiometric_autocalibration", "off")).lower()
-    lux_scale = 1.0
-
-    if target_lux is not None and illum_csv:
-        # Use illuminant CSV to normalise scene irradiance to target_lux.
-        e_wl, e_v = read_csv_curve((repo / str(illum_csv)).resolve())
-        ill_in = illuminance_lux_from_irradiance(e_wl, e_v * irr_scale)
-        if ill_in > 0:
-            lux_scale = float(target_lux) / ill_in
-        else:
-            print(
-                "warning [integrate_qe]: photopic illuminance of illuminant CSV is <= 0; "
-                "lux_scale left at 1",
-                file=sys.stderr,
-            )
-    elif target_lux is not None and auto_cal_mode not in ("off", "none", "disabled", "false", "0"):
-        # Autocalibrate: measure mean photopic lux of the rendered EXR and rescale.
-        E_mean = (
-            np.mean(spec.astype(np.float64), axis=(0, 1))
-            * (rad_to_irr * optics_t * irr_scale)
-        )
-        scene_lux = illuminance_lux_from_irradiance(lam, E_mean)
-        if scene_lux > 0:
-            lux_scale = float(target_lux) / scene_lux
-        else:
-            print(
-                "warning [integrate_qe]: EXR-derived scene illuminance <= 0; "
-                "skipping autocalibration",
-                file=sys.stderr,
-            )
-
-    global_scale = rad_to_irr * optics_t * irr_scale * lux_scale
-
-    # ---- Geometry factor: pixel area × integration time × fill factor ----
-    pixel_pitch_um = float(sensor_cfg.get("pixel_pitch_um", 1.4))
-    t_int = float(sensor_cfg.get("integration_time_s", 0.01))
-    fill_factor = float(sensor_cfg.get("fill_factor", 1.0))
-    pixel_area = (pixel_pitch_um * 1e-6) ** 2
-    geom = t_int * fill_factor * pixel_area
-
-    # ---- QE integration ----
-    ircf = qe_cfg.get("ircf_csv")
-    ircf_path = (repo / ircf).resolve() if ircf else None
-    q_r_src, q_g_src, q_b_src = load_qe_curves_rgb(
-        repo,
-        qe_cfg,
+    model = dict(model_cfg or {})
+    model["calibration"] = cal_cfg
+    if "pbrt_spectral_exr" not in model and "radiometric_autocalibration" in cal_cfg:
+        model["pbrt_spectral_exr"] = {"radiometric_autocalibration": cal_cfg["radiometric_autocalibration"]}
+    electrons, _ = spectral_radiance_to_electrons(
+        spec,
+        lam,
+        repo=repo,
+        sensor={**sensor_cfg, "quantum_efficiency": qe_cfg},
+        model=model,
+        lens_cfg=lens_cfg,
         strict_qe_validation=strict_qe_validation,
+        tag="integrate_qe",
     )
-    q_r = np.interp(lam, q_r_src[0], np.clip(q_r_src[1], 0.0, 1.0), left=0.0, right=0.0)
-    q_g = np.interp(lam, q_g_src[0], np.clip(q_g_src[1], 0.0, 1.0), left=0.0, right=0.0)
-    q_b = np.interp(lam, q_b_src[0], np.clip(q_b_src[1], 0.0, 1.0), left=0.0, right=0.0)
-    if ircf_path is not None:
-        ir_wl, ir = read_csv_curve(ircf_path)
-        ir_i = np.interp(lam, ir_wl, np.clip(ir, 0.0, 1.0), left=0.0, right=0.0)
-        q_r = np.clip(q_r * ir_i, 0.0, 1.0)
-        q_g = np.clip(q_g * ir_i, 0.0, 1.0)
-        q_b = np.clip(q_b * ir_i, 0.0, 1.0)
-
-    weights = spectral_electron_weights(lam, np.stack([q_r, q_g, q_b], axis=1), w, global_scale, geom)
-    electrons = integrate_spectral_planes(spec, weights)
-    return np.clip(electrons, 0.0, None).astype(np.float32)
+    return electrons
 
 
 def main() -> None:
@@ -1335,6 +1267,7 @@ def main() -> None:
                     _cal_cfg,
                     strict_qe_validation=strict_qe_validation,
                     lens_cfg=camera_model.get("lens", {}) if camera_model else None,
+                    model_cfg=_sf_model if camera_model else None,
                 )
             except ValueError as exc:
                 # Some renders are RGB EXRs even when integrate_qe is configured.
