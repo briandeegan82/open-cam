@@ -140,3 +140,68 @@ class TestPbrtEndToEnd(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(PBRT.is_file(), f"pbrt binary not built ({PBRT}); see docs/BUILD_PBRT.txt")
+class TestPbrtHighwaySmoke(unittest.TestCase):
+    """Highway builder -> pbrt -> electrons, offline (proxy cars, analytic sky, no textures)."""
+
+    def test_highway_render_and_electrons(self) -> None:
+        import yaml
+
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            m = yaml.safe_load((REPO / "config" / "highway_assets.yaml").read_text())
+            m["cache_dir"] = str(tmp / "empty_cache")
+            (tmp / "assets.yaml").write_text(yaml.safe_dump(m))
+            exr = tmp / "hw.exr"
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(REPO / "tools" / "build_highway_scene.py"),
+                    "--out-dir",
+                    str(tmp / "scene"),
+                    "--asset-manifest",
+                    str(tmp / "assets.yaml"),
+                    "--allow-missing-assets",
+                    "--film-output",
+                    str(exr),
+                    "--xres",
+                    "64",
+                    "--yres",
+                    "36",
+                    "--pixelsamples",
+                    "4",
+                    "--spectral-lambda-min",
+                    "400",
+                    "--spectral-lambda-max",
+                    "700",
+                ],
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run([str(PBRT), "--quiet", "--seed", "1", str(tmp / "scene" / "highway.pbrt")], check=True)
+            L, _ = spectral_buckets_from_exr(exr)
+            self.assertEqual(L.shape[:2], (36, 64))
+            self.assertTrue(np.isfinite(L).all())
+            self.assertGreater(float(L[:12].mean()), float(L[-8:].mean()))  # bright sky above dark asphalt
+            out = tmp / "electrons.npz"
+            run_tool_main(
+                pbrt_tool.main,
+                [
+                    "--exr",
+                    str(exr),
+                    "--camera-model-config",
+                    str(CAMERA_MODEL),
+                    "--scene-manifest-json",
+                    str(tmp / "scene" / "highway_manifest.json"),
+                    "--out",
+                    str(out),
+                    "--integration-time-s",
+                    "0.0001",
+                ],
+            )
+            npz = dict(np.load(out))
+            e = next(v for k, v in npz.items() if np.asarray(v).ndim >= 2)
+            self.assertTrue(np.isfinite(e).all())
+            self.assertGreater(float(np.mean(e)), 0.0)
