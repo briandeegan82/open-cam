@@ -159,9 +159,7 @@ def theory_curves(
         diffraction=diffraction,
         pixel_aperture=pixel,
         system=s.system_mtf(diffraction, pixel),
-        diffraction_cutoff_cy_per_px=float(
-            s.diffraction_cutoff_cy_per_px(f_number, wavelength_nm, pixel_pitch_um)
-        ),
+        diffraction_cutoff_cy_per_px=float(s.diffraction_cutoff_cy_per_px(f_number, wavelength_nm, pixel_pitch_um)),
     )
 
 
@@ -192,9 +190,7 @@ def aliasing_preview(
     star = s.siemens_star(size, spokes)
     if prefilter_sigma_px > 0:
         m = import_tool("apply_spectral_psf")
-        star = np.asarray(
-            m.separable_gaussian_blur_2d(star.astype(np.float32), prefilter_sigma_px), dtype=np.float64
-        )
+        star = np.asarray(m.separable_gaussian_blur_2d(star.astype(np.float32), prefilter_sigma_px), dtype=np.float64)
     # Point-sample on a coarse grid: no area averaging, so nothing suppresses
     # the frequencies above the new Nyquist limit.
     sampled = star[::downsample, ::downsample]

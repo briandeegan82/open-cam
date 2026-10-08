@@ -49,8 +49,7 @@ SCENARIOS: dict[str, Scenario] = {
             "anyone's colour space."
         ),
         notes=(
-            "Turn white balance and the CCM back on one at a time and watch delta-E fall "
-            "from the teens to about one."
+            "Turn white balance and the CCM back on one at a time and watch delta-E fall from the teens to about one."
         ),
         illuminant_id="D65",
         stages=("mosaic", "demosaic", "srgb"),
@@ -185,8 +184,7 @@ SCENARIOS: dict[str, Scenario] = {
             "V(lambda) than green is. The same 3x3 cannot save a worse spectral basis."
         ),
         notes=(
-            "Compare the QE overlay and the Luther error against the D65 Bayer scenario. "
-            "The green curve is now cyan."
+            "Compare the QE overlay and the Luther error against the D65 Bayer scenario. The green curve is now cyan."
         ),
         illuminant_id="D65",
         stages=ALL_STAGES,

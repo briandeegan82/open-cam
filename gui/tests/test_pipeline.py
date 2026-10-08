@@ -1,4 +1,3 @@
-
 from opencam_gui.core import pipeline as pl
 from opencam_gui.core.catalog import find_recipe
 from opencam_gui.core.repo import pbrt_available
@@ -41,7 +40,7 @@ def test_iq_target_scene_rejects_fast_analytic():
     req = _request(scene_id="slanted_edge", mode="fast_analytic")
     try:
         pl.build_plan(req)
-        assert False, "expected ValueError"
+        raise AssertionError("expected ValueError")
     except ValueError:
         pass
 

@@ -10,7 +10,6 @@ from pathlib import Path
 
 import numpy as np
 import yaml
-
 from apply_emva_noise import bayer_sample_rgb, bilinear_demosaic, load_electrons_npz
 from camera_model import load_camera_model, noise_config_from_camera_model
 

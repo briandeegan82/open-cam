@@ -46,7 +46,10 @@ def temporal_variance_dn_squared(
     """Var(DN) for temporal noise only (no PRNU/DSNU), linear regime, no saturation."""
     return (
         temporal_variance_electrons_squared(
-            mu_e, sigma_d_e, use_poisson=use_poisson, sigma_ktc_e=sigma_ktc_e,
+            mu_e,
+            sigma_d_e,
+            use_poisson=use_poisson,
+            sigma_ktc_e=sigma_ktc_e,
             mu_dark_e=mu_dark_e,
         )
         / float(K_e_per_DN) ** 2
@@ -126,7 +129,11 @@ def photon_transfer_curve_checks(
         else:
             pred_mean = mean_dn_linear(mu, K_e_per_DN, black_dn)
             pred_var = temporal_variance_dn_squared(
-                mu, sigma_d_e, K_e_per_DN, use_poisson=use_poisson, mu_dark_e=mu_dark_e,
+                mu,
+                sigma_d_e,
+                K_e_per_DN,
+                use_poisson=use_poisson,
+                mu_dark_e=mu_dark_e,
             )
         m_mc, v_mc = monte_carlo_temporal_dn_stats(
             float(mu),
@@ -267,8 +274,8 @@ def dsnu_offset_map(
         if mu_dark <= 1e-9:
             return np.zeros(shape, dtype=np.float64)
         v_ratio = std / mu_dark
-        sigma_ln = float(np.sqrt(np.log1p(v_ratio ** 2)))
-        mu_ln = np.log(mu_dark) - 0.5 * sigma_ln ** 2
+        sigma_ln = float(np.sqrt(np.log1p(v_ratio**2)))
+        mu_ln = np.log(mu_dark) - 0.5 * sigma_ln**2
         abs_map = rng.lognormal(mu_ln, sigma_ln, size=shape)
         return (abs_map - mu_dark).astype(np.float64)
     raise ValueError('dsnu model must be "gaussian" or "lognormal"')
@@ -370,7 +377,7 @@ def emva1288_prnu(
     """
     dark = emva1288_spatial_stats(dark_stack_dn)
     bright = emva1288_spatial_stats(bright_stack_dn)
-    s2_photo = bright.corrected_spatial_std_dn ** 2 - dark.corrected_spatial_std_dn ** 2
+    s2_photo = bright.corrected_spatial_std_dn**2 - dark.corrected_spatial_std_dn**2
     s_photo = float(np.sqrt(max(s2_photo, 0.0)))
     mean_photo = bright.mean_dn - dark.mean_dn
     prnu = s_photo / max(abs(mean_photo), 1e-12)

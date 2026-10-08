@@ -10,8 +10,8 @@ and becomes a picture.
 
 from __future__ import annotations
 
-import numpy as np
 import dearpygui.dearpygui as dpg
+import numpy as np
 
 from opencam_gui.core import isp_engine as ie
 from opencam_gui.topics.isp.scenarios import SCENARIOS, get_scenario
@@ -41,11 +41,14 @@ def _fit_to(arr: np.ndarray, size: int) -> np.ndarray:
 def _heat(gray: np.ndarray) -> np.ndarray:
     """Black-red-yellow-white ramp for error maps."""
     g = np.clip(np.asarray(gray, dtype=np.float64), 0.0, 1.0)
-    return np.stack([
-        np.clip(g * 3.0, 0.0, 1.0),
-        np.clip(g * 3.0 - 1.0, 0.0, 1.0),
-        np.clip(g * 3.0 - 2.0, 0.0, 1.0),
-    ], axis=2)
+    return np.stack(
+        [
+            np.clip(g * 3.0, 0.0, 1.0),
+            np.clip(g * 3.0 - 1.0, 0.0, 1.0),
+            np.clip(g * 3.0 - 2.0, 0.0, 1.0),
+        ],
+        axis=2,
+    )
 
 
 class IspApp(DemoApp):
@@ -123,12 +126,15 @@ class IspApp(DemoApp):
         chart = ie.load_chart(illuminant_id=self.illuminant_id, qe_paths=self.qe_paths)
         self._chart = chart
 
-        result = ie.run_isp(chart, ie.IspConfig(
-            enabled=set(self.stages),
-            bayer_pattern=self.bayer_pattern,
-            demosaic_method=self.demosaic_method,
-            wb_method=self.wb_method,
-        ))
+        result = ie.run_isp(
+            chart,
+            ie.IspConfig(
+                enabled=set(self.stages),
+                bayer_pattern=self.bayer_pattern,
+                demosaic_method=self.demosaic_method,
+                wb_method=self.wb_method,
+            ),
+        )
         accuracy = ie.colour_accuracy(chart, result)
 
         self._draw_stages(result)
@@ -145,18 +151,15 @@ class IspApp(DemoApp):
             dpg.set_value(f"label_{stage.id}", label)
         dpg.set_value("tex_reference", _rgba_flat(_fit_to(result.reference_display, STAGE_TEX)))
 
-    def _draw_accuracy(self, chart: ie.Chart, result: ie.IspResult,
-                       accuracy: ie.ColourAccuracy) -> None:
+    def _draw_accuracy(self, chart: ie.Chart, result: ie.IspResult, accuracy: ie.ColourAccuracy) -> None:
         idx = list(range(1, accuracy.delta_e_2000.size + 1))
         dpg.set_value("de_series", [idx, accuracy.delta_e_2000.tolist()])
         dpg.set_value("de_good", [[0, len(idx) + 1], [2.0, 2.0]])
         dpg.set_axis_limits("de_y", 0.0, max(6.0, float(accuracy.max_delta_e) * 1.15))
 
         ccm = result.ccm
-        dpg.set_value("ccm_text", "\n".join(
-            "   ".join(f"{v:+7.3f}" for v in row) for row in ccm))
-        dpg.set_value("ccm_colsums", "column sums   " + "   ".join(
-            f"{v:+7.3f}" for v in ccm.sum(axis=0)))
+        dpg.set_value("ccm_text", "\n".join("   ".join(f"{v:+7.3f}" for v in row) for row in ccm))
+        dpg.set_value("ccm_colsums", "column sums   " + "   ".join(f"{v:+7.3f}" for v in ccm.sum(axis=0)))
 
     def _draw_demosaic(self) -> None:
         cmp_ = ie.compare_demosaic(pattern=self.bayer_pattern, size=COMPARE_TEX)
@@ -208,12 +211,12 @@ class IspApp(DemoApp):
             ),
         )
 
-    def _draw_status(self, chart: ie.Chart, result: ie.IspResult,
-                     accuracy: ie.ColourAccuracy) -> None:
+    def _draw_status(self, chart: ie.Chart, result: ie.IspResult, accuracy: ie.ColourAccuracy) -> None:
         g = result.wb_gains
         cast = accuracy.neutral_cast_rgb
-        verdict = ("excellent" if accuracy.mean_delta_e < 2
-                   else "usable" if accuracy.mean_delta_e < 5 else "clearly wrong")
+        verdict = (
+            "excellent" if accuracy.mean_delta_e < 2 else "usable" if accuracy.mean_delta_e < 5 else "clearly wrong"
+        )
         dpg.set_value(
             "status_text",
             (
@@ -229,12 +232,15 @@ class IspApp(DemoApp):
 
     # --- layout -----------------------------------------------------
     def register_themes(self) -> None:
-        for name, colour in (("r", (235, 90, 90)), ("g", (90, 205, 110)),
-                             ("b", (100, 140, 245)), ("spd", (240, 200, 90)),
-                             ("refl", (200, 200, 200))):
-            with dpg.theme() as theme:
-                with dpg.theme_component(dpg.mvLineSeries):
-                    dpg.add_theme_color(dpg.mvPlotCol_Line, colour, category=dpg.mvThemeCat_Plots)
+        for name, colour in (
+            ("r", (235, 90, 90)),
+            ("g", (90, 205, 110)),
+            ("b", (100, 140, 245)),
+            ("spd", (240, 200, 90)),
+            ("refl", (200, 200, 200)),
+        ):
+            with dpg.theme() as theme, dpg.theme_component(dpg.mvLineSeries):
+                dpg.add_theme_color(dpg.mvPlotCol_Line, colour, category=dpg.mvThemeCat_Plots)
             self._curve_themes[name] = theme
 
     def register_textures(self) -> None:
@@ -248,39 +254,55 @@ class IspApp(DemoApp):
     def build_controls(self) -> None:
         dpg.add_text("Scene")
         dpg.add_combo(
-            tag="illuminant", label="Illuminant", items=self._illuminants,
-            default_value=self.illuminant_id, callback=self.on_control_change,
+            tag="illuminant",
+            label="Illuminant",
+            items=self._illuminants,
+            default_value=self.illuminant_id,
+            callback=self.on_control_change,
         )
 
         dpg.add_separator()
         dpg.add_text("ISP stages")
         for s in ie.STAGES:
             dpg.add_checkbox(
-                tag=f"stage_{s}", label=ie.STAGE_LABELS[s],
-                default_value=s in self.stages, callback=self.on_control_change,
+                tag=f"stage_{s}",
+                label=ie.STAGE_LABELS[s],
+                default_value=s in self.stages,
+                callback=self.on_control_change,
             )
 
         dpg.add_separator()
         dpg.add_combo(
-            tag="demosaic_method", label="Demosaic", items=list(ie.DEMOSAIC_METHODS),
-            default_value=self.demosaic_method, callback=self.on_control_change,
+            tag="demosaic_method",
+            label="Demosaic",
+            items=list(ie.DEMOSAIC_METHODS),
+            default_value=self.demosaic_method,
+            callback=self.on_control_change,
         )
         dpg.add_combo(
-            tag="wb_method", label="White balance", items=list(ie.WB_METHODS),
-            default_value=self.wb_method, callback=self.on_control_change,
+            tag="wb_method",
+            label="White balance",
+            items=list(ie.WB_METHODS),
+            default_value=self.wb_method,
+            callback=self.on_control_change,
         )
 
         with dpg.group(tag="advanced_controls"):
             dpg.add_separator()
             dpg.add_text("Advanced")
             dpg.add_combo(
-                tag="bayer_pattern", label="CFA pattern",
+                tag="bayer_pattern",
+                label="CFA pattern",
                 items=["RGGB", "BGGR", "GRBG", "GBRG"],
-                default_value=self.bayer_pattern, callback=self.on_control_change,
+                default_value=self.bayer_pattern,
+                callback=self.on_control_change,
             )
             dpg.add_slider_int(
-                tag="patch_index", label="Spectral overlay patch",
-                default_value=self.patch_index, min_value=0, max_value=23,
+                tag="patch_index",
+                label="Spectral overlay patch",
+                default_value=self.patch_index,
+                min_value=0,
+                max_value=23,
                 callback=self.on_control_change,
             )
 
@@ -327,9 +349,11 @@ class IspApp(DemoApp):
 
     def _build_demosaic_tab(self) -> None:
         with dpg.group(horizontal=True):
-            for tag, label in (("tex_bilinear", "Bilinear"),
-                               ("tex_malvar", "Malvar-He-Cutler"),
-                               ("tex_diff", "Where they disagree")):
+            for tag, label in (
+                ("tex_bilinear", "Bilinear"),
+                ("tex_malvar", "Malvar-He-Cutler"),
+                ("tex_diff", "Where they disagree"),
+            ):
                 with dpg.group():
                     dpg.add_text(label)
                     dpg.add_image(tag, width=380, height=380)
@@ -337,8 +361,7 @@ class IspApp(DemoApp):
         dpg.add_text("", tag="demosaic_caption", wrap=1180)
 
     def _build_spectra_tab(self) -> None:
-        with dpg.plot(label="Illuminant, reflectance and QE (each normalised)",
-                      height=320, width=-1):
+        with dpg.plot(label="Illuminant, reflectance and QE (each normalised)", height=320, width=-1):
             dpg.add_plot_legend()
             dpg.add_plot_axis(dpg.mvXAxis, label="wavelength (nm)", tag="spec_x")
             with dpg.plot_axis(dpg.mvYAxis, label="relative", tag="spec_y"):
@@ -350,8 +373,7 @@ class IspApp(DemoApp):
                     s = dpg.add_line_series([0], [0], label=label, tag=f"qe_{name}")
                     dpg.bind_item_theme(s, self._curve_themes[name])
 
-        with dpg.plot(label="Their product: what each channel actually collects",
-                      height=320, width=-1):
+        with dpg.plot(label="Their product: what each channel actually collects", height=320, width=-1):
             dpg.add_plot_legend()
             dpg.add_plot_axis(dpg.mvXAxis, label="wavelength (nm)", tag="prod_x")
             with dpg.plot_axis(dpg.mvYAxis, label="response", tag="prod_y"):

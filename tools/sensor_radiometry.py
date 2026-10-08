@@ -119,8 +119,13 @@ def image_plane_illuminance_lux(
     N = np.asarray(f_number, dtype=np.float64)
     if np.any(N <= 0):
         raise ValueError("f_number must be positive")
-    return (np.pi / 4.0) * transmission * np.asarray(scene_luminance_cd_m2, dtype=np.float64) \
-        * relative_illumination / (N ** 2)
+    return (
+        (np.pi / 4.0)
+        * transmission
+        * np.asarray(scene_luminance_cd_m2, dtype=np.float64)
+        * relative_illumination
+        / (N**2)
+    )
 
 
 def photons_per_second_per_pixel(
@@ -163,18 +168,16 @@ def electrons_from_exposure(
     onto the pixel's collecting area, through QE, for a length of time.
     """
     lux = image_plane_illuminance_lux(
-        scene_luminance_cd_m2, f_number,
-        transmission=transmission, relative_illumination=relative_illumination)
+        scene_luminance_cd_m2, f_number, transmission=transmission, relative_illumination=relative_illumination
+    )
     area_m2 = (pixel_pitch_um * 1e-6) ** 2 * fill_factor
     rate = photons_per_second_per_pixel(
-        lux, area_m2,
-        luminous_efficacy_lm_per_W=luminous_efficacy_lm_per_W,
-        wavelength_nm=wavelength_nm)
+        lux, area_m2, luminous_efficacy_lm_per_W=luminous_efficacy_lm_per_W, wavelength_nm=wavelength_nm
+    )
     return rate * quantum_efficiency * np.asarray(integration_time_s, dtype=np.float64)
 
 
-def exposure_value(f_number: float | np.ndarray,
-                   integration_time_s: float | np.ndarray) -> float | np.ndarray:
+def exposure_value(f_number: float | np.ndarray, integration_time_s: float | np.ndarray) -> float | np.ndarray:
     """``EV = log2(N^2 / t)``: the camera-side half of the exposure triangle.
 
     Every (N, t) pair on one EV line delivers the same number of electrons, which
@@ -185,11 +188,12 @@ def exposure_value(f_number: float | np.ndarray,
     t = np.asarray(integration_time_s, dtype=np.float64)
     if np.any(N <= 0) or np.any(t <= 0):
         raise ValueError("f_number and integration_time_s must be positive")
-    return np.log2(N ** 2 / t)
+    return np.log2(N**2 / t)
 
 
-def ev100_from_luminance(scene_luminance_cd_m2: float | np.ndarray,
-                         *, calibration_K: float = METER_CALIBRATION_K) -> float | np.ndarray:
+def ev100_from_luminance(
+    scene_luminance_cd_m2: float | np.ndarray, *, calibration_K: float = METER_CALIBRATION_K
+) -> float | np.ndarray:
     """Scene-side EV at ISO 100: ``EV100 = log2(L * 100 / K)``."""
     L = np.asarray(scene_luminance_cd_m2, dtype=np.float64)
     if np.any(L <= 0):
@@ -197,21 +201,20 @@ def ev100_from_luminance(scene_luminance_cd_m2: float | np.ndarray,
     return np.log2(L * 100.0 / calibration_K)
 
 
-def luminance_from_ev100(ev100: float | np.ndarray,
-                         *, calibration_K: float = METER_CALIBRATION_K) -> float | np.ndarray:
+def luminance_from_ev100(
+    ev100: float | np.ndarray, *, calibration_K: float = METER_CALIBRATION_K
+) -> float | np.ndarray:
     """Inverse of :func:`ev100_from_luminance`."""
     return calibration_K * np.power(2.0, np.asarray(ev100, dtype=np.float64)) / 100.0
 
 
-def shutter_for_exposure_value(f_number: float | np.ndarray,
-                               ev: float | np.ndarray) -> float | np.ndarray:
+def shutter_for_exposure_value(f_number: float | np.ndarray, ev: float | np.ndarray) -> float | np.ndarray:
     """Integration time that puts ``f_number`` on the given EV line."""
     N = np.asarray(f_number, dtype=np.float64)
-    return N ** 2 / np.power(2.0, np.asarray(ev, dtype=np.float64))
+    return N**2 / np.power(2.0, np.asarray(ev, dtype=np.float64))
 
 
-def f_number_for_exposure_value(integration_time_s: float | np.ndarray,
-                                ev: float | np.ndarray) -> float | np.ndarray:
+def f_number_for_exposure_value(integration_time_s: float | np.ndarray, ev: float | np.ndarray) -> float | np.ndarray:
     """F-number that puts ``integration_time_s`` on the given EV line."""
     t = np.asarray(integration_time_s, dtype=np.float64)
     return np.sqrt(t * np.power(2.0, np.asarray(ev, dtype=np.float64)))

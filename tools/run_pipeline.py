@@ -53,7 +53,7 @@ def p(repo: Path, v: str) -> Path:
 
 
 def pick_override(overrides: dict, key: str, default):
-    v = overrides.get(key, None)
+    v = overrides.get(key)
     return default if v is None else v
 
 
@@ -69,7 +69,7 @@ def parse_render_pbrt_args(render: dict) -> list[str]:
 
 
 def resolve_illuminant_rel(render: dict) -> str:
-    illuminant = render.get("illuminant", None)
+    illuminant = render.get("illuminant")
     if illuminant is None:
         return DEFAULT_ILLUMINANT_CSV
     illum_s = str(illuminant).strip()
@@ -89,7 +89,7 @@ def resolve_camera_model_path(repo: Path, paths: dict, cli_path: Path | None) ->
     if cli_path is not None:
         return cli_path.resolve()
     model_name = paths.get("camera_model_name")
-    model_cfg = paths.get("camera_model_config", None)
+    model_cfg = paths.get("camera_model_config")
     if model_name and model_cfg:
         raise ValueError("set only one of paths.camera_model_name or paths.camera_model_config")
     if model_name:
@@ -136,8 +136,7 @@ def main() -> None:
     calibration_tier_policy = str(strict_physical_accuracy.get("calibration_tier_policy", "research")).strip().lower()
     if calibration_tier_policy not in ("strict", "semi_strict", "research"):
         raise ValueError(
-            "strict_physical_accuracy.calibration_tier_policy must be one of "
-            '"strict", "semi_strict", "research"'
+            'strict_physical_accuracy.calibration_tier_policy must be one of "strict", "semi_strict", "research"'
         )
     realistic_focus_distance_override = cfg.get("realistic_focus_distance_override", None)
     if realistic_focus_distance_override is not None:
@@ -150,7 +149,9 @@ def main() -> None:
     pbrt_bin = p(repo, paths.get("pbrt", "third_party/pbrt-v4/build/pbrt"))
     noise_tool = p(repo, paths.get("noise_tool", "tools/apply_emva_noise.py"))
     sensor_forward_tool = p(repo, paths.get("sensor_forward_tool", "tools/spectral_sensor_forward.py"))
-    pbrt_exr_electrons_tool = p(repo, paths.get("pbrt_exr_to_electrons_tool", "tools/pbrt_spectral_exr_to_electrons.py"))
+    pbrt_exr_electrons_tool = p(
+        repo, paths.get("pbrt_exr_to_electrons_tool", "tools/pbrt_spectral_exr_to_electrons.py")
+    )
     validate_tool = p(repo, paths.get("validate_tool", "tools/validate_colorchecker.py"))
     validate_demosaic_tool = p(repo, paths.get("validate_demosaic_tool", "tools/validate_demosaic_linear.py"))
     validate_emva_tool = p(repo, paths.get("validate_emva_tool", "tools/validate_emva_model.py"))
@@ -218,10 +219,7 @@ def main() -> None:
     build_cmd.extend(["--cam-dist", str(float(render.get("cam_dist", 4.25)))])
     cam = lens_type_override or str(lens_cfg.get("camera", "perspective")).lower()
     if cam not in ("perspective", "pinhole", "thinlens", "realistic"):
-        raise ValueError(
-            'lens.camera must be one of "perspective", "pinhole", "thinlens", "realistic", '
-            f"got {cam!r}"
-        )
+        raise ValueError(f'lens.camera must be one of "perspective", "pinhole", "thinlens", "realistic", got {cam!r}')
     build_cmd.extend(["--camera", cam])
     if cam == "thinlens":
         thin_fov = pick_override(
@@ -359,7 +357,14 @@ def main() -> None:
             if strict_qe_validation:
                 sf_cmd.append("--strict-qe-validation")
         elif sf_mode == "analytic":
-            sf_cmd = [py, str(sensor_forward_tool), "--repo-root", str(repo), "--camera-model-config", str(camera_model_cfg)]
+            sf_cmd = [
+                py,
+                str(sensor_forward_tool),
+                "--repo-root",
+                str(repo),
+                "--camera-model-config",
+                str(camera_model_cfg),
+            ]
             if sf_target_lux is not None:
                 sf_cmd.extend(["--target-illuminance-lux", str(float(sf_target_lux))])
             if integration_time_override_s is not None:

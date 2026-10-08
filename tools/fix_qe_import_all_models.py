@@ -81,7 +81,7 @@ def write_curve(path: Path, w: np.ndarray, v: np.ndarray) -> None:
 
 def load_model_qe_paths(repo: Path, model_path: Path) -> tuple[Path, Path, Path]:
     cfg = yaml.safe_load(model_path.read_text()) or {}
-    qe = ((cfg.get("sensor") or {}).get("quantum_efficiency") or {})
+    qe = (cfg.get("sensor") or {}).get("quantum_efficiency") or {}
     return (
         (repo / qe["red_csv"]).resolve(),
         (repo / qe["green_csv"]).resolve(),

@@ -309,7 +309,7 @@ def _demosaic_rggb_bilinear(raw: np.ndarray) -> np.ndarray:
 
     # G: at R and B sites (cross neighbors).
     G[0::2, 0::2] = 0.25 * (
-        xp[0:h - 1 : 2, 1 : w + 1 : 2]
+        xp[0 : h - 1 : 2, 1 : w + 1 : 2]
         + xp[2 : h + 1 : 2, 1 : w + 1 : 2]
         + xp[1 : h + 1 : 2, 0:w:2]
         + xp[1 : h + 1 : 2, 2 : w + 1 : 2]
@@ -322,13 +322,13 @@ def _demosaic_rggb_bilinear(raw: np.ndarray) -> np.ndarray:
     )
 
     # B: G on blue row (horizontal B); G on red row (vertical B). Mirrors the R green-site logic.
-    B[1::2, 0::2] = 0.5 * (xp[2 : h + 1 : 2, 0:w - 1 : 2] + xp[2 : h + 1 : 2, 2 : w + 1 : 2])
-    B[0::2, 1::2] = 0.5 * (xp[0:h - 1 : 2, 2 : w + 1 : 2] + xp[2 : h + 1 : 2, 2 : w + 1 : 2])
+    B[1::2, 0::2] = 0.5 * (xp[2 : h + 1 : 2, 0 : w - 1 : 2] + xp[2 : h + 1 : 2, 2 : w + 1 : 2])
+    B[0::2, 1::2] = 0.5 * (xp[0 : h - 1 : 2, 2 : w + 1 : 2] + xp[2 : h + 1 : 2, 2 : w + 1 : 2])
     # B at R pixels (even, even): average four diagonal B neighbors.
     B[0::2, 0::2] = 0.25 * (
-        xp[0:h - 1 : 2, 0:w - 1 : 2]
-        + xp[0:h - 1 : 2, 2 : w + 1 : 2]
-        + xp[2 : h + 1 : 2, 0:w - 1 : 2]
+        xp[0 : h - 1 : 2, 0 : w - 1 : 2]
+        + xp[0 : h - 1 : 2, 2 : w + 1 : 2]
+        + xp[2 : h + 1 : 2, 0 : w - 1 : 2]
         + xp[2 : h + 1 : 2, 2 : w + 1 : 2]
     )
 
@@ -389,42 +389,49 @@ def _demosaic_rggb_malvar(raw: np.ndarray) -> np.ndarray:
         return convolve2d(img, k, mode="same", boundary="symm")
 
     # G interpolation at R and B sites (same kernel for both).
-    K_G = np.array([[0,  0, -1,  0,  0],
-                    [0,  0,  2,  0,  0],
-                    [-1, 2,  4,  2, -1],
-                    [0,  0,  2,  0,  0],
-                    [0,  0, -1,  0,  0]], dtype=np.float64) / 8.0
+    K_G = (
+        np.array(
+            [[0, 0, -1, 0, 0], [0, 0, 2, 0, 0], [-1, 2, 4, 2, -1], [0, 0, 2, 0, 0], [0, 0, -1, 0, 0]], dtype=np.float64
+        )
+        / 8.0
+    )
     G_interp = _conv(raw, K_G)
 
     # R interpolation — three site types.
-    K_R_at_Gr = np.array([[0,   0,  0.5,  0,  0],
-                           [0,  -1,  0,   -1,  0],
-                           [-1,  4,  5,    4, -1],
-                           [0,  -1,  0,   -1,  0],
-                           [0,   0,  0.5,  0,  0]], dtype=np.float64) / 8.0
-    K_R_at_Gb = np.array([[0,   0, -1,   0,  0],
-                           [0,  -1,  4,  -1,  0],
-                           [0.5, 0,  5,   0, 0.5],
-                           [0,  -1,  4,  -1,  0],
-                           [0,   0, -1,   0,  0]], dtype=np.float64) / 8.0
-    K_R_at_B  = np.array([[0,   0, -1.5,  0,  0],
-                           [0,   2,  0,    2,  0],
-                           [-1.5, 0,  6,   0, -1.5],
-                           [0,   2,  0,    2,  0],
-                           [0,   0, -1.5,  0,  0]], dtype=np.float64) / 8.0
+    K_R_at_Gr = (
+        np.array(
+            [[0, 0, 0.5, 0, 0], [0, -1, 0, -1, 0], [-1, 4, 5, 4, -1], [0, -1, 0, -1, 0], [0, 0, 0.5, 0, 0]],
+            dtype=np.float64,
+        )
+        / 8.0
+    )
+    K_R_at_Gb = (
+        np.array(
+            [[0, 0, -1, 0, 0], [0, -1, 4, -1, 0], [0.5, 0, 5, 0, 0.5], [0, -1, 4, -1, 0], [0, 0, -1, 0, 0]],
+            dtype=np.float64,
+        )
+        / 8.0
+    )
+    K_R_at_B = (
+        np.array(
+            [[0, 0, -1.5, 0, 0], [0, 2, 0, 2, 0], [-1.5, 0, 6, 0, -1.5], [0, 2, 0, 2, 0], [0, 0, -1.5, 0, 0]],
+            dtype=np.float64,
+        )
+        / 8.0
+    )
     R_at_Gr = _conv(raw, K_R_at_Gr)
     R_at_Gb = _conv(raw, K_R_at_Gb)
-    R_at_B  = _conv(raw, K_R_at_B)
+    R_at_B = _conv(raw, K_R_at_B)
 
     # B interpolation: same directional emphasis as the mirror-symmetric R kernels.
     # B at Gb (odd,even): nearest B are horizontal (odd,odd)±1 → same kernel as R at Gr.
     # B at Gr (even,odd): nearest B are vertical (odd,odd)±1 row → same kernel as R at Gb.
-    K_B_at_Gb = K_R_at_Gr    # horizontal emphasis — no transpose
-    K_B_at_Gr = K_R_at_Gb    # vertical emphasis  — no transpose
-    K_B_at_R  = K_R_at_B
+    K_B_at_Gb = K_R_at_Gr  # horizontal emphasis — no transpose
+    K_B_at_Gr = K_R_at_Gb  # vertical emphasis  — no transpose
+    K_B_at_R = K_R_at_B
     B_at_Gb = _conv(raw, K_B_at_Gb)
     B_at_Gr = _conv(raw, K_B_at_Gr)
-    B_at_R  = _conv(raw, K_B_at_R)
+    B_at_R = _conv(raw, K_B_at_R)
 
     h, w = raw.shape
     R = np.empty((h, w), dtype=np.float64)
@@ -432,20 +439,20 @@ def _demosaic_rggb_malvar(raw: np.ndarray) -> np.ndarray:
     B = np.empty((h, w), dtype=np.float64)
 
     # RGGB: R at (even,even), Gr at (even,odd), Gb at (odd,even), B at (odd,odd)
-    R[0::2, 0::2] = raw[0::2, 0::2]          # R pixels: identity
-    R[0::2, 1::2] = R_at_Gr[0::2, 1::2]      # Gr sites
-    R[1::2, 0::2] = R_at_Gb[1::2, 0::2]      # Gb sites
-    R[1::2, 1::2] = R_at_B[1::2, 1::2]       # B sites
+    R[0::2, 0::2] = raw[0::2, 0::2]  # R pixels: identity
+    R[0::2, 1::2] = R_at_Gr[0::2, 1::2]  # Gr sites
+    R[1::2, 0::2] = R_at_Gb[1::2, 0::2]  # Gb sites
+    R[1::2, 1::2] = R_at_B[1::2, 1::2]  # B sites
 
-    G[0::2, 0::2] = G_interp[0::2, 0::2]     # R sites
-    G[0::2, 1::2] = raw[0::2, 1::2]           # Gr pixels: identity
-    G[1::2, 0::2] = raw[1::2, 0::2]           # Gb pixels: identity
-    G[1::2, 1::2] = G_interp[1::2, 1::2]     # B sites
+    G[0::2, 0::2] = G_interp[0::2, 0::2]  # R sites
+    G[0::2, 1::2] = raw[0::2, 1::2]  # Gr pixels: identity
+    G[1::2, 0::2] = raw[1::2, 0::2]  # Gb pixels: identity
+    G[1::2, 1::2] = G_interp[1::2, 1::2]  # B sites
 
-    B[0::2, 0::2] = B_at_R[0::2, 0::2]       # R sites
-    B[0::2, 1::2] = B_at_Gr[0::2, 1::2]      # Gr sites
-    B[1::2, 0::2] = B_at_Gb[1::2, 0::2]      # Gb sites
-    B[1::2, 1::2] = raw[1::2, 1::2]           # B pixels: identity
+    B[0::2, 0::2] = B_at_R[0::2, 0::2]  # R sites
+    B[0::2, 1::2] = B_at_Gr[0::2, 1::2]  # Gr sites
+    B[1::2, 0::2] = B_at_Gb[1::2, 0::2]  # Gb sites
+    B[1::2, 1::2] = raw[1::2, 1::2]  # B pixels: identity
 
     out = np.stack([R, G, B], axis=2)
     return out[:h0, :w0, :].astype(np.float32)
@@ -609,8 +616,9 @@ def _spatial_shape(arr: np.ndarray) -> tuple[int, int]:
     raise ValueError(f"unsupported signal shape for defect model: {arr.shape}")
 
 
-def apply_blooming(shot_e: np.ndarray, full_well_e: float,
-                   spread_fraction: float = 0.5, max_iters: int = 20) -> np.ndarray:
+def apply_blooming(
+    shot_e: np.ndarray, full_well_e: float, spread_fraction: float = 0.5, max_iters: int = 20
+) -> np.ndarray:
     """Simulate charge blooming: excess electrons overflow to adjacent pixels.
 
     When a photodiode's electron count exceeds ``full_well_e``, the surplus
@@ -628,9 +636,7 @@ def apply_blooming(shot_e: np.ndarray, full_well_e: float,
         raise ValueError("apply_blooming requires a 2-D mono electron array (post-Bayer sampling)")
 
     result = shot_e.astype(np.float64)
-    _kernel = np.array([[0.0, 0.25, 0.0],
-                         [0.25, 0.0, 0.25],
-                         [0.0, 0.25, 0.0]], dtype=np.float64)
+    _kernel = np.array([[0.0, 0.25, 0.0], [0.25, 0.0, 0.25], [0.0, 0.25, 0.0]], dtype=np.float64)
 
     for _ in range(max_iters):
         overflow = np.maximum(result - full_well_e, 0.0)
@@ -643,8 +649,7 @@ def apply_blooming(shot_e: np.ndarray, full_well_e: float,
     return np.minimum(result, full_well_e).astype(np.float32)
 
 
-def iso_scaled_conversion(K_e_per_DN: float, full_well_e: float,
-                          iso_gain_factor: float) -> tuple[float, float]:
+def iso_scaled_conversion(K_e_per_DN: float, full_well_e: float, iso_gain_factor: float) -> tuple[float, float]:
     """Scale the ADC path by an ISO amplifier gain.
 
     ISO is gain, not sensitivity: the analog amplifier sits after the photodiode,
@@ -659,8 +664,7 @@ def iso_scaled_conversion(K_e_per_DN: float, full_well_e: float,
     return float(K_e_per_DN) / iso_gain_factor, float(full_well_e) / iso_gain_factor
 
 
-def amplifier_read_noise_e(sigma_d_e: float, sigma_amp_e: float,
-                           iso_gain_factor: float) -> float:
+def amplifier_read_noise_e(sigma_d_e: float, sigma_amp_e: float, iso_gain_factor: float) -> float:
     """Read noise after the ISO amplifier contributes its own share.
 
     ``sigma_amp_e`` is the amplifier's input-referred floor at unit gain; at gain
@@ -668,12 +672,18 @@ def amplifier_read_noise_e(sigma_d_e: float, sigma_amp_e: float,
     pushing ISO does not buy signal-to-noise indefinitely.
     """
     if sigma_amp_e > 0.0 and iso_gain_factor > 1.0:
-        return float(np.sqrt(sigma_d_e ** 2 + (sigma_amp_e * iso_gain_factor) ** 2))
+        return float(np.sqrt(sigma_d_e**2 + (sigma_amp_e * iso_gain_factor) ** 2))
     return float(sigma_d_e)
 
 
-def ktc_sigma_e(*, temperature_c: float, K_e_per_DN: float, bit_depth: int,
-                node_capacitance_fF: float | None = None, vref_V: float = 1.8) -> float:
+def ktc_sigma_e(
+    *,
+    temperature_c: float,
+    K_e_per_DN: float,
+    bit_depth: int,
+    node_capacitance_fF: float | None = None,
+    vref_V: float = 1.8,
+) -> float:
     """kTC reset noise at the sense node, in electrons: ``sqrt(k*T*C)/q``.
 
     Only meaningful for sensors without correlated double sampling; CDS cancels
@@ -681,8 +691,8 @@ def ktc_sigma_e(*, temperature_c: float, K_e_per_DN: float, bit_depth: int,
     node capacitance is not measured directly it is derived from the conversion
     gain as ``C = q * K * (2^bits - 1) / V_ref``.
     """
-    K_B_J = 1.380649e-23        # Boltzmann constant [J/K]
-    Q_E = 1.602176634e-19       # elementary charge [C]
+    K_B_J = 1.380649e-23  # Boltzmann constant [J/K]
+    Q_E = 1.602176634e-19  # elementary charge [C]
     T_K = temperature_c + 273.15
     if node_capacitance_fF is not None:
         C = float(node_capacitance_fF) * 1e-15
@@ -691,8 +701,9 @@ def ktc_sigma_e(*, temperature_c: float, K_e_per_DN: float, bit_depth: int,
     return float(np.sqrt(K_B_J * T_K * C) / Q_E)
 
 
-def row_column_fpn_offsets(shape: tuple[int, ...], row_std_e: float, col_std_e: float,
-                           rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray]:
+def row_column_fpn_offsets(
+    shape: tuple[int, ...], row_std_e: float, col_std_e: float, rng: np.random.Generator
+) -> tuple[np.ndarray, np.ndarray]:
     """Row and column offset patterns in electrons, broadcastable against ``shape``.
 
     Rows are drawn before columns; callers sharing a generator depend on that
@@ -721,15 +732,13 @@ def flicker_row_offsets(n_rows: int, std_e: float, rng: np.random.Generator) -> 
     freqs = np.fft.rfftfreq(fft_len)
     freqs[0] = freqs[1]  # avoid the DC singularity; the DC offset cancels in CDS
     weights = (1.0 / np.sqrt(freqs)).astype(np.float64)
-    white = (rng.normal(0.0, 1.0, size=fft_len // 2 + 1)
-             + 1j * rng.normal(0.0, 1.0, size=fft_len // 2 + 1))
+    white = rng.normal(0.0, 1.0, size=fft_len // 2 + 1) + 1j * rng.normal(0.0, 1.0, size=fft_len // 2 + 1)
     pink = np.fft.irfft(white * weights)[:n_rows]
     std = float(np.std(pink)) + 1e-12
     return (pink * (std_e / std)).astype(np.float32)
 
 
-def apply_adc_inl(dn: np.ndarray, *, black_dn: float, max_dn: float,
-                  quadratic_fraction: float) -> np.ndarray:
+def apply_adc_inl(dn: np.ndarray, *, black_dn: float, max_dn: float, quadratic_fraction: float) -> np.ndarray:
     """Integral non-linearity as a quadratic bow across the ADC range.
 
     The deviation peaks mid-scale and vanishes at both endpoints, so INL shows up
@@ -801,7 +810,12 @@ def apply_hot_stuck_pixel_model(
         stuck_high_mask = np.asarray(data["stuck_high_mask"], dtype=bool)
         stuck_low_mask = np.asarray(data["stuck_low_mask"], dtype=bool)
         hot_add = np.asarray(data["hot_add_e"], dtype=np.float32)
-        if hot_mask.shape != (h, w) or stuck_high_mask.shape != (h, w) or stuck_low_mask.shape != (h, w) or hot_add.shape != (h, w):
+        if (
+            hot_mask.shape != (h, w)
+            or stuck_high_mask.shape != (h, w)
+            or stuck_low_mask.shape != (h, w)
+            or hot_add.shape != (h, w)
+        ):
             raise ValueError(
                 f"persistent defect map shape mismatch: expected {(h, w)}, "
                 f"got hot={hot_mask.shape}, high={stuck_high_mask.shape}, low={stuck_low_mask.shape}, add={hot_add.shape}"
@@ -1076,10 +1090,7 @@ def main() -> None:
     qe_vec = np.array(qe_means, dtype=np.float32)
     qe_max = float(np.max(qe_vec))
     if not np.isfinite(qe_max) or qe_max <= 0.0:
-        raise ValueError(
-            "computed QE response is non-positive; check QE/IRCF curves in camera model "
-            f"{cfg_path}"
-        )
+        raise ValueError(f"computed QE response is non-positive; check QE/IRCF curves in camera model {cfg_path}")
     qe_vec /= qe_max
 
     if "full_well_e" not in adc:
@@ -1153,9 +1164,7 @@ def main() -> None:
     if _spatial_seed_cfg is not None:
         _spatial_seed = int(_spatial_seed_cfg)
     else:
-        _spatial_seed = (
-            int(hashlib.sha256(str(cfg_path).encode()).hexdigest()[:16], 16) & 0x7FFFFFFF
-        )
+        _spatial_seed = int(hashlib.sha256(str(cfg_path).encode()).hexdigest()[:16], 16) & 0x7FFFFFFF
     spatial_rng = np.random.default_rng(_spatial_seed)
 
     adc_inl_quad_fraction = float(adc.get("inl_quadratic_fraction", 0.0))
@@ -1170,9 +1179,7 @@ def main() -> None:
         elif _cs in ("soft", "false", "no", "off", "0", "none", "disabled"):
             adc_clipping = False
         else:
-            raise ValueError(
-                f"adc.clipping must be a boolean or one of 'hard'/'soft', got {_clipping_raw!r}"
-            )
+            raise ValueError(f"adc.clipping must be a boolean or one of 'hard'/'soft', got {_clipping_raw!r}")
     else:
         adc_clipping = bool(_clipping_raw)
     defect_cfg = emva.get("defect_pixels", {}) or {}
@@ -1331,11 +1338,10 @@ def main() -> None:
         # The T^1.5 pre-exponential (intrinsic carrier concentration ∝ T^1.5) is
         # significant: at 60 °C vs 20 °C it adds ~16% on top of the exponential.
         _K_B_EV = 8.617333262e-5
-        _T_K  = dark_temp_c + 273.15
+        _T_K = dark_temp_c + 273.15
         _T0_K = dark_ref_temp_c + 273.15
         dark_temp_scale = float(
-            (_T_K / _T0_K) ** 1.5
-            * np.exp((dark_activation_energy_eV / _K_B_EV) * (1.0 / _T0_K - 1.0 / _T_K))
+            (_T_K / _T0_K) ** 1.5 * np.exp((dark_activation_energy_eV / _K_B_EV) * (1.0 / _T0_K - 1.0 / _T_K))
         )
     else:
         dark_temp_scale = 2.0 ** ((dark_temp_c - dark_ref_temp_c) / max(1e-6, dark_doubling_c))
@@ -1373,6 +1379,7 @@ def main() -> None:
     # Enabled only when prnu_lf_std_fraction > 0 in the emva config.
     if prnu_lf_std > 0.0 and prnu_lf_sigma_px > 0.0:
         from scipy.ndimage import gaussian_filter as _gf  # noqa: PLC0415
+
         _lf_raw = spatial_rng.normal(0.0, prnu_lf_std, size=signal_e.shape[:2]).astype(np.float32)
         _lf_smooth = _gf(_lf_raw, sigma=prnu_lf_sigma_px, mode="reflect").astype(np.float32)
         if signal_e.ndim == 2:
@@ -1400,8 +1407,8 @@ def main() -> None:
     if dsnu_rate_std_fraction > 0.0 and dark_current_e_per_s > 0.0:
         # Preferred path: per-pixel rates drawn from lognormal, DSNU = (rate_i − mean_rate) × t_int.
         _mean_rate = dark_current_e_per_s * dark_temp_scale  # e/s, temperature-corrected
-        _sigma_ln_rate = float(np.sqrt(np.log1p(dsnu_rate_std_fraction ** 2)))
-        _mu_ln_rate = np.log(_mean_rate) - 0.5 * _sigma_ln_rate ** 2
+        _sigma_ln_rate = float(np.sqrt(np.log1p(dsnu_rate_std_fraction**2)))
+        _mu_ln_rate = np.log(_mean_rate) - 0.5 * _sigma_ln_rate**2
         _sp_shape = signal_e.shape if signal_e.ndim == 2 else signal_e.shape[:2]
         _rate_map = spatial_rng.lognormal(_mu_ln_rate, _sigma_ln_rate, size=_sp_shape).astype(np.float64)
         _dsnu_e_map = (_rate_map - _mean_rate) * t_int_s  # scale by t_int
@@ -1411,8 +1418,8 @@ def main() -> None:
             dsnu_map = _dsnu_e_map[:, :, None].astype(np.float32)
     elif dark_mean_e > 1e-9 and dsnu_std_e > 0.0:
         _v_ratio = dsnu_std_e / dark_mean_e
-        _sigma_ln = float(np.sqrt(np.log1p(_v_ratio ** 2)))
-        _mu_ln = np.log(dark_mean_e) - 0.5 * _sigma_ln ** 2
+        _sigma_ln = float(np.sqrt(np.log1p(_v_ratio**2)))
+        _mu_ln = np.log(dark_mean_e) - 0.5 * _sigma_ln**2
         if signal_e.ndim == 2:
             _dsnu_abs = spatial_rng.lognormal(_mu_ln, _sigma_ln, size=signal_e.shape).astype(np.float32)
             dsnu_map = (_dsnu_abs - dark_mean_e).astype(np.float32)
@@ -1433,11 +1440,11 @@ def main() -> None:
     # circuit — the same pattern every frame from the same camera unit.  Drawn from
     # spatial_rng (fixed seed) after DSNU so PRNU/DSNU patterns are unaffected.
     row_fpn_fixed, col_fpn_fixed = row_column_fpn_offsets(
-        signal_e.shape, row_fpn_fixed_std_e, col_fpn_fixed_std_e, spatial_rng)
+        signal_e.shape, row_fpn_fixed_std_e, col_fpn_fixed_std_e, spatial_rng
+    )
 
     # Row/column readout amplifier noise: temporal banding that changes every frame.
-    row_fpn, col_fpn = row_column_fpn_offsets(
-        signal_e.shape, row_fpn_std_e, col_fpn_std_e, rng)
+    row_fpn, col_fpn = row_column_fpn_offsets(signal_e.shape, row_fpn_std_e, col_fpn_std_e, rng)
 
     # ---- 1/f (flicker) noise: pink-spectrum row offsets ----
     # Drawn from the temporal rng, so it differs every frame.
@@ -1470,9 +1477,7 @@ def main() -> None:
     # Only modelled for the mono Bayer path (2-D shot_e); the multi-channel
     # analytic path treats each channel independently and has no inter-pixel overflow.
     if bloom_enabled and shot_e.ndim == 2:
-        shot_e = apply_blooming(shot_e, full_well_e,
-                                spread_fraction=bloom_spread,
-                                max_iters=bloom_max_iters)
+        shot_e = apply_blooming(shot_e, full_well_e, spread_fraction=bloom_spread, max_iters=bloom_max_iters)
 
     # ---- kTC reset noise (sense-node sampling uncertainty) ----
     # Only relevant for sensors without correlated double sampling (CDS).
@@ -1484,8 +1489,7 @@ def main() -> None:
             temperature_c=dark_temp_c,
             K_e_per_DN=K_e_per_DN,
             bit_depth=bit_depth,
-            node_capacitance_fF=(float(ktc_cfg["node_capacitance_fF"])
-                                 if "node_capacitance_fF" in ktc_cfg else None),
+            node_capacitance_fF=(float(ktc_cfg["node_capacitance_fF"]) if "node_capacitance_fF" in ktc_cfg else None),
             vref_V=float(ktc_cfg.get("vref_V", 1.8)),
         )
 
@@ -1505,13 +1509,11 @@ def main() -> None:
     else:
         dn_clean = np.clip(signal_e / K_e_per_DN + black_dn, 0.0, None)
         dn_noisy = np.clip(total_e / K_e_per_DN + black_dn, 0.0, None)
-    dn_noisy = apply_adc_inl(dn_noisy, black_dn=black_dn, max_dn=max_dn,
-                             quadratic_fraction=adc_inl_quad_fraction)
+    dn_noisy = apply_adc_inl(dn_noisy, black_dn=black_dn, max_dn=max_dn, quadratic_fraction=adc_inl_quad_fraction)
     if adc_dnl_std_lsb > 0.0:
         # The table comes from spatial_rng (seeded per camera unit) because DNL is a
         # property of the converter, identical on every frame it ever produces.
-        dn_noisy = apply_adc_dnl(
-            dn_noisy, adc_dnl_table(max_dn, adc_dnl_std_lsb, spatial_rng), max_dn)
+        dn_noisy = apply_adc_dnl(dn_noisy, adc_dnl_table(max_dn, adc_dnl_std_lsb, spatial_rng), max_dn)
 
     if bayer_on:
         raw_u16 = np.rint(dn_noisy).astype(np.uint16)
@@ -1532,8 +1534,7 @@ def main() -> None:
             print(f"warning: preview CCM reference unavailable from {exr_in}: {exc}", file=sys.stderr)
     if wb_enabled and not bayer_on:
         _wb_src = np.clip(dn_clean - black_dn, 0.0, None)
-        wb_gains = (white_patch_gains(_wb_src) if wb_method == "white_patch"
-                    else gray_world_gains(_wb_src))
+        wb_gains = white_patch_gains(_wb_src) if wb_method == "white_patch" else gray_world_gains(_wb_src)
         dn_clean = apply_preview_wb_dn(dn_clean, black_dn, wb_gains)
         dn_noisy = apply_preview_wb_dn(dn_noisy, black_dn, wb_gains)
     if ccm_enabled and not bayer_on and ref_linear is not None and ref_linear.shape == dn_clean.shape:
@@ -1567,8 +1568,7 @@ def main() -> None:
         dn_noisy_rgb = _demosaic_fn(dn_noisy, bayer_pat)
         if wb_enabled:
             _wb_src = np.clip(dn_clean_rgb - black_dn, 0.0, None)
-            wb_gains = (white_patch_gains(_wb_src) if wb_method == "white_patch"
-                        else gray_world_gains(_wb_src))
+            wb_gains = white_patch_gains(_wb_src) if wb_method == "white_patch" else gray_world_gains(_wb_src)
             dn_clean_rgb = apply_preview_wb_dn(dn_clean_rgb, black_dn, wb_gains)
             dn_noisy_rgb = apply_preview_wb_dn(dn_noisy_rgb, black_dn, wb_gains)
         if ccm_enabled and ref_linear is not None and ref_linear.shape == dn_clean_rgb.shape:

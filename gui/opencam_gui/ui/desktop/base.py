@@ -14,7 +14,8 @@ Subclasses must implement :meth:`init_state`, :meth:`apply_scenario_state`,
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 import dearpygui.dearpygui as dpg
 
@@ -213,10 +214,9 @@ class DemoApp:
         self.build_footer()
 
     def _bind_global_theme(self) -> None:
-        with dpg.theme() as global_theme:
-            with dpg.theme_component(dpg.mvAll):
-                dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, 4)
-                dpg.add_theme_style(dpg.mvStyleVar_WindowRounding, 6)
+        with dpg.theme() as global_theme, dpg.theme_component(dpg.mvAll):
+            dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, 4)
+            dpg.add_theme_style(dpg.mvStyleVar_WindowRounding, 6)
         dpg.bind_theme(global_theme)
 
     # --- lifecycle ---------------------------------------------------
@@ -248,9 +248,7 @@ class DemoApp:
 
     def run(self) -> None:
         dpg.create_context()
-        dpg.create_viewport(
-            title=self.viewport_title, width=self.viewport_width, height=self.viewport_height
-        )
+        dpg.create_viewport(title=self.viewport_title, width=self.viewport_width, height=self.viewport_height)
         self.build_ui()
         dpg.setup_dearpygui()
         dpg.show_viewport()

@@ -88,13 +88,13 @@ class Chart:
     """A ColorChecker rendered two ways: as the camera sees it, and as the eye does."""
 
     wavelength_nm: np.ndarray
-    reflectance: np.ndarray          # (24, K)
-    illuminant: np.ndarray           # (K,)
+    reflectance: np.ndarray  # (24, K)
+    illuminant: np.ndarray  # (K,)
     illuminant_id: str
-    qe_rgb: np.ndarray               # (3, K)
-    camera_rgb: np.ndarray           # (24, 3) raw sensor response
+    qe_rgb: np.ndarray  # (3, K)
+    camera_rgb: np.ndarray  # (24, 3) raw sensor response
     reference_srgb_linear: np.ndarray  # (24, 3) ground truth, sRGB primaries
-    reference_xyz: np.ndarray        # (24, 3)
+    reference_xyz: np.ndarray  # (24, 3)
     names: tuple[str, ...]
     white_point_xyz: np.ndarray
     luther_error: float
@@ -147,8 +147,7 @@ def load_chart(
     )
 
 
-def chart_image(values: np.ndarray, *, patch_px: int = PATCH_PX,
-                gap_px: int = 3) -> np.ndarray:
+def chart_image(values: np.ndarray, *, patch_px: int = PATCH_PX, gap_px: int = 3) -> np.ndarray:
     """Lay 24 per-patch values out as the familiar 6x4 chart image."""
     v = np.asarray(values, dtype=np.float64).reshape(-1, 3)
     h = CHART_ROWS * patch_px + (CHART_ROWS + 1) * gap_px
@@ -158,7 +157,7 @@ def chart_image(values: np.ndarray, *, patch_px: int = PATCH_PX,
         r, c = divmod(i, CHART_COLS)
         y = gap_px + r * (patch_px + gap_px)
         x = gap_px + c * (patch_px + gap_px)
-        img[y:y + patch_px, x:x + patch_px] = v[i]
+        img[y : y + patch_px, x : x + patch_px] = v[i]
     return img
 
 
@@ -192,7 +191,7 @@ class Stage:
     id: str
     label: str
     note: str
-    image: np.ndarray      # HxWx3 linear, or HxWx3 display-encoded for the srgb stage
+    image: np.ndarray  # HxWx3 linear, or HxWx3 display-encoded for the srgb stage
     applied: bool
 
 
@@ -218,22 +217,28 @@ def run_isp(chart: Chart, cfg: IspConfig) -> IspResult:
     linear = chart_image(chart.camera_rgb) * cfg.exposure_scale
     reference = chart_image(chart.reference_srgb_linear)
 
-    stages: list[Stage] = [Stage(
-        id="scene",
-        label="Sensor linear RGB",
-        note=("Spectral reflectance times the illuminant, integrated against the QE curves. "
-              "This is the raw response, before the CFA throws two thirds of it away."),
-        image=linear.copy(),
-        applied=True,
-    )]
+    stages: list[Stage] = [
+        Stage(
+            id="scene",
+            label="Sensor linear RGB",
+            note=(
+                "Spectral reflectance times the illuminant, integrated against the QE curves. "
+                "This is the raw response, before the CFA throws two thirds of it away."
+            ),
+            image=linear.copy(),
+            applied=True,
+        )
+    ]
 
     # --- mosaic ---------------------------------------------------
     if "mosaic" in cfg.enabled:
         cfa = noise.bayer_sample_rgb(linear.astype(np.float32), cfg.bayer_pattern)
         current = np.repeat(np.asarray(cfa, dtype=np.float64)[:, :, None], 3, axis=2)
-        note = (f"{cfg.bayer_pattern} colour filter array: each pixel now records one "
-                "channel only, so two thirds of the colour information is gone and has "
-                "to be guessed back.")
+        note = (
+            f"{cfg.bayer_pattern} colour filter array: each pixel now records one "
+            "channel only, so two thirds of the colour information is gone and has "
+            "to be guessed back."
+        )
         mosaic_applied = True
     else:
         cfa = None
@@ -245,14 +250,18 @@ def run_isp(chart: Chart, cfg: IspConfig) -> IspResult:
     # --- demosaic -------------------------------------------------
     if "demosaic" in cfg.enabled and cfa is not None:
         fn = noise.malvar_demosaic if cfg.demosaic_method == "malvar" else noise.bilinear_demosaic
-        current = np.asarray(fn(np.asarray(cfa, dtype=np.float32), cfg.bayer_pattern),
-                             dtype=np.float64)
-        note = (f"{cfg.demosaic_method.capitalize()} interpolation reconstructs the two missing "
-                "channels at every pixel. Errors here land on edges, as colour fringes.")
+        current = np.asarray(fn(np.asarray(cfa, dtype=np.float32), cfg.bayer_pattern), dtype=np.float64)
+        note = (
+            f"{cfg.demosaic_method.capitalize()} interpolation reconstructs the two missing "
+            "channels at every pixel. Errors here land on edges, as colour fringes."
+        )
         applied = True
     else:
-        note = ("Skipped: without demosaic the mosaic stays as a grey pattern."
-                if cfa is not None else "Nothing to demosaic -- the mosaic stage was skipped.")
+        note = (
+            "Skipped: without demosaic the mosaic stays as a grey pattern."
+            if cfa is not None
+            else "Nothing to demosaic -- the mosaic stage was skipped."
+        )
         applied = False
     stages.append(Stage("demosaic", STAGE_LABELS["demosaic"], note, current.copy(), applied))
 
@@ -262,19 +271,18 @@ def run_isp(chart: Chart, cfg: IspConfig) -> IspResult:
         # Estimate on the patches only. The gaps between them are black, and
         # letting them into a gray-world average biases the estimate.
         src = current[mask].reshape(1, -1, 3).astype(np.float32)
-        gains = (noise.white_patch_gains(src) if cfg.wb_method == "white_patch"
-                 else noise.gray_world_gains(src))
-        current = np.asarray(noise.apply_rgb_gains(current.astype(np.float32), gains),
-                             dtype=np.float64)
-        note = (f"{cfg.wb_method.replace('_', ' ').capitalize()} gains "
-                f"R {gains[0]:.2f}, G {gains[1]:.2f}, B {gains[2]:.2f}. "
-                "This removes the illuminant's overall cast but cannot fix its shape.")
+        gains = noise.white_patch_gains(src) if cfg.wb_method == "white_patch" else noise.gray_world_gains(src)
+        current = np.asarray(noise.apply_rgb_gains(current.astype(np.float32), gains), dtype=np.float64)
+        note = (
+            f"{cfg.wb_method.replace('_', ' ').capitalize()} gains "
+            f"R {gains[0]:.2f}, G {gains[1]:.2f}, B {gains[2]:.2f}. "
+            "This removes the illuminant's overall cast but cannot fix its shape."
+        )
         applied = True
     else:
         note = "Skipped: the image keeps the illuminant's colour cast."
         applied = False
-    stages.append(Stage("white_balance", STAGE_LABELS["white_balance"], note,
-                        current.copy(), applied))
+    stages.append(Stage("white_balance", STAGE_LABELS["white_balance"], note, current.copy(), applied))
 
     # --- ccm ------------------------------------------------------
     ccm = np.eye(3, dtype=np.float32)
@@ -288,12 +296,14 @@ def run_isp(chart: Chart, cfg: IspConfig) -> IspResult:
         scale = _neutral_exposure_scale(src, chart.reference_srgb_linear)
         ccm = noise.fit_ccm_lstsq(
             (src * scale).astype(np.float32).reshape(1, -1, 3),
-            chart.reference_srgb_linear.astype(np.float32).reshape(1, -1, 3))
-        current = np.asarray(
-            noise.apply_ccm((current * scale).astype(np.float32), ccm), dtype=np.float64)
-        note = ("A 3x3 fitted against the colorimetric reference. It corrects what a linear "
-                "map can correct; what is left over is the camera failing the Luther "
-                "condition, and no 3x3 will remove it.")
+            chart.reference_srgb_linear.astype(np.float32).reshape(1, -1, 3),
+        )
+        current = np.asarray(noise.apply_ccm((current * scale).astype(np.float32), ccm), dtype=np.float64)
+        note = (
+            "A 3x3 fitted against the colorimetric reference. It corrects what a linear "
+            "map can correct; what is left over is the camera failing the Luther "
+            "condition, and no 3x3 will remove it."
+        )
         applied = True
     else:
         note = "Skipped: raw camera RGB is not a colour space, and it shows."
@@ -303,10 +313,11 @@ def run_isp(chart: Chart, cfg: IspConfig) -> IspResult:
     # --- srgb encode ----------------------------------------------
     final_linear = current.copy()
     if "srgb" in cfg.enabled:
-        display = np.asarray(
-            noise.linear_to_srgb(np.clip(current, 0.0, 1.0).astype(np.float32)), dtype=np.float64)
-        note = ("The sRGB transfer function. Non-linear on purpose: it spends code values "
-                "where the eye can tell them apart.")
+        display = np.asarray(noise.linear_to_srgb(np.clip(current, 0.0, 1.0).astype(np.float32)), dtype=np.float64)
+        note = (
+            "The sRGB transfer function. Non-linear on purpose: it spends code values "
+            "where the eye can tell them apart."
+        )
         applied = True
     else:
         display = np.clip(current, 0.0, 1.0)
@@ -315,7 +326,8 @@ def run_isp(chart: Chart, cfg: IspConfig) -> IspResult:
     stages.append(Stage("srgb", STAGE_LABELS["srgb"], note, display.copy(), applied))
 
     reference_display = np.asarray(
-        _noise().linear_to_srgb(np.clip(reference, 0.0, 1.0).astype(np.float32)), dtype=np.float64)
+        _noise().linear_to_srgb(np.clip(reference, 0.0, 1.0).astype(np.float32)), dtype=np.float64
+    )
 
     return IspResult(
         stages=tuple(stages),
@@ -388,18 +400,21 @@ def _zipper_target(size: int) -> np.ndarray:
     u, v = x / (size - 1), y / (size - 1)
 
     # Converging bars: period shrinks toward the right edge, down to 2 px.
-    phase = 2.0 * np.pi * (u ** 2) * size / 2.0
+    phase = 2.0 * np.pi * (u**2) * size / 2.0
     luminance = 0.5 + 0.38 * np.sign(np.sin(phase))
 
     # A diagonal luminance step across the lower half.
     luminance = np.where((v > 0.55) & (u + v > 1.1), 0.12, luminance)
 
     # Slowly varying hue, normalised so it carries chroma and not brightness.
-    hue = np.stack([
-        0.85 + 0.30 * u,
-        0.90 + 0.10 * v,
-        1.05 - 0.25 * u,
-    ], axis=2)
+    hue = np.stack(
+        [
+            0.85 + 0.30 * u,
+            0.90 + 0.10 * v,
+            1.05 - 0.25 * u,
+        ],
+        axis=2,
+    )
     hue = hue / hue.mean(axis=2, keepdims=True)
 
     return np.clip(luminance[:, :, None] * hue, 0.0, 1.0)
@@ -479,7 +494,7 @@ def _patch_means(img: np.ndarray, *, patch_px: int = PATCH_PX, gap_px: int = 3) 
         r, c = divmod(i, CHART_COLS)
         y = gap_px + r * (patch_px + gap_px)
         x = gap_px + c * (patch_px + gap_px)
-        block = img[y + inset:y + patch_px - inset, x + inset:x + patch_px - inset]
+        block = img[y + inset : y + patch_px - inset, x + inset : x + patch_px - inset]
         out[i] = block.reshape(-1, 3).mean(axis=0)
     return out
 
@@ -517,8 +532,7 @@ def spectral_overlay(chart: Chart, patch_index: int = 21) -> SpectralOverlay:
         qe_rgb=chart.qe_rgb,
         product_rgb=product,
         patch_name=chart.names[idx],
-        cct_k=float(cs.correlated_colour_temperature(
-            cs.xy_chromaticity(chart.white_point_xyz[None, :])[0])),
+        cct_k=float(cs.correlated_colour_temperature(cs.xy_chromaticity(chart.white_point_xyz[None, :])[0])),
     )
 
 

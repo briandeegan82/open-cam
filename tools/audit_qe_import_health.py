@@ -79,7 +79,7 @@ def summarize_curve(path: Path) -> CurveInfo:
 
 def model_qe_paths(repo: Path, model_path: Path) -> tuple[Path, Path, Path]:
     cfg = yaml.safe_load(model_path.read_text()) or {}
-    qe = ((cfg.get("sensor") or {}).get("quantum_efficiency") or {})
+    qe = (cfg.get("sensor") or {}).get("quantum_efficiency") or {}
     return (
         (repo / qe["red_csv"]).resolve(),
         (repo / qe["green_csv"]).resolve(),
@@ -144,8 +144,8 @@ def main() -> None:
     print("model,axis_issue,rb_swap,red_peak_nm,green_peak_nm,blue_peak_nm")
     for r in rows:
         print(
-            f'{r["model"]},{r["normalized_axis"]},{r["rb_inversion"]},'
-            f'{r["red_peak_nm"]},{r["green_peak_nm"]},{r["blue_peak_nm"]}'
+            f"{r['model']},{r['normalized_axis']},{r['rb_inversion']},"
+            f"{r['red_peak_nm']},{r['green_peak_nm']},{r['blue_peak_nm']}"
         )
 
     if args.csv_out is not None:

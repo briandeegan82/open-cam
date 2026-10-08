@@ -34,7 +34,7 @@ class TestCameraEquation(unittest.TestCase):
 
     def test_matches_the_closed_form(self):
         got = sr.image_plane_illuminance_lux(500.0, 2.8, transmission=0.85)
-        want = (math.pi / 4.0) * 0.85 * 500.0 / (2.8 ** 2)
+        want = (math.pi / 4.0) * 0.85 * 500.0 / (2.8**2)
         self.assertAlmostEqual(float(got), want, places=9)
 
     def test_vignetting_scales_illuminance_directly(self):
@@ -50,10 +50,8 @@ class TestCameraEquation(unittest.TestCase):
 class TestPhotonsAndElectrons(unittest.TestCase):
     def test_photon_rate_is_linear_in_illuminance_and_area(self):
         base = sr.photons_per_second_per_pixel(100.0, 1e-11)
-        self.assertAlmostEqual(
-            float(sr.photons_per_second_per_pixel(200.0, 1e-11)), 2.0 * float(base), places=6)
-        self.assertAlmostEqual(
-            float(sr.photons_per_second_per_pixel(100.0, 2e-11)), 2.0 * float(base), places=6)
+        self.assertAlmostEqual(float(sr.photons_per_second_per_pixel(200.0, 1e-11)), 2.0 * float(base), places=6)
+        self.assertAlmostEqual(float(sr.photons_per_second_per_pixel(100.0, 2e-11)), 2.0 * float(base), places=6)
 
     def test_bluer_photons_are_more_energetic_so_fewer_arrive(self):
         red = sr.photons_per_second_per_pixel(100.0, 1e-11, wavelength_nm=650.0)
@@ -66,15 +64,12 @@ class TestPhotonsAndElectrons(unittest.TestCase):
         doubled = sr.electrons_from_exposure(500.0, 4.0, 0.02, **PIXEL)
         self.assertAlmostEqual(float(doubled), 2.0 * float(base), places=6)
 
-        half_qe = sr.electrons_from_exposure(
-            500.0, 4.0, 0.01, pixel_pitch_um=4.3, quantum_efficiency=0.3)
+        half_qe = sr.electrons_from_exposure(500.0, 4.0, 0.01, pixel_pitch_um=4.3, quantum_efficiency=0.3)
         self.assertAlmostEqual(float(half_qe), 0.5 * float(base), places=6)
 
     def test_bigger_pixels_collect_as_the_square_of_the_pitch(self):
-        small = sr.electrons_from_exposure(
-            500.0, 4.0, 0.01, pixel_pitch_um=2.0, quantum_efficiency=0.6)
-        big = sr.electrons_from_exposure(
-            500.0, 4.0, 0.01, pixel_pitch_um=4.0, quantum_efficiency=0.6)
+        small = sr.electrons_from_exposure(500.0, 4.0, 0.01, pixel_pitch_um=2.0, quantum_efficiency=0.6)
+        big = sr.electrons_from_exposure(500.0, 4.0, 0.01, pixel_pitch_um=4.0, quantum_efficiency=0.6)
         self.assertAlmostEqual(float(big / small), 4.0, places=6)
 
     def test_reciprocity(self):
@@ -99,8 +94,7 @@ class TestExposureValue(unittest.TestCase):
     def test_one_stop_of_either_control_is_one_ev(self):
         base = float(sr.exposure_value(4.0, 1 / 250.0))
         self.assertAlmostEqual(float(sr.exposure_value(4.0, 1 / 500.0)), base + 1.0, places=9)
-        self.assertAlmostEqual(
-            float(sr.exposure_value(4.0 * math.sqrt(2.0), 1 / 250.0)), base + 1.0, places=9)
+        self.assertAlmostEqual(float(sr.exposure_value(4.0 * math.sqrt(2.0), 1 / 250.0)), base + 1.0, places=9)
 
     def test_sunny_16_is_about_ev_15(self):
         self.assertAlmostEqual(float(sr.exposure_value(16.0, 1 / 128.0)), 15.0, places=6)

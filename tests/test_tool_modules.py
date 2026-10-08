@@ -7,9 +7,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import apply_spectral_psf  # noqa: E402  (synthetic_data puts tools/ on sys.path)
 import numpy as np
+import pbrt_spectral_exr_to_electrons  # noqa: E402
+import run_pipeline  # noqa: E402
 import yaml
-
+from exr_multispectral import read_separate_exr_channels, trapezoid_weights_nm  # noqa: E402
+from sensor_radiometry import C_LIGHT, H_PLANCK  # noqa: E402
 from synthetic_data import (
     REPO,
     SPECTRAL_LAMBDAS_NM,
@@ -19,12 +23,6 @@ from synthetic_data import (
     write_spectral_exr,
     write_yaml,
 )
-
-import apply_spectral_psf  # noqa: E402  (synthetic_data puts tools/ on sys.path)
-import pbrt_spectral_exr_to_electrons  # noqa: E402
-import run_pipeline  # noqa: E402
-from exr_multispectral import read_separate_exr_channels, trapezoid_weights_nm  # noqa: E402
-from sensor_radiometry import C_LIGHT, H_PLANCK  # noqa: E402
 
 
 class _TmpDirCase(unittest.TestCase):
@@ -141,11 +139,16 @@ class TestPbrtSpectralExrToElectronsModule(_TmpDirCase):
         run_tool_main(
             pbrt_spectral_exr_to_electrons.main,
             [
-                "--exr", str(self.exr),
-                "--sensor-config", str(self.sensor_cfg),
-                "--noise-config", str(self.noise_cfg),
-                "--scene-manifest-json", str(self.manifest),
-                "--out", str(self.out),
+                "--exr",
+                str(self.exr),
+                "--sensor-config",
+                str(self.sensor_cfg),
+                "--noise-config",
+                str(self.noise_cfg),
+                "--scene-manifest-json",
+                str(self.manifest),
+                "--out",
+                str(self.out),
                 *extra,
             ],
         )

@@ -84,9 +84,7 @@ TOPICS: tuple[Topic, ...] = (
     ),
 )
 
-TOPIC_BY_NAME: dict[str, Topic] = {
-    name: topic for topic in TOPICS for name in topic.command_names
-}
+TOPIC_BY_NAME: dict[str, Topic] = {name: topic for topic in TOPICS for name in topic.command_names}
 
 
 def build_parser() -> argparse.ArgumentParser:

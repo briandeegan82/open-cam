@@ -212,9 +212,7 @@ def fov_vs_focal_length(
     """Diagonal field of view across a focal-length sweep, for the context plot."""
     g = _geom()
     focal = np.geomspace(f_min_mm, f_max_mm, int(n))
-    fov = np.array(
-        [g.field_of_view(float(f), sensor_width_mm, sensor_height_mm).diagonal_deg for f in focal]
-    )
+    fov = np.array([g.field_of_view(float(f), sensor_width_mm, sensor_height_mm).diagonal_deg for f in focal])
     return focal, fov
 
 
@@ -292,11 +290,7 @@ def blur_vs_object_distance(
     if min_distance_mm <= focus_distance_mm <= max_distance_mm:
         d = np.unique(np.append(d, focus_distance_mm))
     blur = np.array(
-        [
-            g.defocus_blur_diameter_mm(focal_length_mm, f_number, focus_distance_mm, float(x))
-            * 1000.0
-            for x in d
-        ]
+        [g.defocus_blur_diameter_mm(focal_length_mm, f_number, focus_distance_mm, float(x)) * 1000.0 for x in d]
     )
     return d / 1000.0, blur
 
@@ -330,8 +324,7 @@ def aperture_tradeoff(
     N = np.geomspace(f_min, f_max, int(n))
     defocus = np.array(
         [
-            g.defocus_blur_diameter_mm(focal_length_mm, float(n_), focus_distance_mm, object_distance_mm)
-            * 1000.0
+            g.defocus_blur_diameter_mm(focal_length_mm, float(n_), focus_distance_mm, object_distance_mm) * 1000.0
             for n_ in N
         ]
     )

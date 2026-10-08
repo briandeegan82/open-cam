@@ -25,6 +25,8 @@ jobs:
         run: pip install -r requirements-dev.txt
       - name: Lint
         run: ruff check .
+      - name: Format check
+        run: ruff format --check .
       - name: Pipeline tests
         run: python -m pytest tests -q
       - name: GUI tests

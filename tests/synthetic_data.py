@@ -41,9 +41,7 @@ def write_gaussian_qe(directory: Path) -> dict:
     wl = QE_WAVELENGTHS_NM
     peaks = {"red": 600.0, "green": 540.0, "blue": 460.0}
     return {
-        f"{ch}_csv": str(
-            write_curve(directory / f"qe_{ch}.csv", wl, 0.6 * np.exp(-0.5 * ((wl - peak) / 40.0) ** 2))
-        )
+        f"{ch}_csv": str(write_curve(directory / f"qe_{ch}.csv", wl, 0.6 * np.exp(-0.5 * ((wl - peak) / 40.0) ** 2)))
         for ch, peak in peaks.items()
     }
 
@@ -91,6 +89,10 @@ def write_yaml(path: Path, data: dict) -> Path:
 def run_tool_main(main, argv: list[str]) -> str:
     """Run a tool's ``main()`` with ``argv``; return captured stdout (stderr is discarded)."""
     out, err = io.StringIO(), io.StringIO()
-    with mock.patch.object(sys, "argv", ["tool", *argv]), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+    with (
+        mock.patch.object(sys, "argv", ["tool", *argv]),
+        contextlib.redirect_stdout(out),
+        contextlib.redirect_stderr(err),
+    ):
         main()
     return out.getvalue()

@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-
 from opencam_gui.core import mtf_engine as me
 from opencam_gui.core.repo import import_tool
 from opencam_gui.topics.mtf.scenarios import SCENARIOS
@@ -28,16 +27,15 @@ def _gaussian_edge(sigma_px, size=192, angle_deg=5.0):
     sfr = import_tool("sfr_analysis")
     margin = max(16, size // 4)
     big = sfr.synthetic_slanted_edge(size + 2 * margin, size + 2 * margin, angle_deg)
-    blurred = np.asarray(
-        _psf().separable_gaussian_blur_2d(big.astype(np.float32), sigma_px), dtype=np.float64)
-    return np.ascontiguousarray(blurred[margin:margin + size, margin:margin + size])
+    blurred = np.asarray(_psf().separable_gaussian_blur_2d(big.astype(np.float32), sigma_px), dtype=np.float64)
+    return np.ascontiguousarray(blurred[margin : margin + size, margin : margin + size])
 
 
 class TestSyntheticEdge:
     def test_the_roi_is_square_and_bounded(self):
         roi = me.synthetic_edge(size=128)
         assert roi.shape == (128, 128)
-        assert -0.01 <= roi.min() and roi.max() <= 1.01
+        assert roi.min() >= -0.01 and roi.max() <= 1.01
 
     def test_the_edge_is_slanted_rather_than_axis_aligned(self):
         """ISO 12233 needs a slant: it is what supplies the sub-pixel phases the
@@ -95,8 +93,7 @@ class TestGaussianRoundTrip:
 
     def test_the_measurement_does_not_depend_on_the_slant_angle(self):
         """The angle is a sampling trick, not a property of the system."""
-        values = [me.measure(_gaussian_edge(1.2, angle_deg=a), PITCH_UM).mtf50_cy_per_px
-                  for a in (3.0, 5.0, 8.0, 12.0)]
+        values = [me.measure(_gaussian_edge(1.2, angle_deg=a), PITCH_UM).mtf50_cy_per_px for a in (3.0, 5.0, 8.0, 12.0)]
         assert np.ptp(values) < 0.05 * np.mean(values)
 
     def test_a_bigger_roi_does_not_move_the_answer(self):
@@ -133,8 +130,7 @@ class TestMeasurementShape:
         """The same optics on a finer pixel is the same lens: cycles/mm is a
         property of the lens, cycles/px of the pair."""
         m = me.measure(me.synthetic_edge(), PITCH_UM)
-        assert m.mtf50_cy_per_mm == pytest.approx(
-            m.mtf50_cy_per_px * 1000.0 / PITCH_UM, rel=1e-9)
+        assert m.mtf50_cy_per_mm == pytest.approx(m.mtf50_cy_per_px * 1000.0 / PITCH_UM, rel=1e-9)
 
 
 class TestDiffractionTheory:
@@ -179,14 +175,14 @@ class TestDiffractionTheory:
     def test_a_measured_airy_edge_tracks_the_diffraction_theory(self):
         """The point of the overlay: measurement and theory on the same axes, and
         they agree."""
-        roi = me.synthetic_edge(size=256, mode="airy_disk", f_number=16.0,
-                                pixel_pitch_um=PITCH_UM, sigma_geometric_px=0.0)
+        roi = me.synthetic_edge(
+            size=256, mode="airy_disk", f_number=16.0, pixel_pitch_um=PITCH_UM, sigma_geometric_px=0.0
+        )
         measured = me.measure(roi, PITCH_UM)
         curves = me.theory_curves(f_number=16.0, pixel_pitch_um=PITCH_UM)
 
         band = (measured.frequency_cy_per_px > 0.02) & (measured.frequency_cy_per_px < 0.3)
-        theory = np.interp(measured.frequency_cy_per_px[band],
-                           curves.frequency_cy_per_px, curves.diffraction)
+        theory = np.interp(measured.frequency_cy_per_px[band], curves.frequency_cy_per_px, curves.diffraction)
         assert np.max(np.abs(measured.mtf[band] - theory)) < 0.1
 
     def test_tiny_pixels_put_the_diffraction_cutoff_below_nyquist(self):
@@ -243,7 +239,7 @@ def _centre_contrast(preview):
     sampled = preview.sampled
     r = max(int(preview.nyquist_radius_px / preview.downsample), 4)
     c = sampled.shape[0] // 2
-    patch = sampled[max(c - r, 0):c + r, max(c - r, 0):c + r]
+    patch = sampled[max(c - r, 0) : c + r, max(c - r, 0) : c + r]
     return float(np.abs(np.diff(patch, axis=1)).mean())
 
 
@@ -257,10 +253,13 @@ class TestScenarios:
     @pytest.mark.parametrize("sid", list(SCENARIOS))
     def test_every_scenario_measures_something_sensible(self, sid):
         sc = SCENARIOS[sid]
-        roi = me.synthetic_edge(mode=sc.mode, f_number=sc.f_number,
-                                pixel_pitch_um=sc.pixel_pitch_um,
-                                sigma_geometric_px=sc.sigma_geometric_px,
-                                angle_deg=sc.edge_angle_deg)
+        roi = me.synthetic_edge(
+            mode=sc.mode,
+            f_number=sc.f_number,
+            pixel_pitch_um=sc.pixel_pitch_um,
+            sigma_geometric_px=sc.sigma_geometric_px,
+            angle_deg=sc.edge_angle_deg,
+        )
         m = me.measure(roi, sc.pixel_pitch_um)
         assert 0.0 < m.mtf50_cy_per_px < 2.0
         assert np.all(np.isfinite(m.mtf))
@@ -269,9 +268,15 @@ class TestScenarios:
     def test_the_soft_lens_really_is_softer_than_the_reference(self):
         def mtf50(sid):
             sc = SCENARIOS[sid]
-            return me.measure(me.synthetic_edge(
-                mode=sc.mode, f_number=sc.f_number, pixel_pitch_um=sc.pixel_pitch_um,
-                sigma_geometric_px=sc.sigma_geometric_px), sc.pixel_pitch_um).mtf50_cy_per_px
+            return me.measure(
+                me.synthetic_edge(
+                    mode=sc.mode,
+                    f_number=sc.f_number,
+                    pixel_pitch_um=sc.pixel_pitch_um,
+                    sigma_geometric_px=sc.sigma_geometric_px,
+                ),
+                sc.pixel_pitch_um,
+            ).mtf50_cy_per_px
 
         assert mtf50("soft_lens") < 0.5 * mtf50("sharp_reference")
 
@@ -279,13 +284,17 @@ class TestScenarios:
         """Its claim is that the cutoff is set by the aperture, not the aberration
         term, so the measured MTF50 should land near the diffraction prediction."""
         sc = SCENARIOS["diffraction_limited_f16"]
-        m = me.measure(me.synthetic_edge(
-            size=256, mode=sc.mode, f_number=sc.f_number,
-            pixel_pitch_um=sc.pixel_pitch_um,
-            sigma_geometric_px=sc.sigma_geometric_px), sc.pixel_pitch_um)
-        cutoff = me.theory_curves(
-            f_number=sc.f_number,
-            pixel_pitch_um=sc.pixel_pitch_um).diffraction_cutoff_cy_per_px
+        m = me.measure(
+            me.synthetic_edge(
+                size=256,
+                mode=sc.mode,
+                f_number=sc.f_number,
+                pixel_pitch_um=sc.pixel_pitch_um,
+                sigma_geometric_px=sc.sigma_geometric_px,
+            ),
+            sc.pixel_pitch_um,
+        )
+        cutoff = me.theory_curves(f_number=sc.f_number, pixel_pitch_um=sc.pixel_pitch_um).diffraction_cutoff_cy_per_px
         # The diffraction MTF crosses 0.5 at roughly 0.4 of its cutoff.
         assert m.mtf50_cy_per_px == pytest.approx(0.4 * cutoff, rel=0.25)
 

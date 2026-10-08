@@ -157,9 +157,7 @@ class TestMtf(unittest.TestCase):
             measured = sfr.slanted_edge_sfr(_blurred_edge(sigma)).mtf50_cy_per_px
             theory = sfr.mtf50(
                 THEORY_FREQ,
-                sfr.system_mtf(
-                    sfr.gaussian_mtf(THEORY_FREQ, sigma), sfr.pixel_aperture_mtf(THEORY_FREQ)
-                ),
+                sfr.system_mtf(sfr.gaussian_mtf(THEORY_FREQ, sigma), sfr.pixel_aperture_mtf(THEORY_FREQ)),
             )
             self.assertAlmostEqual(measured / theory, 1.0, delta=0.02, msg=f"sigma={sigma}")
 
@@ -177,9 +175,7 @@ class TestMtf(unittest.TestCase):
         for sigma in (1.5, 2.0, 3.0):
             result = sfr.slanted_edge_sfr(_blurred_edge(sigma))
             # Undo the pixel aperture's contribution before inverting the Gaussian.
-            self.assertAlmostEqual(
-                sfr.gaussian_sigma_from_mtf50(result.mtf50_cy_per_px) / sigma, 1.0, delta=0.05
-            )
+            self.assertAlmostEqual(sfr.gaussian_sigma_from_mtf50(result.mtf50_cy_per_px) / sigma, 1.0, delta=0.05)
 
     def test_mtf10_is_beyond_mtf50(self):
         result = sfr.slanted_edge_sfr(_blurred_edge(2.0))
@@ -210,14 +206,10 @@ class TestTheoreticalMtfs(unittest.TestCase):
 
     def test_diffraction_mtf_falls_to_zero_at_the_cutoff(self):
         cutoff = sfr.diffraction_cutoff_cy_per_px(8.0, 550.0, 4.3)
-        self.assertAlmostEqual(
-            float(sfr.diffraction_mtf(np.array([cutoff]), 8.0, 550.0, 4.3)[0]), 0.0, places=9
-        )
+        self.assertAlmostEqual(float(sfr.diffraction_mtf(np.array([cutoff]), 8.0, 550.0, 4.3)[0]), 0.0, places=9)
 
     def test_diffraction_mtf_starts_at_unity(self):
-        self.assertAlmostEqual(
-            float(sfr.diffraction_mtf(np.array([0.0]), 5.6, 550.0, 4.3)[0]), 1.0, places=9
-        )
+        self.assertAlmostEqual(float(sfr.diffraction_mtf(np.array([0.0]), 5.6, 550.0, 4.3)[0]), 1.0, places=9)
 
     def test_diffraction_cutoff_follows_one_over_lambda_n(self):
         """Stopping down two stops halves the cutoff frequency."""

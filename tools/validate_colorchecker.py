@@ -8,7 +8,6 @@ import json
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 
@@ -41,7 +40,7 @@ def check_neutral_luminance(repo: Path) -> bool:
     return ok
 
 
-def summarize_exr(path: Path, imgtool: Optional[Path]) -> None:
+def summarize_exr(path: Path, imgtool: Path | None) -> None:
     if imgtool and imgtool.is_file():
         r = subprocess.run([str(imgtool), "info", str(path)], capture_output=True, text=True, check=False)
         if r.returncode == 0:
@@ -58,7 +57,9 @@ def summarize_exr(path: Path, imgtool: Optional[Path]) -> None:
     if img.ndim == 2:
         img = img[:, :, np.newaxis]
     flat = np.reshape(img, (-1, img.shape[-1]))
-    print(f"EXR {path}: shape={img.shape} mean={np.mean(flat, axis=0)} min={np.min(flat, axis=0)} max={np.max(flat, axis=0)}")
+    print(
+        f"EXR {path}: shape={img.shape} mean={np.mean(flat, axis=0)} min={np.min(flat, axis=0)} max={np.max(flat, axis=0)}"
+    )
 
 
 def main() -> None:

@@ -11,7 +11,6 @@ import math
 
 import numpy as np
 import pytest
-
 from opencam_gui.core import geometry_engine as ge
 from opencam_gui.topics.geometry.scenarios import SCENARIOS
 
@@ -131,44 +130,47 @@ class TestFieldOfView:
 class TestDepthOfFieldSweeps:
     def test_near_limit_is_always_below_the_far_limit(self):
         sweep = ge.dof_vs_focus_distance(
-            focal_length_mm=50.0, f_number=5.6, coc_mm=0.03,
-            min_distance_mm=200.0, max_distance_mm=50_000.0,
+            focal_length_mm=50.0,
+            f_number=5.6,
+            coc_mm=0.03,
+            min_distance_mm=200.0,
+            max_distance_mm=50_000.0,
         )
         assert np.all(sweep.near_m <= sweep.far_m)
 
     def test_far_limit_runs_away_past_the_hyperfocal_distance(self):
         sweep = ge.dof_vs_focus_distance(
-            focal_length_mm=50.0, f_number=5.6, coc_mm=0.03,
-            min_distance_mm=200.0, max_distance_mm=200_000.0,
+            focal_length_mm=50.0,
+            f_number=5.6,
+            coc_mm=0.03,
+            min_distance_mm=200.0,
+            max_distance_mm=200_000.0,
         )
         beyond = sweep.far_m[sweep.focus_distance_m > sweep.hyperfocal_m * 1.2]
         assert beyond.size and np.all(beyond > 100.0)
 
     def test_blur_dips_to_zero_at_the_plane_of_focus(self):
         d_m, blur = ge.blur_vs_object_distance(
-            focal_length_mm=50.0, f_number=2.8, focus_distance_mm=3000.0,
-            min_distance_mm=500.0, max_distance_mm=20_000.0,
+            focal_length_mm=50.0,
+            f_number=2.8,
+            focus_distance_mm=3000.0,
+            min_distance_mm=500.0,
+            max_distance_mm=20_000.0,
         )
         assert blur.min() == pytest.approx(0.0, abs=1.0)
         assert d_m[int(np.argmin(blur))] == pytest.approx(3.0, rel=0.05)
 
     def test_aperture_tradeoff_has_an_interior_optimum(self):
-        trade = ge.aperture_tradeoff(
-            focal_length_mm=50.0, focus_distance_mm=3000.0, object_distance_mm=2500.0
-        )
+        trade = ge.aperture_tradeoff(focal_length_mm=50.0, focus_distance_mm=3000.0, object_distance_mm=2500.0)
         assert trade.f_numbers[0] < trade.optimum_f_number < trade.f_numbers[-1]
 
     def test_defocus_falls_and_diffraction_rises_with_f_number(self):
-        trade = ge.aperture_tradeoff(
-            focal_length_mm=50.0, focus_distance_mm=3000.0, object_distance_mm=2500.0
-        )
+        trade = ge.aperture_tradeoff(focal_length_mm=50.0, focus_distance_mm=3000.0, object_distance_mm=2500.0)
         assert np.all(np.diff(trade.defocus_blur_um) < 0)
         assert np.all(np.diff(trade.diffraction_blur_um) > 0)
 
     def test_total_is_the_quadrature_sum(self):
-        trade = ge.aperture_tradeoff(
-            focal_length_mm=50.0, focus_distance_mm=3000.0, object_distance_mm=2500.0
-        )
+        trade = ge.aperture_tradeoff(focal_length_mm=50.0, focus_distance_mm=3000.0, object_distance_mm=2500.0)
         np.testing.assert_allclose(
             trade.total_blur_um,
             np.hypot(trade.defocus_blur_um, trade.diffraction_blur_um),
@@ -184,9 +186,7 @@ class TestVignettingAndDistortion:
         assert ri[0] == pytest.approx(1.0)
 
     def test_vignette_preview_is_brightest_in_the_middle(self):
-        img = ge.vignetting_preview(
-            focal_length_mm=16.0, sensor_width_mm=36.0, sensor_height_mm=24.0, size=41
-        )
+        img = ge.vignetting_preview(focal_length_mm=16.0, sensor_width_mm=36.0, sensor_height_mm=24.0, size=41)
         assert img.shape == (41, 41)
         assert img[20, 20] == pytest.approx(img.max())
         assert img[0, 0] < img[20, 20]
@@ -226,8 +226,10 @@ class TestScenarios:
     def test_macro_scenario_really_is_life_size(self):
         sc = SCENARIOS["macro_life_size"]
         s = ge.summarize(
-            focal_length_mm=sc.focal_length_mm, f_number=sc.f_number,
-            focus_distance_mm=sc.focus_distance_mm, format_id=sc.format_id,
+            focal_length_mm=sc.focal_length_mm,
+            f_number=sc.f_number,
+            focus_distance_mm=sc.focus_distance_mm,
+            format_id=sc.format_id,
             pixel_pitch_um=sc.pixel_pitch_um,
         )
         assert abs(s.magnification) == pytest.approx(1.0, abs=1e-6)
@@ -237,8 +239,10 @@ class TestScenarios:
     def test_phone_scenario_is_a_26mm_equivalent(self):
         sc = SCENARIOS["phone_wide"]
         s = ge.summarize(
-            focal_length_mm=sc.focal_length_mm, f_number=sc.f_number,
-            focus_distance_mm=sc.focus_distance_mm, format_id=sc.format_id,
+            focal_length_mm=sc.focal_length_mm,
+            f_number=sc.f_number,
+            focus_distance_mm=sc.focus_distance_mm,
+            format_id=sc.format_id,
             pixel_pitch_um=sc.pixel_pitch_um,
         )
         assert s.equivalent_focal_length_mm == pytest.approx(26.0, abs=2.0)
@@ -246,8 +250,10 @@ class TestScenarios:
     def test_landscape_scenario_reaches_infinity(self):
         sc = SCENARIOS["landscape_hyperfocal"]
         s = ge.summarize(
-            focal_length_mm=sc.focal_length_mm, f_number=sc.f_number,
-            focus_distance_mm=sc.focus_distance_mm, format_id=sc.format_id,
+            focal_length_mm=sc.focal_length_mm,
+            f_number=sc.f_number,
+            focus_distance_mm=sc.focus_distance_mm,
+            format_id=sc.format_id,
             pixel_pitch_um=sc.pixel_pitch_um,
         )
         assert not math.isfinite(s.dof_far_mm)
@@ -255,8 +261,10 @@ class TestScenarios:
     def test_portrait_scenario_has_a_depth_of_field_of_a_few_centimetres(self):
         sc = SCENARIOS["portrait_shallow_dof"]
         s = ge.summarize(
-            focal_length_mm=sc.focal_length_mm, f_number=sc.f_number,
-            focus_distance_mm=sc.focus_distance_mm, format_id=sc.format_id,
+            focal_length_mm=sc.focal_length_mm,
+            f_number=sc.f_number,
+            focus_distance_mm=sc.focus_distance_mm,
+            format_id=sc.format_id,
             pixel_pitch_um=sc.pixel_pitch_um,
         )
         assert 10.0 < s.dof_total_mm < 100.0
@@ -265,8 +273,12 @@ class TestScenarios:
         sc = SCENARIOS["barrel_distortion"]
         assert sc.distortion_k1 < 0
         s = ge.summarize(
-            focal_length_mm=sc.focal_length_mm, f_number=sc.f_number,
-            focus_distance_mm=sc.focus_distance_mm, format_id=sc.format_id,
-            pixel_pitch_um=sc.pixel_pitch_um, k1=sc.distortion_k1, k2=sc.distortion_k2,
+            focal_length_mm=sc.focal_length_mm,
+            f_number=sc.f_number,
+            focus_distance_mm=sc.focus_distance_mm,
+            format_id=sc.format_id,
+            pixel_pitch_um=sc.pixel_pitch_um,
+            k1=sc.distortion_k1,
+            k2=sc.distortion_k2,
         )
         assert s.distortion_percent < 0

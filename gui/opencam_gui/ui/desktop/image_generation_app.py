@@ -13,8 +13,8 @@ import queue
 import threading
 from pathlib import Path
 
-import numpy as np
 import dearpygui.dearpygui as dpg
+import numpy as np
 from PIL import Image
 
 from opencam_gui.core import pipeline as pl
@@ -182,7 +182,9 @@ class ImageGenerationApp(DemoApp):
             scene_id=self.scene_id,
             camera_model_config=next(r.path for r in self._recipes if r.id == self.camera_recipe_id),
             mode=self.mode,
-            illuminant_csv=self._illum_by_id[self.illuminant_id].repo_relative if self.illuminant_id in self._illum_by_id else None,
+            illuminant_csv=self._illum_by_id[self.illuminant_id].repo_relative
+            if self.illuminant_id in self._illum_by_id
+            else None,
             target_illuminance_lux=self.target_lux,
             exposure_time_s=self.exposure_time_s,
             seed=self.seed,
@@ -250,9 +252,7 @@ class ImageGenerationApp(DemoApp):
 
     def build_pre_controls(self) -> None:
         dpg.add_text("Scene")
-        dpg.add_combo(
-            tag="scene_combo", items=[s.label for s in self._scenes], callback=self._on_scene_change
-        )
+        dpg.add_combo(tag="scene_combo", items=[s.label for s in self._scenes], callback=self._on_scene_change)
         dpg.add_text("", tag="scene_note", wrap=370)
         dpg.add_separator()
 
@@ -269,15 +269,21 @@ class ImageGenerationApp(DemoApp):
         )
         dpg.add_text("Illumination intensity (lux)")
         dpg.add_slider_float(
-            tag="lux_slider", default_value=self.target_lux, min_value=0.1, max_value=50000.0,
+            tag="lux_slider",
+            default_value=self.target_lux,
+            min_value=0.1,
+            max_value=50000.0,
             format="%.1f lux",
         )
         with dpg.group(horizontal=True):
             for label, val in _LUX_PRESETS:
                 dpg.add_button(label=label.split(" (")[0], user_data=val, callback=self._set_lux_preset)
         dpg.add_slider_float(
-            tag="exposure_slider", label="Exposure time (s)", default_value=self.exposure_time_s,
-            min_value=0.0005, max_value=1.0,
+            tag="exposure_slider",
+            label="Exposure time (s)",
+            default_value=self.exposure_time_s,
+            min_value=0.0005,
+            max_value=1.0,
         )
 
     def build_footer(self) -> None:
@@ -287,8 +293,11 @@ class ImageGenerationApp(DemoApp):
         dpg.add_slider_int(tag="xres_slider", label="Width (px)", default_value=self.xres, min_value=80, max_value=960)
         dpg.add_slider_int(tag="yres_slider", label="Height (px)", default_value=self.yres, min_value=60, max_value=640)
         dpg.add_slider_int(
-            tag="pixelsamples_slider", label="PBRT samples/px", default_value=self.pixelsamples,
-            min_value=4, max_value=1024,
+            tag="pixelsamples_slider",
+            label="PBRT samples/px",
+            default_value=self.pixelsamples,
+            min_value=4,
+            max_value=1024,
         )
         dpg.add_checkbox(tag="dry_run_checkbox", label="Dry run (print commands only)", default_value=False)
         dpg.add_button(tag="generate_button", label="Generate", width=-1, callback=self._generate)

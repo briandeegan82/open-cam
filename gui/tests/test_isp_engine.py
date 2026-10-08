@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-
 from opencam_gui.core import isp_engine as ie
 from opencam_gui.topics.isp.scenarios import SCENARIOS
 
@@ -120,14 +119,12 @@ class TestColourAccuracy:
 
     def test_the_full_pipeline_reaches_good_camera_colour(self, chart):
         """Under delta-E 2 is what a well-profiled camera achieves."""
-        assert _accuracy(chart, enabled=ALL - {"srgb"},
-                         wb_method="white_patch").mean_delta_e < 2.0
+        assert _accuracy(chart, enabled=ALL - {"srgb"}, wb_method="white_patch").mean_delta_e < 2.0
 
     def test_exposure_is_normalised_before_colour_is_judged(self, chart):
         """Halving the exposure is not a colour error, and must not read as one."""
         normal = ie.colour_accuracy(chart, ie.run_isp(chart, ie.IspConfig(enabled=ALL - {"srgb"})))
-        dim = ie.colour_accuracy(chart, ie.run_isp(
-            chart, ie.IspConfig(enabled=ALL - {"srgb"}, exposure_scale=0.5)))
+        dim = ie.colour_accuracy(chart, ie.run_isp(chart, ie.IspConfig(enabled=ALL - {"srgb"}, exposure_scale=0.5)))
         assert dim.mean_delta_e == pytest.approx(normal.mean_delta_e, rel=0.05)
 
     def test_the_worst_patches_are_the_saturated_ones(self, chart):
@@ -139,15 +136,13 @@ class TestColourAccuracy:
 
 class TestWhiteBalance:
     def test_white_patch_neutralises_the_greys(self, chart):
-        cast = _accuracy(chart, enabled=ALL - {"ccm", "srgb"},
-                         wb_method="white_patch").neutral_cast_rgb
+        cast = _accuracy(chart, enabled=ALL - {"ccm", "srgb"}, wb_method="white_patch").neutral_cast_rgb
         assert np.allclose(cast, 1.0, atol=0.05), cast
 
     def test_gray_world_leaves_a_cast_on_a_chart(self, chart):
         """Gray world assumes the scene averages to grey. A ColorChecker does not,
         so it over-corrects towards blue -- a real and well-known failure."""
-        cast = _accuracy(chart, enabled=ALL - {"ccm", "srgb"},
-                         wb_method="gray_world").neutral_cast_rgb
+        cast = _accuracy(chart, enabled=ALL - {"ccm", "srgb"}, wb_method="gray_world").neutral_cast_rgb
         assert cast[2] > cast[0] * 1.1
 
     def test_white_patch_beats_gray_world_on_this_scene(self, chart):
@@ -255,10 +250,8 @@ class TestSpectralOverlay:
         assert ie.spectral_overlay(chart, -5).patch_name == chart.names[0]
 
     def test_colour_temperature_matches_the_illuminant(self):
-        assert ie.spectral_overlay(
-            ie.load_chart(illuminant_id="D65")).cct_k == pytest.approx(6504, rel=0.02)
-        assert ie.spectral_overlay(
-            ie.load_chart(illuminant_id="A")).cct_k == pytest.approx(2856, rel=0.02)
+        assert ie.spectral_overlay(ie.load_chart(illuminant_id="D65")).cct_k == pytest.approx(6504, rel=0.02)
+        assert ie.spectral_overlay(ie.load_chart(illuminant_id="A")).cct_k == pytest.approx(2856, rel=0.02)
 
 
 def _chart_for_scenario(sc):
@@ -273,9 +266,15 @@ class TestScenarios:
     def test_every_scenario_runs(self, sid):
         sc = SCENARIOS[sid]
         chart = _chart_for_scenario(sc)
-        result = ie.run_isp(chart, ie.IspConfig(
-            enabled=set(sc.stages), demosaic_method=sc.demosaic_method,
-            wb_method=sc.wb_method, bayer_pattern=sc.bayer_pattern))
+        result = ie.run_isp(
+            chart,
+            ie.IspConfig(
+                enabled=set(sc.stages),
+                demosaic_method=sc.demosaic_method,
+                wb_method=sc.wb_method,
+                bayer_pattern=sc.bayer_pattern,
+            ),
+        )
         assert np.all(np.isfinite(result.final_display))
         assert np.all(np.isfinite(ie.colour_accuracy(chart, result).delta_e_2000))
 
@@ -297,21 +296,17 @@ class TestScenarios:
 
     def test_the_narrowband_led_is_the_hardest_illuminant(self):
         """Its spectrum has holes, and no downstream stage can fill them."""
-        led = _accuracy(ie.load_chart(illuminant_id="LED_RGB1"),
-                        enabled=ALL - {"srgb"}, wb_method="white_patch")
-        daylight = _accuracy(ie.load_chart(illuminant_id="D65"),
-                             enabled=ALL - {"srgb"}, wb_method="white_patch")
+        led = _accuracy(ie.load_chart(illuminant_id="LED_RGB1"), enabled=ALL - {"srgb"}, wb_method="white_patch")
+        daylight = _accuracy(ie.load_chart(illuminant_id="D65"), enabled=ALL - {"srgb"}, wb_method="white_patch")
         assert led.mean_delta_e > daylight.mean_delta_e
 
 
 class TestCameraRecipes:
     def test_qe_paths_fall_back_to_defaults_for_an_empty_model(self):
-        assert ie.qe_paths_from_model({}) == {
-            k: v for k, v in ie.DEFAULT_QE_PATHS.items() if k != "ircf"}
+        assert ie.qe_paths_from_model({}) == {k: v for k, v in ie.DEFAULT_QE_PATHS.items() if k != "ircf"}
 
     def test_qe_paths_are_taken_from_the_model_when_present(self):
-        model = {"sensor": {"quantum_efficiency": {
-            "red_csv": "a.csv", "green_csv": "b.csv", "blue_csv": "c.csv"}}}
+        model = {"sensor": {"quantum_efficiency": {"red_csv": "a.csv", "green_csv": "b.csv", "blue_csv": "c.csv"}}}
         paths = ie.qe_paths_from_model(model)
         assert (paths["red"], paths["green"], paths["blue"]) == ("a.csv", "b.csv", "c.csv")
 

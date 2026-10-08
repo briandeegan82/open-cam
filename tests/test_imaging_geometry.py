@@ -140,18 +140,14 @@ class TestDepthOfField(unittest.TestCase):
         f, N, s, coc = 50.0, 4.0, 2000.0, 0.03
         dof = ig.depth_of_field(f, N, s, coc)
         for limit in (dof.near_mm, dof.far_mm):
-            self.assertAlmostEqual(
-                ig.defocus_blur_diameter_mm(f, N, s, limit), coc, places=6
-            )
+            self.assertAlmostEqual(ig.defocus_blur_diameter_mm(f, N, s, limit), coc, places=6)
 
     def test_blur_is_zero_at_the_plane_of_focus(self):
         self.assertAlmostEqual(ig.defocus_blur_diameter_mm(50.0, 2.0, 1500.0, 1500.0), 0.0)
 
     def test_pixel_coc_is_stricter_than_the_print_criterion(self):
         ff = ig.sensor_format("full_frame")
-        self.assertLess(
-            ig.pixel_circle_of_confusion_mm(5.94), ig.circle_of_confusion_mm(ff.diagonal_mm)
-        )
+        self.assertLess(ig.pixel_circle_of_confusion_mm(5.94), ig.circle_of_confusion_mm(ff.diagonal_mm))
 
     def test_airy_disk_grows_with_f_number(self):
         self.assertLess(ig.airy_disk_diameter_mm(2.8), ig.airy_disk_diameter_mm(16.0))
@@ -183,9 +179,7 @@ class TestRelativeIllumination(unittest.TestCase):
     def test_corner_falloff_is_reported_in_stops(self):
         diag = ig.sensor_format("full_frame").diagonal_mm
         _, ri = ig.relative_illumination_profile(24.0, diag, n_samples=2)
-        self.assertAlmostEqual(
-            ig.corner_falloff_stops(24.0, diag), -math.log2(float(ri[-1])), places=12
-        )
+        self.assertAlmostEqual(ig.corner_falloff_stops(24.0, diag), -math.log2(float(ri[-1])), places=12)
 
 
 class TestDistortion(unittest.TestCase):

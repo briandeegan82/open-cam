@@ -51,8 +51,12 @@ class TestIlluminants(unittest.TestCase):
         self.assertEqual(len(cs.list_illuminant_ids(REPO)), 18)
 
     def test_chromaticities_match_the_published_values(self):
-        for name, x, y in (("D65", 0.3127, 0.3290), ("D50", 0.3457, 0.3585),
-                           ("A", 0.4476, 0.4074), ("D75", 0.2990, 0.3149)):
+        for name, x, y in (
+            ("D65", 0.3127, 0.3290),
+            ("D50", 0.3457, 0.3585),
+            ("A", 0.4476, 0.4074),
+            ("D75", 0.2990, 0.3149),
+        ):
             _, spd = cs.load_illuminant(REPO, name, WL)
             xy = cs.xy_chromaticity(cs.white_point_xyz(WL, spd)[None, :])[0]
             self.assertAlmostEqual(float(xy[0]), x, delta=0.003, msg=name)
@@ -98,17 +102,37 @@ class TestColorChecker(unittest.TestCase):
         the transfer function all have to be right for this to land."""
         chart = cs.load_colorchecker(REPO, WL)
         _, spd = cs.load_illuminant(REPO, "D65", WL)
-        srgb = np.clip(cs.xyz_to_srgb_linear(
-            cs.xyz_from_spectra(WL, chart.reflectance, spd)), 0.0, 1.0) ** (1 / 2.2)
+        srgb = np.clip(cs.xyz_to_srgb_linear(cs.xyz_from_spectra(WL, chart.reflectance, spd)), 0.0, 1.0) ** (1 / 2.2)
 
-        published = np.array([
-            [115, 82, 68], [194, 150, 130], [98, 122, 157], [87, 108, 67],
-            [133, 128, 177], [103, 189, 170], [214, 126, 44], [80, 91, 166],
-            [193, 90, 99], [94, 60, 108], [157, 188, 64], [224, 163, 46],
-            [56, 61, 150], [70, 148, 73], [175, 54, 60], [231, 199, 31],
-            [187, 86, 149], [8, 133, 161], [243, 243, 242], [200, 200, 200],
-            [160, 160, 160], [122, 122, 121], [85, 85, 85], [52, 52, 52],
-        ], dtype=np.float64)
+        published = np.array(
+            [
+                [115, 82, 68],
+                [194, 150, 130],
+                [98, 122, 157],
+                [87, 108, 67],
+                [133, 128, 177],
+                [103, 189, 170],
+                [214, 126, 44],
+                [80, 91, 166],
+                [193, 90, 99],
+                [94, 60, 108],
+                [157, 188, 64],
+                [224, 163, 46],
+                [56, 61, 150],
+                [70, 148, 73],
+                [175, 54, 60],
+                [231, 199, 31],
+                [187, 86, 149],
+                [8, 133, 161],
+                [243, 243, 242],
+                [200, 200, 200],
+                [160, 160, 160],
+                [122, 122, 121],
+                [85, 85, 85],
+                [52, 52, 52],
+            ],
+            dtype=np.float64,
+        )
 
         error = np.abs(srgb * 255.0 - published)
         self.assertLess(float(error.mean()), 4.0)
@@ -153,15 +177,18 @@ class TestLutherCondition(unittest.TestCase):
         """The condition is on the span of the curves, not the curves themselves --
         which is why a CCM can exist at all."""
         mix = np.array([[1.0, 0.2, 0.0], [0.0, 1.0, 0.1], [0.1, 0.0, 1.0]])
-        self.assertAlmostEqual(
-            cs.luther_condition_error(WL, mix @ cs.cmf_on_grid(WL)), 0.0, places=9)
+        self.assertAlmostEqual(cs.luther_condition_error(WL, mix @ cs.cmf_on_grid(WL)), 0.0, places=9)
 
     def test_a_real_camera_misses_it(self):
-        qe = cs.load_qe_rgb(REPO, {
-            "red": "spectra/QE/interpolated/QE_red.csv",
-            "green": "spectra/QE/interpolated/QE_green.csv",
-            "blue": "spectra/QE/interpolated/QE_blue.csv",
-        }, WL)
+        qe = cs.load_qe_rgb(
+            REPO,
+            {
+                "red": "spectra/QE/interpolated/QE_red.csv",
+                "green": "spectra/QE/interpolated/QE_green.csv",
+                "blue": "spectra/QE/interpolated/QE_blue.csv",
+            },
+            WL,
+        )
         self.assertGreater(cs.luther_condition_error(WL, qe), 0.05)
 
 

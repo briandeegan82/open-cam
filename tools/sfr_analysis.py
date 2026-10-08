@@ -192,9 +192,7 @@ def edge_spread_function(
     cols = np.arange(a.shape[1], dtype=np.float64)
     # Signed horizontal distance from the fitted edge, then projected onto the
     # edge normal so the ESF is a true perpendicular profile.
-    distance = (cols[None, :] - (slope * rows[:, None] + intercept)) * math.cos(
-        math.radians(angle_deg)
-    )
+    distance = (cols[None, :] - (slope * rows[:, None] + intercept)) * math.cos(math.radians(angle_deg))
 
     bin_width = 1.0 / int(oversampling)
     d_flat = distance.ravel()
@@ -235,9 +233,9 @@ def mtf_from_lsf(
     ``sinc(f * bin_width)``; dividing it out is what lets the recovered MTF match
     theory instead of drooping at high frequency.
     """
-    l = np.asarray(lsf, dtype=np.float64)
-    n = l.size
-    spectrum = np.abs(np.fft.rfft(l))
+    lsf_arr = np.asarray(lsf, dtype=np.float64)
+    n = lsf_arr.size
+    spectrum = np.abs(np.fft.rfft(lsf_arr))
     dc = spectrum[0]
     if dc <= 0:
         raise ValueError("LSF has no DC component; the ROI probably contains no edge")
@@ -278,9 +276,7 @@ def mtf50(frequency: np.ndarray, mtf: np.ndarray) -> float:
     return frequency_at_mtf(frequency, mtf, 0.5)
 
 
-def slanted_edge_sfr(
-    roi: np.ndarray, oversampling: int = DEFAULT_OVERSAMPLING, window: bool = True
-) -> SfrResult:
+def slanted_edge_sfr(roi: np.ndarray, oversampling: int = DEFAULT_OVERSAMPLING, window: bool = True) -> SfrResult:
     """Full ISO 12233 chain: ROI -> edge angle -> ESF -> LSF -> MTF."""
     angle = find_edge_angle(roi)
     position, esf, bin_width = edge_spread_function(roi, angle, oversampling)
@@ -325,9 +321,7 @@ def gaussian_sigma_from_mtf50(mtf50_cy_per_px: float) -> float:
     return math.sqrt(math.log(2.0)) / (math.pi * math.sqrt(2.0) * mtf50_cy_per_px)
 
 
-def diffraction_cutoff_cy_per_px(
-    f_number: float, wavelength_nm: float, pixel_pitch_um: float
-) -> float:
+def diffraction_cutoff_cy_per_px(f_number: float, wavelength_nm: float, pixel_pitch_um: float) -> float:
     """Incoherent diffraction cutoff ``1 / (lambda N)``, expressed per pixel.
 
     Beyond this frequency a diffraction-limited lens transmits no contrast at

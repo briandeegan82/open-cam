@@ -12,8 +12,8 @@ helper is a documented read-only mirror of the formula in
 
 from __future__ import annotations
 
-import numpy as np
 import dearpygui.dearpygui as dpg
+import numpy as np
 
 from opencam_gui.core import dark_current as dc
 from opencam_gui.core import sensor_engine as se
@@ -45,9 +45,7 @@ def _signed_gray_rgba(field: np.ndarray, half: float) -> list[float]:
     return rgba.ravel().tolist()
 
 
-def _histogram_series(
-    values: np.ndarray, lo: float, hi: float, n_bins: int = 40
-) -> tuple[list[float], list[float]]:
+def _histogram_series(values: np.ndarray, lo: float, hi: float, n_bins: int = 40) -> tuple[list[float], list[float]]:
     finite = values[np.isfinite(values)].ravel()
     if finite.size == 0:
         return [0.0], [0.0]
@@ -160,13 +158,16 @@ class SensorApp(DemoApp):
         dpg.configure_item("verify_mu_e", max_value=self.full_well_e)
 
     def _mu_dark_e(self) -> float:
-        return dc.dark_current_electrons_per_s(
-            self.dark_current_e_per_s,
-            self.temperature_c,
-            self.dark_current_reference_temp_c,
-            self.dark_current_doubling_per_c,
-            self.dark_activation_energy_eV,
-        ) * self.integration_time_s
+        return (
+            dc.dark_current_electrons_per_s(
+                self.dark_current_e_per_s,
+                self.temperature_c,
+                self.dark_current_reference_temp_c,
+                self.dark_current_doubling_per_c,
+                self.dark_activation_energy_eV,
+            )
+            * self.integration_time_s
+        )
 
     def _unit_maps(self) -> tuple[np.ndarray, np.ndarray]:
         """Stable N(0,1) fields so slider drags scale the same speckle pattern."""
@@ -279,9 +280,7 @@ class SensorApp(DemoApp):
         dpg.set_value("snr_series", [curve.mean_dn.tolist(), snr_db.tolist()])
         dpg.set_axis_limits("snr_x", float(curve.mean_dn.min()) * 0.8, float(curve.mean_dn.max()) * 1.2)
 
-        crossover_dn = se.mean_dn_linear(
-            curve.shot_read_crossover_e, self.K_e_per_DN, self.black_level_DN
-        )
+        crossover_dn = se.mean_dn_linear(curve.shot_read_crossover_e, self.K_e_per_DN, self.black_level_DN)
         dpg.set_value(
             "status_text",
             (
@@ -318,17 +317,11 @@ class SensorApp(DemoApp):
         dpg.set_value("prnu_texture", _signed_gray_rgba(prnu_pct, PRNU_SCALE_PCT))
         dpg.set_value(
             "dsnu_caption",
-            (
-                f"DSNU map  (fixed scale +/-{DSNU_SCALE_E:.0f} e-; mid-gray = 0)   "
-                f"RMS = {float(np.std(dsnu_e)):.2f} e-"
-            ),
+            (f"DSNU map  (fixed scale +/-{DSNU_SCALE_E:.0f} e-; mid-gray = 0)   RMS = {float(np.std(dsnu_e)):.2f} e-"),
         )
         dpg.set_value(
             "prnu_caption",
-            (
-                f"PRNU map  (fixed scale +/-{PRNU_SCALE_PCT:.0f}%; mid-gray = 0)   "
-                f"RMS = {float(np.std(prnu_pct)):.2f}%"
-            ),
+            (f"PRNU map  (fixed scale +/-{PRNU_SCALE_PCT:.0f}%; mid-gray = 0)   RMS = {float(np.std(prnu_pct)):.2f}%"),
         )
 
         dpg.set_value("spatial_total", [preview.mu_e.tolist(), preview.spatial_std_e.tolist()])
@@ -357,16 +350,14 @@ class SensorApp(DemoApp):
 
     # --- layout -----------------------------------------------------
     def register_themes(self) -> None:
-        with dpg.theme() as dark_point_theme:
-            with dpg.theme_component(dpg.mvScatterSeries):
-                dpg.add_theme_color(dpg.mvPlotCol_MarkerFill, (255, 190, 60), category=dpg.mvThemeCat_Plots)
-                dpg.add_theme_color(dpg.mvPlotCol_Line, (255, 190, 60), category=dpg.mvThemeCat_Plots)
+        with dpg.theme() as dark_point_theme, dpg.theme_component(dpg.mvScatterSeries):
+            dpg.add_theme_color(dpg.mvPlotCol_MarkerFill, (255, 190, 60), category=dpg.mvThemeCat_Plots)
+            dpg.add_theme_color(dpg.mvPlotCol_Line, (255, 190, 60), category=dpg.mvThemeCat_Plots)
         self._dark_point_theme = dark_point_theme
 
-        with dpg.theme() as measured_theme:
-            with dpg.theme_component(dpg.mvScatterSeries):
-                dpg.add_theme_color(dpg.mvPlotCol_MarkerFill, (90, 200, 255), category=dpg.mvThemeCat_Plots)
-                dpg.add_theme_color(dpg.mvPlotCol_Line, (90, 200, 255), category=dpg.mvThemeCat_Plots)
+        with dpg.theme() as measured_theme, dpg.theme_component(dpg.mvScatterSeries):
+            dpg.add_theme_color(dpg.mvPlotCol_MarkerFill, (90, 200, 255), category=dpg.mvThemeCat_Plots)
+            dpg.add_theme_color(dpg.mvPlotCol_Line, (90, 200, 255), category=dpg.mvThemeCat_Plots)
         self._measured_theme = measured_theme
 
     def register_textures(self) -> None:
@@ -377,44 +368,73 @@ class SensorApp(DemoApp):
     def build_controls(self) -> None:
         dpg.add_text("Core controls")
         dpg.add_slider_float(
-            tag="sigma_d_e", label="Read noise sigma_d", default_value=self.sigma_d_e,
-            min_value=0.1, max_value=15.0, callback=self.on_control_change,
+            tag="sigma_d_e",
+            label="Read noise sigma_d",
+            default_value=self.sigma_d_e,
+            min_value=0.1,
+            max_value=15.0,
+            callback=self.on_control_change,
         )
         dpg.add_slider_float(
-            tag="k_gain", label="Gain K (e-/DN)", default_value=self.K_e_per_DN,
-            min_value=0.3, max_value=8.0, callback=self.on_control_change,
+            tag="k_gain",
+            label="Gain K (e-/DN)",
+            default_value=self.K_e_per_DN,
+            min_value=0.3,
+            max_value=8.0,
+            callback=self.on_control_change,
         )
         dpg.add_slider_float(
-            tag="full_well", label="Full well (e-)", default_value=self.full_well_e,
-            min_value=500.0, max_value=100000.0, callback=self.on_control_change,
+            tag="full_well",
+            label="Full well (e-)",
+            default_value=self.full_well_e,
+            min_value=500.0,
+            max_value=100000.0,
+            callback=self.on_control_change,
         )
         dpg.add_slider_float(
-            tag="black_level", label="Black level (DN)", default_value=self.black_level_DN,
-            min_value=0.0, max_value=100.0, callback=self.on_control_change,
+            tag="black_level",
+            label="Black level (DN)",
+            default_value=self.black_level_DN,
+            min_value=0.0,
+            max_value=100.0,
+            callback=self.on_control_change,
         )
         dpg.add_checkbox(
-            tag="use_poisson", label="Poisson shot noise enabled",
-            default_value=self.use_poisson, callback=self.on_control_change,
+            tag="use_poisson",
+            label="Poisson shot noise enabled",
+            default_value=self.use_poisson,
+            callback=self.on_control_change,
         )
         dpg.add_separator()
         dpg.add_text("Fixed-pattern noise (EMVA1288)")
         dpg.add_slider_float(
-            tag="prnu_std", label="PRNU (fraction)",
-            default_value=self.prnu_std_fraction, min_value=0.0, max_value=0.05,
-            format="%.3f", callback=self.on_control_change,
+            tag="prnu_std",
+            label="PRNU (fraction)",
+            default_value=self.prnu_std_fraction,
+            min_value=0.0,
+            max_value=0.05,
+            format="%.3f",
+            callback=self.on_control_change,
         )
         dpg.add_slider_float(
-            tag="dsnu_std", label="DSNU (e-)",
-            default_value=self.dsnu_std_e, min_value=0.0, max_value=8.0,
+            tag="dsnu_std",
+            label="DSNU (e-)",
+            default_value=self.dsnu_std_e,
+            min_value=0.0,
+            max_value=8.0,
             callback=self.on_control_change,
         )
         dpg.add_slider_int(
-            tag="n_frames", label="Frames L to average",
-            default_value=self.n_measure_frames, min_value=2, max_value=100,
+            tag="n_frames",
+            label="Frames L to average",
+            default_value=self.n_measure_frames,
+            min_value=2,
+            max_value=100,
             callback=self.on_control_change,
         )
         dpg.add_button(
-            label="Measure DSNU1288 / PRNU1288", width=-1,
+            label="Measure DSNU1288 / PRNU1288",
+            width=-1,
             callback=self._run_emva_measure,
         )
         dpg.add_text("", tag="fpn_measure_text", wrap=350)
@@ -423,27 +443,42 @@ class SensorApp(DemoApp):
             dpg.add_separator()
             dpg.add_text("Dark current / temperature")
             dpg.add_slider_float(
-                tag="dark_rate", label="Dark current (e-/s)",
-                default_value=self.dark_current_e_per_s, min_value=0.0, max_value=5.0,
+                tag="dark_rate",
+                label="Dark current (e-/s)",
+                default_value=self.dark_current_e_per_s,
+                min_value=0.0,
+                max_value=5.0,
                 callback=self.on_control_change,
             )
             dpg.add_slider_float(
-                tag="temperature", label="Temperature (C)", default_value=self.temperature_c,
-                min_value=-10.0, max_value=80.0, callback=self.on_control_change,
-            )
-            dpg.add_slider_float(
-                tag="activation_energy", label="Arrhenius Ea (eV)",
-                default_value=self.dark_activation_energy_eV, min_value=0.0, max_value=1.0,
+                tag="temperature",
+                label="Temperature (C)",
+                default_value=self.temperature_c,
+                min_value=-10.0,
+                max_value=80.0,
                 callback=self.on_control_change,
             )
             dpg.add_slider_float(
-                tag="integration_time", label="Exposure time (s)",
-                default_value=self.integration_time_s, min_value=0.0001, max_value=2.0,
+                tag="activation_energy",
+                label="Arrhenius Ea (eV)",
+                default_value=self.dark_activation_energy_eV,
+                min_value=0.0,
+                max_value=1.0,
+                callback=self.on_control_change,
+            )
+            dpg.add_slider_float(
+                tag="integration_time",
+                label="Exposure time (s)",
+                default_value=self.integration_time_s,
+                min_value=0.0001,
+                max_value=2.0,
                 callback=self.on_control_change,
             )
             dpg.add_combo(
-                tag="dsnu_model", label="DSNU model",
-                items=list(_DSNU_MODELS), default_value=self.dsnu_model,
+                tag="dsnu_model",
+                label="DSNU model",
+                items=list(_DSNU_MODELS),
+                default_value=self.dsnu_model,
                 callback=self.on_control_change,
             )
 
@@ -451,8 +486,11 @@ class SensorApp(DemoApp):
         dpg.add_separator()
         dpg.add_text("Monte Carlo verification")
         dpg.add_slider_float(
-            tag="verify_mu_e", label="mu_e to verify", default_value=2000.0,
-            min_value=0.0, max_value=self.full_well_e,
+            tag="verify_mu_e",
+            label="mu_e to verify",
+            default_value=2000.0,
+            min_value=0.0,
+            max_value=self.full_well_e,
         )
         dpg.add_button(label="Run Monte Carlo check", width=-1, callback=self._run_verify)
         dpg.add_text("", tag="verify_text", wrap=350)
@@ -465,7 +503,9 @@ class SensorApp(DemoApp):
                     dpg.add_plot_axis(dpg.mvXAxis, label="mean signal (DN)", tag="ptc_x", scale=dpg.mvPlotScale_Log10)
                     with dpg.plot_axis(dpg.mvYAxis, label="variance (DN^2)", tag="ptc_y", scale=dpg.mvPlotScale_Log10):
                         dpg.add_line_series([1.0], [1.0], label="Var(DN) vs mean(DN)", tag="ptc_series")
-                        dark_pt = dpg.add_scatter_series([1.0], [1.0], label="dark floor (mu_e=0)", tag="ptc_dark_point")
+                        dark_pt = dpg.add_scatter_series(
+                            [1.0], [1.0], label="dark floor (mu_e=0)", tag="ptc_dark_point"
+                        )
                         dpg.bind_item_theme(dark_pt, self._dark_point_theme)
 
                 with dpg.plot(label="SNR vs mean signal", height=340, width=-1, tag="snr_plot"):
@@ -484,12 +524,16 @@ class SensorApp(DemoApp):
 
                 with dpg.plot(
                     label="Spatial std vs signal (after infinite averaging)",
-                    height=280, width=-1, tag="spatial_plot",
+                    height=280,
+                    width=-1,
+                    tag="spatial_plot",
                 ):
                     dpg.add_plot_legend()
                     dpg.add_plot_axis(dpg.mvXAxis, label="mean signal (e-)", tag="spatial_x")
                     with dpg.plot_axis(dpg.mvYAxis, label="spatial std (e-)", tag="spatial_y"):
-                        dpg.add_line_series([0.0], [0.0], label="total  sqrt(DSNU^2 + (PRNU x mu)^2)", tag="spatial_total")
+                        dpg.add_line_series(
+                            [0.0], [0.0], label="total  sqrt(DSNU^2 + (PRNU x mu)^2)", tag="spatial_total"
+                        )
                         dpg.add_line_series([0.0], [0.0], label="DSNU floor", tag="spatial_dsnu")
                         dpg.add_line_series([0.0], [0.0], label="PRNU x mu", tag="spatial_prnu")
                         meas = dpg.add_scatter_series([], [], label="EMVA1288 measured", tag="spatial_measured")

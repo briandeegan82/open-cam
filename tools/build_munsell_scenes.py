@@ -16,7 +16,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-
 from munsell_mat import load_joensuu_mat, parse_munsell_label, sanitize_filename
 
 HUE_FAMILY_ORDER = ("R", "YR", "Y", "GY", "G", "BG", "B", "PB", "P", "RP", "N")
@@ -193,7 +192,9 @@ def _make_film_block(args: argparse.Namespace, film_type: str, film_filename: st
     ]
 
 
-def _board_geometry(n: int, columns: int, patch_width: float, patch_height: float, gap: float) -> tuple[int, float, float]:
+def _board_geometry(
+    n: int, columns: int, patch_width: float, patch_height: float, gap: float
+) -> tuple[int, float, float]:
     cols = max(1, columns)
     rows = int(math.ceil(float(n) / float(cols)))
     board_w = cols * patch_width + max(0, cols - 1) * gap
@@ -471,8 +472,15 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--repo-root", type=Path, default=root)
     ap.add_argument("--mat", type=Path, default=None, help="Path to munsell380_800_1.mat")
-    ap.add_argument("--out-dir", type=Path, default=None, help="Output directory root (default: scenes/generated/munsell)")
-    ap.add_argument("--illuminant", type=Path, default=None, help="Illuminant CSV (default: spectra/illuminant/interpolated/D55.csv)")
+    ap.add_argument(
+        "--out-dir", type=Path, default=None, help="Output directory root (default: scenes/generated/munsell)"
+    )
+    ap.add_argument(
+        "--illuminant",
+        type=Path,
+        default=None,
+        help="Illuminant CSV (default: spectra/illuminant/interpolated/D55.csv)",
+    )
     ap.add_argument("--hues", type=str, default="all", help='Comma-separated hue families (e.g. "R,YR,Y"), or "all"')
     ap.add_argument("--max-patches-per-scene", type=int, default=None, help="Optional cap per hue family scene")
     ap.add_argument("--columns", type=int, default=12, help="Grid columns per hue-family scene")

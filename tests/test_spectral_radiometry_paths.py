@@ -7,12 +7,18 @@ import tempfile
 import unittest
 from pathlib import Path
 
-import numpy as np
-from synthetic_data import SPECTRAL_LAMBDAS_NM, run_tool_main, write_curve, write_gaussian_qe, write_spectral_exr, write_yaml
-
 import apply_emva_noise
+import numpy as np
 import pbrt_spectral_exr_to_electrons as pbrt_tool
 from spectral_sensor_forward import illuminance_lux_from_irradiance
+from synthetic_data import (
+    SPECTRAL_LAMBDAS_NM,
+    run_tool_main,
+    write_curve,
+    write_gaussian_qe,
+    write_spectral_exr,
+    write_yaml,
+)
 
 H, W = 12, 16
 
@@ -60,15 +66,31 @@ class TestSharedRadiometry(unittest.TestCase):
     def _both_paths(self, camera: dict) -> tuple[np.ndarray, np.ndarray, dict]:
         cfg_path = write_yaml(self.tmp / "camera.yaml", camera)
         out = self.tmp / "e.npz"
-        run_tool_main(pbrt_tool.main, [
-            "--repo-root", str(self.tmp), "--exr", str(self.exr), "--camera-model-config", str(cfg_path),
-            "--scene-manifest-json", str(self.tmp / "manifest.json"), "--out", str(out),
-        ])
+        run_tool_main(
+            pbrt_tool.main,
+            [
+                "--repo-root",
+                str(self.tmp),
+                "--exr",
+                str(self.exr),
+                "--camera-model-config",
+                str(cfg_path),
+                "--scene-manifest-json",
+                str(self.tmp / "manifest.json"),
+                "--out",
+                str(out),
+            ],
+        )
         npz = np.load(out)
         model = camera["sensor_forward"]["model"]
         e_iq = apply_emva_noise.integrate_exr_spectral_qe(
-            self.exr, self.tmp, self.qe, camera["sensor"], dict(model["calibration"]),
-            lens_cfg=camera["lens"], model_cfg=model,
+            self.exr,
+            self.tmp,
+            self.qe,
+            camera["sensor"],
+            dict(model["calibration"]),
+            lens_cfg=camera["lens"],
+            model_cfg=model,
         )
         return npz["electrons_rgb"], e_iq, dict(npz)
 
@@ -115,7 +137,11 @@ class TestSharedRadiometry(unittest.TestCase):
         camera = self._camera({"target_illuminance_lux": 500.0}, spatial=False)
         with self.assertRaisesRegex(RuntimeError, "illuminant_override_csv"):
             apply_emva_noise.integrate_exr_spectral_qe(
-                self.exr, self.tmp, self.qe, camera["sensor"], camera["sensor_forward"]["model"]["calibration"],
+                self.exr,
+                self.tmp,
+                self.qe,
+                camera["sensor"],
+                camera["sensor_forward"]["model"]["calibration"],
             )
 
 
