@@ -1,0 +1,22 @@
+{
+  "D65": {
+    "bayer_pattern": "GBRG",
+    "demosaic": "malvar",
+    "signal_e_mean_mono": 138.7557830810547,
+    "preview_white_balance_gains_rgb": [
+      2.186739206314087,
+      1.0,
+      1.8251802921295166
+    ]
+  },
+  "A": {
+    "bayer_pattern": "GBRG",
+    "demosaic": "malvar",
+    "signal_e_mean_mono": 123.71906280517578,
+    "preview_white_balance_gains_rgb": [
+      1.2705100774765015,
+      1.0,
+      3.2089314460754395
+    ]
+  }
+}
