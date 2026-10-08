@@ -20,6 +20,8 @@ subprocesses — nothing here reimplements scene building, rendering, or noise:
 from __future__ import annotations
 
 import json
+import math
+import os
 import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -182,13 +184,14 @@ def _run_steps(steps: list[Step], *, dry_run: bool, on_output: OutputCallback | 
             result.steps.append(StepResult(step=step, returncode=None, dry_run=True))
             continue
         try:
-            proc = subprocess.run(
+            proc = subprocess.Popen(
                 step.argv,
                 cwd=str(repo),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
-                check=False,
+                bufsize=1,
+                env={**os.environ, "PYTHONUNBUFFERED": "1"},
             )
         except FileNotFoundError as exc:
             result.ok = False
@@ -196,13 +199,16 @@ def _run_steps(steps: list[Step], *, dry_run: bool, on_output: OutputCallback | 
             if on_output:
                 on_output(str(exc))
             return result
-        if on_output and proc.stdout:
-            for line in proc.stdout.splitlines():
-                on_output(line)
-        result.steps.append(StepResult(step=step, returncode=proc.returncode, dry_run=False))
-        if proc.returncode != 0:
+        assert proc.stdout is not None
+        with proc.stdout:
+            for line in proc.stdout:
+                if on_output:
+                    on_output(line.rstrip("\r\n"))
+        returncode = proc.wait()
+        result.steps.append(StepResult(step=step, returncode=returncode, dry_run=False))
+        if returncode != 0:
             result.ok = False
-            result.error = f"{step.name} failed (exit {proc.returncode})"
+            result.error = f"{step.name} failed (exit {returncode})"
             return result
     return result
 
@@ -287,6 +293,30 @@ def _fast_analytic_steps(req: GenerationRequest) -> list[Step]:
 # ---------------------------------------------------------------------------
 
 
+_FAST_CAM_DIST = 4.25
+_FAST_FOV_DEG = 35.0
+_PBRT_FILM_DIAGONAL_MM = 35.0
+
+
+def _realistic_cam_dist_matching_fast_framing(req: GenerationRequest, cfg: dict) -> float | None:
+    """Camera distance at which a traced lens frames the chart like the fast path's 35 deg pinhole.
+
+    pbrt's ``fov`` spans the shorter image axis; a RealisticCamera's field is set by the lens focal length and
+    the film diagonal (pbrt default 35 mm). Returns None when the lens is not realistic or has no focal length.
+    """
+    lens_type = str(cfg.get("lens_type_override") or "").lower()
+    lens = import_tool("camera_model").load_camera_model(Path(req.camera_model_config)).get("lens", {}) or {}
+    if (lens_type or str(lens.get("camera", "")).lower()) != "realistic":
+        return None
+    focal_mm = lens.get("focal_length_mm")
+    if not focal_mm:
+        return None
+    short_px, long_px = sorted((req.xres, req.yres))
+    short_mm = _PBRT_FILM_DIAGONAL_MM * short_px / math.hypot(short_px, long_px)
+    half_fov_tan = (short_mm / 2.0) / float(focal_mm)
+    return round(_FAST_CAM_DIST * math.tan(math.radians(_FAST_FOV_DEG / 2.0)) / half_fov_tan, 4)
+
+
 def _write_colorchecker_pipeline_yaml(req: GenerationRequest) -> Path:
     repo = repo_root()
     base_path = repo / "config" / "pipeline.yaml"
@@ -307,8 +337,18 @@ def _write_colorchecker_pipeline_yaml(req: GenerationRequest) -> Path:
     cfg["sensor_forward"]["enabled"] = True
     cfg["sensor_forward"]["target_illuminance_lux"] = req.target_illuminance_lux
 
+    cam_dist = _realistic_cam_dist_matching_fast_framing(req, cfg)
+    if cam_dist is not None:
+        cfg["render"]["cam_dist"] = cam_dist
+        cfg.setdefault("lens_overrides", {})
+        cfg["lens_overrides"]["realistic_focus_distance"] = cam_dist
+
     cfg.setdefault("noise", {})
     cfg["noise"]["seed"] = req.seed
+    # Same preview policy as fast_analytic so the two modes are visually comparable; raw/electrons are unaffected.
+    cfg["noise"]["preview_no_normalize"] = False
+    cfg["noise"]["preview_white_balance_enabled"] = True
+    cfg["noise"]["preview_color_correction_enabled"] = True
 
     if req.exposure_time_s is not None:
         cfg["exposure_time_override_s"] = req.exposure_time_s
