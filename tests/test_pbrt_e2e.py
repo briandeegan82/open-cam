@@ -159,7 +159,7 @@ class TestPbrtHighwayHaze(unittest.TestCase):
         txt = (scene / "highway.pbrt").read_text()
         head = txt[: txt.index("AttributeEnd", txt.index('LightSource "infinite"')) + len("AttributeEnd")]
         exr = tmp / f"{name}.exr"
-        head = re.sub(r"^LookAt .*$", "LookAt 0 0.05 0  0 0 0  0 0 1", head, flags=re.M)
+        head = re.sub(r"^LookAt .*$", "LookAt 0 0.2 0  0 0 0.12  0 1 0", head, flags=re.M)
         head = re.sub(r"^Camera .*$", 'Camera "perspective" "float fov" [20]', head, flags=re.M)
         head = re.sub(r'"string filename" \[".*?"\]', f'"string filename" ["{exr}"]', head, count=1)
         head = re.sub(r'"integer xresolution" \[\d+\]', '"integer xresolution" [8]', head)
@@ -167,7 +167,7 @@ class TestPbrtHighwayHaze(unittest.TestCase):
         head = re.sub(r'"integer pixelsamples" \[\d+\]', '"integer pixelsamples" [2048]', head)
         rho = json.loads((scene / "highway_manifest.json").read_text())
         albedo = (rho["atmosphere"] or {}).get("road_illuminance", {}).get("ground_albedo", 0.15)
-        w = 150_000
+        w = 5_000  # float32 hit-point error on a 100 km+ quad biases the shadow rays at this scale
         (scene / "probe.pbrt").write_text(
             head
             + f'\nMaterial "diffuse" "spectrum reflectance" [300 {albedo} 900 {albedo}]\n'
@@ -177,15 +177,19 @@ class TestPbrtHighwayHaze(unittest.TestCase):
         subprocess.run([str(PBRT), "--quiet", "--seed", "1", str(scene / "probe.pbrt")], check=True)
         return float((read_rgb_exr(exr) @ LUMA).mean()), rho
 
-    def test_fog_road_illuminance_matches_manifest(self) -> None:
+    def test_road_illuminance_matches_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             tmp = Path(td)
             l_clear, plain = self._probe(tmp, "plain")
-            l_fog, fog = self._probe(tmp, "fog", "--haze", "fog")
-        rendered = l_fog / l_clear
-        expected = fog["lighting"]["reference_illuminance_lux"] / plain["lighting"]["reference_illuminance_lux"]
-        self.assertLess(expected, 0.85)
-        self.assertAlmostEqual(rendered, expected, delta=0.05 * expected)
+            for preset in ("clear", "hazy", "mist", "fog"):
+                l_haze, haze = self._probe(tmp, preset, "--haze", preset)
+                rendered = l_haze / l_clear
+                expected = (
+                    haze["lighting"]["reference_illuminance_lux"] / plain["lighting"]["reference_illuminance_lux"]
+                )
+                with self.subTest(preset=preset):
+                    self.assertLess(expected, 0.97)
+                    self.assertAlmostEqual(rendered, expected, delta=0.05 * expected)
 
 
 if __name__ == "__main__":

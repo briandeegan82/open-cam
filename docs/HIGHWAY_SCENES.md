@@ -117,9 +117,7 @@ over 400-700 nm; sun at its elevation, sky with the sky map's angular distributi
 it to `lighting.reference_illuminance_lux` (and `_exr_lux` with the same 683 x Y-integral scale as
 without medium). Everything about the calculation is in the manifest's `atmosphere` block
 (`road_illuminance`: top-of-layer sun/sky, direct and total transmittances, diffuse fraction,
-and `no_medium_horizontal_illuminance_lux`). `TestPbrtHighwayHaze` checks it against pbrt: an
-infinite Lambertian ground probe rendered with `volpath` under fog and under no medium gives the
-same illuminance ratio as the manifest, within 5 %. With `--haze-light-reference road` the lights
+and `no_medium_horizontal_illuminance_lux`). `TestPbrtHighwayHaze` checks it against pbrt: a Lambertian ground probe (±5 km quad, camera 0.2 m) rendered with `volpath` under each preset and under no medium gives the same illuminance ratio as the manifest within 5 % (measured: clear 0.955 vs 0.959, hazy 0.841 vs 0.854, mist 0.883 vs 0.888, fog 0.680 vs 0.688). Keep such probes ≲10 km across: on a 300 km float32 quad the hit-point error biases the shadow rays by tens of percent. With `--haze-light-reference road` the lights
 are instead rescaled so the road receives the no-medium illuminance (useful to isolate the
 contrast loss of fog from the change in exposure); the manifest then records the scale applied.
 
