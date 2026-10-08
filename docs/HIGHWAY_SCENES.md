@@ -130,7 +130,15 @@ It is procedural, so no new assets are fetched; `--seed` changes the skyline.
 
 **Render cost** (1280x720, 256 spp, 8 threads, same view; see the PR for images):
 
-RENDER_COST_TABLE
+| scene | integrator / maxdepth | wall time | × default |
+|---|---|---:|---:|
+| default (no haze) | path / 8 | 148 s | 1.00 |
+| clear | volpath / 8 | 281 s | 1.89 |
+| hazy | volpath / 8 | 440 s | 2.96 |
+| mist | volpath / 24 | 362 s | 2.44 |
+| fog | volpath / 64 | 683 s | 4.61 |
+
+1280×720, 256 spp, same camera view, 8-thread VM, pbrt-v4 CPU build. Haze presets also switch on the distant hills (64×720-vertex ring, ~92 k triangles); the time is the total for medium + hills.
 
 ## Known approximations
 
