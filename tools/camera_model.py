@@ -31,9 +31,13 @@ import sys
 from pathlib import Path
 
 import yaml
+from lens_prescription import traced_f_number
 
 _SENSOR_DEFAULTS_NAME = "default.yaml"
 _LENS_DEFAULTS_NAME = "default.yaml"
+_REPO = Path(__file__).resolve().parents[1]
+_LEGACY_REALISTIC_LENSFILE = "scenes/lenses/wide_22mm.dat"
+_DEFAULT_REALISTIC_LENSFILE = "config/lenses/wide_22mm.dat"
 
 
 def _load_yaml_mapping(path: Path) -> dict:
@@ -182,19 +186,40 @@ def effective_f_number(sensor_cfg: dict, lens_cfg: dict | None, *, default: floa
     """f-number for radiance-to-irradiance conversion.
 
     For PBRT ``realistic`` cameras the solid angle is set by the traced lens, so the
-    f-number comes from ``focal_length_mm / realistic_aperture_diameter_mm`` rather
-    than the nominal ``sensor.f_number`` label.
+    f-number is the lens prescription's traced on-axis working f-number at
+    ``realistic_aperture_diameter_mm`` (see ``lens_prescription.traced_f_number``),
+    not the nominal ``sensor.f_number`` label. Without a readable lens file it falls
+    back to ``focal_length_mm / realistic_aperture_diameter_mm``.
     """
     f_number = float(sensor_cfg.get("f_number", default))
     if not lens_cfg or str(lens_cfg.get("camera", "pinhole")).lower() != "realistic":
         return f_number
     fl = lens_cfg.get("focal_length_mm")
     ap = lens_cfg.get("realistic_aperture_diameter_mm")
+    lens_file = resolve_lensfile(lens_cfg.get("realistic_lensfile"))
+    prefix = f"warning [{tag}]" if tag else "warning"
+    if lens_file is not None:
+        try:
+            return traced_f_number(str(lens_file), None if ap is None else float(ap))
+        except ValueError as exc:
+            print(f"{prefix}: cannot trace {lens_file} ({exc}); using focal/aperture.", file=sys.stderr)
     if fl is not None and ap is not None and float(ap) > 0:
         return float(fl) / float(ap)
-    prefix = f"warning [{tag}]" if tag else "warning"
     print(
         f"{prefix}: realistic camera lens model missing focal_length_mm — falling back to sensor.f_number={f_number}.",
         file=sys.stderr,
     )
     return f_number
+
+
+def resolve_lensfile(lensfile: object) -> Path | None:
+    """Absolute path of a lens model's ``realistic_lensfile`` (repo-relative), or None if absent."""
+    if not lensfile:
+        return None
+    rel = str(lensfile)
+    if rel == _LEGACY_REALISTIC_LENSFILE:
+        rel = _DEFAULT_REALISTIC_LENSFILE
+    path = Path(rel)
+    if not path.is_absolute():
+        path = _REPO / path
+    return path if path.is_file() else None

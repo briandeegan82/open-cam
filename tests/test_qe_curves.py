@@ -68,9 +68,20 @@ class TestEffectiveFNumber(unittest.TestCase):
         self.assertEqual(effective_f_number({"f_number": 4.0}, {"camera": "thinlens", "focal_length_mm": 50}), 4.0)
         self.assertEqual(effective_f_number({}, {}), 2.8)
 
-    def test_realistic_lens_uses_prescription(self) -> None:
+    def test_realistic_lens_without_lensfile_uses_focal_over_aperture(self) -> None:
         lens = {"camera": "realistic", "focal_length_mm": 50.0, "realistic_aperture_diameter_mm": 12.5}
         self.assertEqual(effective_f_number({"f_number": 2.0}, lens), 4.0)
+
+    def test_realistic_lens_uses_traced_prescription(self) -> None:
+        lens = {
+            "camera": "realistic",
+            "realistic_lensfile": "config/lenses/wide_22mm.dat",
+            "focal_length_mm": 22.0,
+            "realistic_aperture_diameter_mm": 8.756,
+        }
+        self.assertAlmostEqual(effective_f_number({"f_number": 1.8}, lens), 2.79, delta=0.01)
+        lens["realistic_lensfile"] = "scenes/lenses/wide_22mm.dat"  # legacy path
+        self.assertAlmostEqual(effective_f_number({"f_number": 1.8}, lens), 2.79, delta=0.01)
 
     def test_realistic_lens_without_prescription_warns_and_falls_back(self) -> None:
         err = io.StringIO()

@@ -3,11 +3,12 @@ schema_version: 1
 # Suitable for: APS-C and Micro Four Thirds cameras (~3.3–3.9 µm pixel pitch).
 # Source: config/lenses/dgauss.50mm.dat — US patent 2,673,491 (Tronnier, expired),
 #   as distributed in pbrt-v4-scenes (MIT licence).
-# Aperture diameter = 50 mm / 2.8 ≈ 17.9 mm.
+# Stop diameter 12.34 mm traces to f/2.80 (tools/lens_prescription.py). 50/2.8 = 17.9 mm
+# exceeds the 17.1 mm stop, which pbrt clamps to f/2.02.
 lens:
   camera: realistic
   realistic_lensfile: config/lenses/dgauss.50mm.dat
-  realistic_aperture_diameter_mm: 17.9
+  realistic_aperture_diameter_mm: 12.34
   realistic_focus_distance: 1.0
   focal_length_mm: 50.0  # dgauss.50mm.dat image-space focal length
   post_psf:
