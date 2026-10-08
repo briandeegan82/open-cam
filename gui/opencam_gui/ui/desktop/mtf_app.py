@@ -151,15 +151,9 @@ class MtfApp(DemoApp):
 
         dpg.set_value("mtf_series", [m.frequency_cy_per_px.tolist(), m.mtf.tolist()])
 
-        theory = me.theory_curves(
-            f_number=self.f_number, pixel_pitch_um=self.pixel_pitch_um, max_frequency=1.0
-        )
-        dpg.set_value(
-            "mtf_diffraction", [theory.frequency_cy_per_px.tolist(), theory.diffraction.tolist()]
-        )
-        dpg.set_value(
-            "mtf_pixel", [theory.frequency_cy_per_px.tolist(), theory.pixel_aperture.tolist()]
-        )
+        theory = me.theory_curves(f_number=self.f_number, pixel_pitch_um=self.pixel_pitch_um, max_frequency=1.0)
+        dpg.set_value("mtf_diffraction", [theory.frequency_cy_per_px.tolist(), theory.diffraction.tolist()])
+        dpg.set_value("mtf_pixel", [theory.frequency_cy_per_px.tolist(), theory.pixel_aperture.tolist()])
         dpg.set_value("mtf_system", [theory.frequency_cy_per_px.tolist(), theory.system.tolist()])
         dpg.set_value("mtf_nyquist", [[me.NYQUIST_CY_PER_PX, me.NYQUIST_CY_PER_PX], [0.0, 1.05]])
         cutoff = theory.diffraction_cutoff_cy_per_px
@@ -241,8 +235,10 @@ class MtfApp(DemoApp):
     def build_controls(self) -> None:
         dpg.add_text("Edge source")
         dpg.add_radio_button(
-            tag="source_radio", items=[SOURCE_SYNTHETIC, SOURCE_RENDERED],
-            default_value=self.source, callback=self.on_control_change,
+            tag="source_radio",
+            items=[SOURCE_SYNTHETIC, SOURCE_RENDERED],
+            default_value=self.source,
+            callback=self.on_control_change,
         )
         dpg.add_combo(
             tag="rendered_combo",
@@ -254,36 +250,61 @@ class MtfApp(DemoApp):
 
         dpg.add_text("Optics under test")
         dpg.add_combo(
-            tag="psf_mode", label="PSF mode", items=["chromatic_gaussian", "airy_disk"],
-            default_value=self.mode, callback=self.on_control_change,
+            tag="psf_mode",
+            label="PSF mode",
+            items=["chromatic_gaussian", "airy_disk"],
+            default_value=self.mode,
+            callback=self.on_control_change,
         )
         dpg.add_slider_float(
-            tag="f_number", label="f-number (N)", default_value=self.f_number,
-            min_value=1.0, max_value=32.0, callback=self.on_control_change,
+            tag="f_number",
+            label="f-number (N)",
+            default_value=self.f_number,
+            min_value=1.0,
+            max_value=32.0,
+            callback=self.on_control_change,
         )
         dpg.add_slider_float(
-            tag="pixel_pitch_um", label="Pixel pitch (um)", default_value=self.pixel_pitch_um,
-            min_value=0.7, max_value=9.0, callback=self.on_control_change,
+            tag="pixel_pitch_um",
+            label="Pixel pitch (um)",
+            default_value=self.pixel_pitch_um,
+            min_value=0.7,
+            max_value=9.0,
+            callback=self.on_control_change,
         )
         dpg.add_slider_float(
-            tag="sigma_geom", label="Geometric aberration sigma (px)",
-            default_value=self.sigma_geometric_px, min_value=0.0, max_value=3.0,
+            tag="sigma_geom",
+            label="Geometric aberration sigma (px)",
+            default_value=self.sigma_geometric_px,
+            min_value=0.0,
+            max_value=3.0,
             callback=self.on_control_change,
         )
 
         dpg.add_separator()
         dpg.add_text("Aliasing (Siemens star)")
         dpg.add_slider_int(
-            tag="spokes", label="Spokes", default_value=self.spokes,
-            min_value=16, max_value=144, callback=self.on_control_change,
+            tag="spokes",
+            label="Spokes",
+            default_value=self.spokes,
+            min_value=16,
+            max_value=144,
+            callback=self.on_control_change,
         )
         dpg.add_slider_int(
-            tag="downsample", label="Sample every N px", default_value=self.downsample,
-            min_value=1, max_value=8, callback=self.on_control_change,
+            tag="downsample",
+            label="Sample every N px",
+            default_value=self.downsample,
+            min_value=1,
+            max_value=8,
+            callback=self.on_control_change,
         )
         dpg.add_slider_float(
-            tag="prefilter_sigma", label="OLPF prefilter sigma (px)",
-            default_value=self.prefilter_sigma_px, min_value=0.0, max_value=3.0,
+            tag="prefilter_sigma",
+            label="OLPF prefilter sigma (px)",
+            default_value=self.prefilter_sigma_px,
+            min_value=0.0,
+            max_value=3.0,
             callback=self.on_control_change,
         )
 
@@ -291,8 +312,12 @@ class MtfApp(DemoApp):
             dpg.add_separator()
             dpg.add_text("Advanced")
             dpg.add_slider_float(
-                tag="edge_angle", label="Edge slant (deg)", default_value=self.edge_angle_deg,
-                min_value=1.0, max_value=15.0, callback=self.on_control_change,
+                tag="edge_angle",
+                label="Edge slant (deg)",
+                default_value=self.edge_angle_deg,
+                min_value=1.0,
+                max_value=15.0,
+                callback=self.on_control_change,
             )
 
     def build_content(self) -> None:

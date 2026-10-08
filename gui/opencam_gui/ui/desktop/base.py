@@ -248,9 +248,7 @@ class DemoApp:
 
     def run(self) -> None:
         dpg.create_context()
-        dpg.create_viewport(
-            title=self.viewport_title, width=self.viewport_width, height=self.viewport_height
-        )
+        dpg.create_viewport(title=self.viewport_title, width=self.viewport_width, height=self.viewport_height)
         self.build_ui()
         dpg.setup_dearpygui()
         dpg.show_viewport()

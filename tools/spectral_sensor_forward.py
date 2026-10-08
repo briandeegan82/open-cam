@@ -264,7 +264,9 @@ def main() -> None:
     model = cfg.get("model", {})
     output = cfg.get("output", {})
 
-    spectral_npz = (repo / inputs.get("spectral_reference_npz", "scenes/generated/spectral_reference_1nm.npz")).resolve()
+    spectral_npz = (
+        repo / inputs.get("spectral_reference_npz", "scenes/generated/spectral_reference_1nm.npz")
+    ).resolve()
     scene_manifest = (repo / inputs.get("scene_manifest_json", "scenes/generated/colorchecker_manifest.json")).resolve()
     noise_cfg_path = (repo / inputs.get("noise_config_yaml", "config/noise_emva.yaml")).resolve()
     out_npz = (repo / output.get("electrons_npz", "out/sensor_forward_electrons.npz")).resolve()
@@ -395,10 +397,10 @@ def main() -> None:
         # Iterative Brown-Conrady inversion (10 iterations, converges to < 1e-7 px).
         xu, yu = xn.copy(), yn.copy()
         for _ in range(10):
-            r2 = xu ** 2 + yu ** 2
-            rad = 1.0 + k1 * r2 + k2 * r2 ** 2
-            xu = (xn - (2.0 * p1 * xu * yu + p2 * (r2 + 2.0 * xu ** 2))) / rad
-            yu = (yn - (p1 * (r2 + 2.0 * yu ** 2) + 2.0 * p2 * xu * yu)) / rad
+            r2 = xu**2 + yu**2
+            rad = 1.0 + k1 * r2 + k2 * r2**2
+            xu = (xn - (2.0 * p1 * xu * yu + p2 * (r2 + 2.0 * xu**2))) / rad
+            yu = (yn - (p1 * (r2 + 2.0 * yu**2) + 2.0 * p2 * xu * yu)) / rad
         x_ndc = xu / aspect
         y_ndc = yu
 

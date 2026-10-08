@@ -194,8 +194,7 @@ def effective_f_number(sensor_cfg: dict, lens_cfg: dict | None, *, default: floa
         return float(fl) / float(ap)
     prefix = f"warning [{tag}]" if tag else "warning"
     print(
-        f"{prefix}: realistic camera lens model missing focal_length_mm — "
-        f"falling back to sensor.f_number={f_number}.",
+        f"{prefix}: realistic camera lens model missing focal_length_mm — falling back to sensor.f_number={f_number}.",
         file=sys.stderr,
     )
     return f_number

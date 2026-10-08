@@ -51,7 +51,9 @@ def load_joensuu_mat(mat_path: Path) -> JoensuuMunsellBundle:
     data = scipy.io.loadmat(str(mat_path), squeeze_me=True, struct_as_record=False)
     for key in ("munsell", "S"):
         if key not in data:
-            raise KeyError(f"MAT file missing {key!r}; keys: {sorted(k for k in data if not str(k).startswith('__'))!r}")
+            raise KeyError(
+                f"MAT file missing {key!r}; keys: {sorted(k for k in data if not str(k).startswith('__'))!r}"
+            )
 
     spec = np.asarray(data["munsell"], dtype=np.float64)
     if spec.ndim != 2 or spec.shape[0] != 421:

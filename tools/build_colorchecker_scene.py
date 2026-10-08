@@ -178,7 +178,7 @@ def main() -> None:
         "--film-output",
         type=str,
         default=None,
-        help='EXR path relative to repo root (default: out/colorchecker.exr or out/colorchecker_spectral.exr).',
+        help="EXR path relative to repo root (default: out/colorchecker.exr or out/colorchecker_spectral.exr).",
     )
     ap.add_argument(
         "--spectral-nbuckets",
@@ -190,13 +190,13 @@ def main() -> None:
         "--spectral-lambda-min",
         type=float,
         default=360.0,
-        help='SpectralFilm only: lambdamin (nm), must be >= 360 (pbrt Lambda_min).',
+        help="SpectralFilm only: lambdamin (nm), must be >= 360 (pbrt Lambda_min).",
     )
     ap.add_argument(
         "--spectral-lambda-max",
         type=float,
         default=830.0,
-        help='SpectralFilm only: lambdamax (nm), must be <= 830 (pbrt Lambda_max).',
+        help="SpectralFilm only: lambdamax (nm), must be <= 830 (pbrt Lambda_max).",
     )
     args = ap.parse_args()
 
@@ -306,9 +306,7 @@ def main() -> None:
         pbrt_lines.append('Camera "perspective" "float fov" [%s]' % args.fov)
     elif camera_kind == "thinlens":
         thin_focal_d = (
-            float(args.thinlens_focal_distance)
-            if args.thinlens_focal_distance is not None
-            else float(args.cam_dist)
+            float(args.thinlens_focal_distance) if args.thinlens_focal_distance is not None else float(args.cam_dist)
         )
         pbrt_lines.extend(
             [
@@ -321,7 +319,9 @@ def main() -> None:
     else:
         lens_repo = resolve_lensfile(repo, args.lensfile)
         if not lens_repo.is_file():
-            raise FileNotFoundError(f'realistic camera: lens file not found: {lens_repo} (from --lensfile {args.lensfile!r})')
+            raise FileNotFoundError(
+                f"realistic camera: lens file not found: {lens_repo} (from --lensfile {args.lensfile!r})"
+            )
         lens_for_scene = os.path.relpath(str(lens_repo), str(out_dir.resolve()))
         pbrt_lines.extend(
             [

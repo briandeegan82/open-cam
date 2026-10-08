@@ -53,10 +53,8 @@ class TestExposure:
 
     def test_electrons_scale_with_time_and_inverse_square_of_aperture(self):
         base = _point(f_number=4.0, integration_time_s=0.01)
-        assert _point(f_number=4.0, integration_time_s=0.02).signal_e == pytest.approx(
-            2.0 * base.signal_e, rel=1e-9)
-        assert _point(f_number=8.0, integration_time_s=0.01).signal_e == pytest.approx(
-            base.signal_e / 4.0, rel=1e-9)
+        assert _point(f_number=4.0, integration_time_s=0.02).signal_e == pytest.approx(2.0 * base.signal_e, rel=1e-9)
+        assert _point(f_number=8.0, integration_time_s=0.01).signal_e == pytest.approx(base.signal_e / 4.0, rel=1e-9)
 
     def test_sunny_16_lands_within_a_third_of_a_stop_of_the_meter(self):
         """The classic rule: ISO 100, f/16, 1/125 in direct sun."""
@@ -84,7 +82,7 @@ class TestExposure:
     def test_snr_of_a_shot_limited_exposure_is_root_n(self):
         p = _point(scene_luminance_cd_m2=300.0, f_number=4.0, integration_time_s=1.0 / 250.0)
         assert p.shot_noise_e == pytest.approx(np.sqrt(p.signal_e), rel=1e-9)
-        expected_db = 20.0 * np.log10(p.signal_e / np.sqrt(p.signal_e + p.read_noise_e ** 2))
+        expected_db = 20.0 * np.log10(p.signal_e / np.sqrt(p.signal_e + p.read_noise_e**2))
         assert p.snr_db == pytest.approx(expected_db, abs=1e-6)
 
 
@@ -101,21 +99,24 @@ class TestIsoIsGain:
         assert pushed.K_e_per_DN == pytest.approx(base.K_e_per_DN / 8.0, rel=1e-9)
 
     def test_dynamic_range_falls_as_iso_rises(self):
-        sweep = ee.iso_sweep(signal_e=2000.0, sigma_amp_e=0.4, **{
-            k: SENSOR[k] for k in ("K_e_per_DN", "full_well_e", "sigma_d_e")})
+        sweep = ee.iso_sweep(
+            signal_e=2000.0, sigma_amp_e=0.4, **{k: SENSOR[k] for k in ("K_e_per_DN", "full_well_e", "sigma_d_e")}
+        )
         assert np.all(np.diff(sweep.dynamic_range_db) < 0)
 
     def test_amplifier_noise_only_bites_above_unity_gain(self):
-        sweep = ee.iso_sweep(signal_e=2000.0, sigma_amp_e=0.4, **{
-            k: SENSOR[k] for k in ("K_e_per_DN", "full_well_e", "sigma_d_e")})
+        sweep = ee.iso_sweep(
+            signal_e=2000.0, sigma_amp_e=0.4, **{k: SENSOR[k] for k in ("K_e_per_DN", "full_well_e", "sigma_d_e")}
+        )
         assert sweep.read_noise_e[0] == pytest.approx(SENSOR["sigma_d_e"])
         assert np.all(np.diff(sweep.read_noise_e) > 0)
 
     def test_without_amplifier_noise_the_floor_is_flat(self):
         """Read noise is input-referred: with a noiseless amplifier, gain moves
         signal and noise together and the electron-domain floor does not move."""
-        sweep = ee.iso_sweep(signal_e=2000.0, sigma_amp_e=0.0, **{
-            k: SENSOR[k] for k in ("K_e_per_DN", "full_well_e", "sigma_d_e")})
+        sweep = ee.iso_sweep(
+            signal_e=2000.0, sigma_amp_e=0.0, **{k: SENSOR[k] for k in ("K_e_per_DN", "full_well_e", "sigma_d_e")}
+        )
         assert np.allclose(sweep.read_noise_e, SENSOR["sigma_d_e"])
 
 
@@ -123,8 +124,9 @@ class TestExposureTriangle:
     def test_every_point_on_a_line_is_the_same_exposure(self):
         tri = ee.exposure_triangle(f_number=5.6, integration_time_s=1.0 / 250.0)
         signals = [
-            ee.exposure_point(scene_luminance_cd_m2=200.0, f_number=float(n),
-                              integration_time_s=float(t), **EXPOSURE).signal_e
+            ee.exposure_point(
+                scene_luminance_cd_m2=200.0, f_number=float(n), integration_time_s=float(t), **EXPOSURE
+            ).signal_e
             for n, t in zip(tri.f_number[::12], tri.shutter_s[::12])
         ]
         assert np.allclose(signals, signals[0], rtol=1e-9)
@@ -138,8 +140,7 @@ class TestExposureTriangle:
 
     def test_the_current_setting_sits_on_the_centre_line(self):
         tri = ee.exposure_triangle(f_number=5.6, integration_time_s=1.0 / 250.0)
-        centre = next(shutter for ev, shutter in tri.ev_lines
-                      if ev == pytest.approx(tri.current_ev))
+        centre = next(shutter for ev, shutter in tri.ev_lines if ev == pytest.approx(tri.current_ev))
         assert np.interp(5.6, tri.f_number, centre) == pytest.approx(1.0 / 250.0, rel=1e-3)
 
 
@@ -156,22 +157,19 @@ class TestDefects:
             ee.render_defects(enabled=("purple_fringing",), **SENSOR)
 
     def test_row_fpn_shows_up_in_the_row_profile_and_not_the_column_profile(self):
-        rows, cols = ee.row_column_profiles(
-            ee.render_defects(enabled=("row_fpn",), row_fpn_std_e=25.0, **SENSOR))
+        rows, cols = ee.row_column_profiles(ee.render_defects(enabled=("row_fpn",), row_fpn_std_e=25.0, **SENSOR))
         base_rows, base_cols = ee.row_column_profiles(ee.render_defects(enabled=(), **SENSOR))
         assert rows.std() > 3.0 * base_rows.std()
         assert cols.std() == pytest.approx(base_cols.std(), rel=0.5)
 
     def test_column_fpn_shows_up_in_the_column_profile_and_not_the_row_profile(self):
-        rows, cols = ee.row_column_profiles(
-            ee.render_defects(enabled=("column_fpn",), col_fpn_std_e=25.0, **SENSOR))
+        rows, cols = ee.row_column_profiles(ee.render_defects(enabled=("column_fpn",), col_fpn_std_e=25.0, **SENSOR))
         base_rows, base_cols = ee.row_column_profiles(ee.render_defects(enabled=(), **SENSOR))
         assert cols.std() > 3.0 * base_cols.std()
         assert rows.std() == pytest.approx(base_rows.std(), rel=0.5)
 
     def test_flicker_bands_rows_because_a_rolling_shutter_reads_rows_in_time(self):
-        rows, cols = ee.row_column_profiles(
-            ee.render_defects(enabled=("flicker",), flicker_std_e=25.0, **SENSOR))
+        rows, cols = ee.row_column_profiles(ee.render_defects(enabled=("flicker",), flicker_std_e=25.0, **SENSOR))
         assert rows.std() > cols.std()
 
     def test_flicker_is_smoother_than_white_row_fpn(self):
@@ -204,8 +202,7 @@ class TestDefects:
         hot = ee.render_defects(enabled=("ktc",), temperature_c=80.0, **SENSOR)
         assert 0 < cold.sigma_ktc_e < hot.sigma_ktc_e
         # sqrt(T) in kelvin, so 100 C of swing is a small effect -- worth seeing.
-        assert hot.sigma_ktc_e / cold.sigma_ktc_e == pytest.approx(
-            np.sqrt(353.15 / 253.15), rel=1e-6)
+        assert hot.sigma_ktc_e / cold.sigma_ktc_e == pytest.approx(np.sqrt(353.15 / 253.15), rel=1e-6)
 
     def test_disabled_defects_leave_the_frame_untouched(self):
         """Toggling one defect must not perturb the others, or the signatures
@@ -255,11 +252,17 @@ class TestScenarios:
         assert point.regime in ("read-noise limited", "shot-noise limited", "clipped")
 
         frame = ee.render_defects(
-            enabled=sc.defects, temperature_c=sc.temperature_c,
-            row_fpn_std_e=sc.row_fpn_std_e, col_fpn_std_e=sc.col_fpn_std_e,
-            flicker_std_e=sc.flicker_std_e, adc_inl_fraction=sc.adc_inl_fraction,
-            adc_dnl_std_lsb=sc.adc_dnl_std_lsb, hot_pixel_fraction=sc.hot_pixel_fraction,
-            bloom_spread=sc.bloom_spread, **SENSOR)
+            enabled=sc.defects,
+            temperature_c=sc.temperature_c,
+            row_fpn_std_e=sc.row_fpn_std_e,
+            col_fpn_std_e=sc.col_fpn_std_e,
+            flicker_std_e=sc.flicker_std_e,
+            adc_inl_fraction=sc.adc_inl_fraction,
+            adc_dnl_std_lsb=sc.adc_dnl_std_lsb,
+            hot_pixel_fraction=sc.hot_pixel_fraction,
+            bloom_spread=sc.bloom_spread,
+            **SENSOR,
+        )
         assert np.all(np.isfinite(frame.dn))
 
     def test_the_scenarios_named_defects_all_exist(self):
@@ -269,15 +272,23 @@ class TestScenarios:
     def test_the_underexposed_scenario_really_is_read_noise_limited(self):
         sc = SCENARIOS["read_noise_limited"]
         point = ee.exposure_point(
-            scene_luminance_cd_m2=sc.scene_luminance_cd_m2, f_number=sc.f_number,
-            integration_time_s=sc.integration_time_s, iso_gain=sc.iso_gain, **EXPOSURE)
+            scene_luminance_cd_m2=sc.scene_luminance_cd_m2,
+            f_number=sc.f_number,
+            integration_time_s=sc.integration_time_s,
+            iso_gain=sc.iso_gain,
+            **EXPOSURE,
+        )
         assert point.regime == "read-noise limited"
 
     def test_the_blown_highlight_scenario_really_clips(self):
         sc = SCENARIOS["blown_highlight"]
         point = ee.exposure_point(
-            scene_luminance_cd_m2=sc.scene_luminance_cd_m2, f_number=sc.f_number,
-            integration_time_s=sc.integration_time_s, iso_gain=sc.iso_gain, **EXPOSURE)
+            scene_luminance_cd_m2=sc.scene_luminance_cd_m2,
+            f_number=sc.f_number,
+            integration_time_s=sc.integration_time_s,
+            iso_gain=sc.iso_gain,
+            **EXPOSURE,
+        )
         assert point.regime == "clipped"
 
 
@@ -300,8 +311,12 @@ class TestAgainstTheNamedRecipe:
 
     def _point(self, sc):
         return ee.exposure_point(
-            scene_luminance_cd_m2=sc.scene_luminance_cd_m2, f_number=sc.f_number,
-            integration_time_s=sc.integration_time_s, iso_gain=sc.iso_gain, **self.Z6)
+            scene_luminance_cd_m2=sc.scene_luminance_cd_m2,
+            f_number=sc.f_number,
+            integration_time_s=sc.integration_time_s,
+            iso_gain=sc.iso_gain,
+            **self.Z6,
+        )
 
     def test_every_scenario_names_a_recipe(self):
         assert all(sc.camera_recipe_id for sc in SCENARIOS.values())
@@ -317,13 +332,16 @@ class TestAgainstTheNamedRecipe:
         """Which is the scenario's actual lesson: the branch is narrow."""
         sc = SCENARIOS["read_noise_limited"]
         opened = ee.exposure_point(
-            scene_luminance_cd_m2=sc.scene_luminance_cd_m2, f_number=sc.f_number / np.sqrt(2),
-            integration_time_s=sc.integration_time_s, iso_gain=sc.iso_gain, **self.Z6)
+            scene_luminance_cd_m2=sc.scene_luminance_cd_m2,
+            f_number=sc.f_number / np.sqrt(2),
+            integration_time_s=sc.integration_time_s,
+            iso_gain=sc.iso_gain,
+            **self.Z6,
+        )
         assert opened.regime == "shot-noise limited"
 
     def test_sunny_16_still_meters_correctly(self):
-        assert abs(self._point(SCENARIOS["sunny_16"]).ev
-                   - self._point(SCENARIOS["sunny_16"]).ev100_scene) < 0.34
+        assert abs(self._point(SCENARIOS["sunny_16"]).ev - self._point(SCENARIOS["sunny_16"]).ev100_scene) < 0.34
 
     def test_the_blown_highlight_scenario_clips_here_too(self):
         assert self._point(SCENARIOS["blown_highlight"]).regime == "clipped"
@@ -333,5 +351,4 @@ class TestAgainstTheNamedRecipe:
         the exposure readout cannot account for, and a well that falls short of
         it wastes bits. They should coincide to within a code or so."""
         point = self._point(SCENARIOS["sunny_16"])
-        assert (point.full_well_e / point.K_e_per_DN + self.Z6["black_level_DN"]
-                == pytest.approx(point.max_dn, abs=2.0))
+        assert point.full_well_e / point.K_e_per_DN + self.Z6["black_level_DN"] == pytest.approx(point.max_dn, abs=2.0)

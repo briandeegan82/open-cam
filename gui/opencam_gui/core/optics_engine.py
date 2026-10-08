@@ -25,7 +25,9 @@ def rgb_center_wavelengths_nm() -> dict[str, float]:
     return dict(_psf_module()._RGB_CENTER_NM)
 
 
-def chromatic_sigma_px(wavelength_nm: float, f_number: float, pixel_pitch_um: float, sigma_geometric_px: float) -> float:
+def chromatic_sigma_px(
+    wavelength_nm: float, f_number: float, pixel_pitch_um: float, sigma_geometric_px: float
+) -> float:
     m = _psf_module()
     return m.psf_sigma_chromatic(wavelength_nm, f_number, pixel_pitch_um, sigma_geometric_px)
 

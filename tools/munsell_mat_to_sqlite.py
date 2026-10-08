@@ -77,13 +77,10 @@ def _print_summary(conn: sqlite3.Connection) -> None:
     print(f"chips: {n_chip}  spectrum rows: {n_spec}", file=sys.stderr)
     print("top hues by count:", file=sys.stderr)
     for row in cur.execute(
-        "SELECT hue, COUNT(*) AS n FROM chip WHERE hue IS NOT NULL "
-        "GROUP BY hue ORDER BY n DESC LIMIT 12"
+        "SELECT hue, COUNT(*) AS n FROM chip WHERE hue IS NOT NULL GROUP BY hue ORDER BY n DESC LIMIT 12"
     ):
         print(f"  {row[0]!r}: {row[1]}", file=sys.stderr)
-    wl0, wl1 = cur.execute(
-        "SELECT MIN(wavelength_nm), MAX(wavelength_nm) FROM spectrum"
-    ).fetchone()
+    wl0, wl1 = cur.execute("SELECT MIN(wavelength_nm), MAX(wavelength_nm) FROM spectrum").fetchone()
     print(f"wavelength_nm range: {wl0} .. {wl1}", file=sys.stderr)
 
 
@@ -153,7 +150,7 @@ def main() -> None:
         c_cols = ",".join([f"c_{i}" for i in range(16)])
         ins_chip = (
             f"INSERT INTO chip (mat_index,label,slug,hue,value,chroma,{c_cols}) "
-            f"VALUES (?,?,?,?,?,?,{','.join(['?']*16)})"
+            f"VALUES (?,?,?,?,?,?,{','.join(['?'] * 16)})"
         )
 
         chip_ids: list[int] = []

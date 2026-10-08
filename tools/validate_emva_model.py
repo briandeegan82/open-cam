@@ -59,10 +59,7 @@ def main() -> None:
     ap.add_argument(
         "--strict-calibration",
         action="store_true",
-        help=(
-            "Fail validation when EMVA parameters are heuristic or when "
-            "validation.datasheet.source is missing."
-        ),
+        help=("Fail validation when EMVA parameters are heuristic or when validation.datasheet.source is missing."),
     )
     ap.add_argument(
         "--calibration-tier-policy",
@@ -162,15 +159,9 @@ def main() -> None:
     emva_method = str(source.get("emva_param_method", "")).strip().lower()
     ds_source = str(ds.get("source", "")).strip()
     strict_calibration = bool(args.strict_calibration or val.get("strict_calibration", False))
-    tier_policy = str(
-        args.calibration_tier_policy
-        or val.get("calibration_tier_policy", "research")
-    ).strip().lower()
+    tier_policy = str(args.calibration_tier_policy or val.get("calibration_tier_policy", "research")).strip().lower()
     if tier_policy not in ("strict", "semi_strict", "research"):
-        raise ValueError(
-            "validation.calibration_tier_policy must be one of "
-            '"strict", "semi_strict", "research"'
-        )
+        raise ValueError('validation.calibration_tier_policy must be one of "strict", "semi_strict", "research"')
     calibration_tier = str(source.get("calibration_tier", "")).strip().lower()
     if not calibration_tier:
         calibration_tier = "unspecified"
@@ -265,11 +256,7 @@ def main() -> None:
     report["calibration_ok"] = calibration_ok
     report["calibration_failure_reasons"] = calibration_failure_reasons
     report["all_ok"] = bool(
-        ptc_ok
-        and dark_var_ok
-        and dark_mean_ok
-        and (param_cmp is None or param_cmp["all_ok"])
-        and calibration_ok
+        ptc_ok and dark_var_ok and dark_mean_ok and (param_cmp is None or param_cmp["all_ok"]) and calibration_ok
     )
 
     json_out = args.json_out

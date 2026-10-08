@@ -68,7 +68,7 @@ class SensorFormat:
 
 #: Formats that span the range the tutorials compare, smallest sensor first.
 SENSOR_FORMATS: dict[str, SensorFormat] = {
-    "phone_1_2_55": SensorFormat("Phone 1/2.55\"", 5.76, 4.29),
+    "phone_1_2_55": SensorFormat('Phone 1/2.55"', 5.76, 4.29),
     "type_1_inch": SensorFormat("1-inch (RX100 class)", 13.2, 8.8),
     "micro_four_thirds": SensorFormat("Micro Four Thirds", 17.3, 13.0),
     "aps_c": SensorFormat("APS-C", 23.6, 15.7),
@@ -194,9 +194,7 @@ def subject_extent_mm(fov_deg: float, distance_mm: float) -> float:
 # =====================================================================
 # Depth of field
 # =====================================================================
-def circle_of_confusion_mm(
-    sensor_diagonal_mm: float, divisor: float = DEFAULT_COC_DIVISOR
-) -> float:
+def circle_of_confusion_mm(sensor_diagonal_mm: float, divisor: float = DEFAULT_COC_DIVISOR) -> float:
     """Print-based CoC criterion: sensor diagonal / *divisor*."""
     if divisor <= 0:
         raise ValueError("divisor must be positive")
@@ -307,9 +305,7 @@ def diffraction_limited_f_number(coc_mm: float, wavelength_nm: float = 550.0) ->
 # =====================================================================
 # Natural (cos^4) vignetting
 # =====================================================================
-def relative_illumination_cos4(
-    image_height_mm: np.ndarray | float, image_distance_mm: float
-) -> np.ndarray:
+def relative_illumination_cos4(image_height_mm: np.ndarray | float, image_distance_mm: float) -> np.ndarray:
     """cos^4 falloff vs distance from the optical axis on the sensor.
 
     Delegates to :func:`sensor_radiometry.cos4_vignetting_from_pinhole`, the

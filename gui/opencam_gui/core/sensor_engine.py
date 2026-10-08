@@ -55,9 +55,7 @@ def photon_transfer_curve(
     mean_dn = np.array([m.mean_dn_linear(mu, K_e_per_DN, black_level_DN) for mu in mu_e])
     var_dn = np.array(
         [
-            m.temporal_variance_dn_squared(
-                mu, sigma_d_e, K_e_per_DN, use_poisson=use_poisson, mu_dark_e=mu_dark_e
-            )
+            m.temporal_variance_dn_squared(mu, sigma_d_e, K_e_per_DN, use_poisson=use_poisson, mu_dark_e=mu_dark_e)
             for mu in mu_e
         ]
     )

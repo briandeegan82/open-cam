@@ -36,9 +36,7 @@ def _camera_block(args: argparse.Namespace, scene_dir: Path, repo: Path) -> list
         return [f'Camera "perspective" "float fov" [{float(args.fov):.6g}]']
     if args.camera == "thinlens":
         thin_focus = (
-            float(args.thinlens_focal_distance)
-            if args.thinlens_focal_distance is not None
-            else float(args.cam_dist)
+            float(args.thinlens_focal_distance) if args.thinlens_focal_distance is not None else float(args.cam_dist)
         )
         return [
             'Camera "perspective"',
@@ -135,7 +133,12 @@ def build_slanted_edge_lines(width: float, height: float, angle_deg: float, edge
     rad = math.radians(angle_deg)
     c = math.cos(rad)
     s = math.sin(rad)
-    local = [(-edge_w / 2.0, -edge_h / 2.0), (edge_w / 2.0, -edge_h / 2.0), (-edge_w / 2.0, edge_h / 2.0), (edge_w / 2.0, edge_h / 2.0)]
+    local = [
+        (-edge_w / 2.0, -edge_h / 2.0),
+        (edge_w / 2.0, -edge_h / 2.0),
+        (-edge_w / 2.0, edge_h / 2.0),
+        (edge_w / 2.0, edge_h / 2.0),
+    ]
     pts = []
     for x, y in local:
         xr = c * x - s * y + cx
@@ -160,7 +163,9 @@ def build_slanted_edge_lines(width: float, height: float, angle_deg: float, edge
     return lines
 
 
-def build_iso_noise_lines(width: float, height: float, rows: int, cols: int, min_reflectance: float, max_reflectance: float) -> list[str]:
+def build_iso_noise_lines(
+    width: float, height: float, rows: int, cols: int, min_reflectance: float, max_reflectance: float
+) -> list[str]:
     lines = _background_plane(width, height, refl=0.2)
     margin_x = width * 0.06
     margin_y = height * 0.08

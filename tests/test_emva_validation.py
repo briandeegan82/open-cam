@@ -129,8 +129,8 @@ class TestEmva1288DsnuPrnu(unittest.TestCase):
         mu = np.array([0.0, 1000.0, 4000.0])
         std = spatial_std_electrons(mu, dsnu_std_e=3.0, prnu_std_fraction=0.02)
         np.testing.assert_allclose(std[0], 3.0)
-        np.testing.assert_allclose(std[1], np.sqrt(3.0 ** 2 + (0.02 * 1000.0) ** 2))
-        np.testing.assert_allclose(std[2], np.sqrt(3.0 ** 2 + (0.02 * 4000.0) ** 2))
+        np.testing.assert_allclose(std[1], np.sqrt(3.0**2 + (0.02 * 1000.0) ** 2))
+        np.testing.assert_allclose(std[2], np.sqrt(3.0**2 + (0.02 * 4000.0) ** 2))
 
     def test_temporal_correction_removes_read_noise_bias(self) -> None:
         rng = np.random.default_rng(0)
@@ -140,9 +140,17 @@ class TestEmva1288DsnuPrnu(unittest.TestCase):
         sigma_d, k, n_frames = 4.0, 1.0, 40
         # Uniform field well above the dark floor so read noise is not clipped.
         stack = simulate_uniform_stack(
-            mu_e=200.0, n_frames=n_frames, prnu_map=prnu, dsnu_map=dsnu,
-            dark_mean_e=0.0, sigma_d_e=sigma_d, K_e_per_DN=k, black_level_DN=0.0,
-            full_well_e=10000.0, use_poisson=False, seed=1,
+            mu_e=200.0,
+            n_frames=n_frames,
+            prnu_map=prnu,
+            dsnu_map=dsnu,
+            dark_mean_e=0.0,
+            sigma_d_e=sigma_d,
+            K_e_per_DN=k,
+            black_level_DN=0.0,
+            full_well_e=10000.0,
+            use_poisson=False,
+            seed=1,
         )
         stats = emva1288_spatial_stats(stack)
         expected_residual = sigma_d / np.sqrt(n_frames)
@@ -156,18 +164,38 @@ class TestEmva1288DsnuPrnu(unittest.TestCase):
         prnu_true, dsnu_true = 0.025, 6.0
         prnu = prnu_gain_map((h, w), prnu_true, rng)
         dsnu = dsnu_offset_map(
-            (h, w), dsnu_std_e=dsnu_true, dark_mean_e=0.0, rng=rng, model="gaussian",
+            (h, w),
+            dsnu_std_e=dsnu_true,
+            dark_mean_e=0.0,
+            rng=rng,
+            model="gaussian",
         )
         k = 2.0
         dark = simulate_uniform_stack(
-            mu_e=0.0, n_frames=80, prnu_map=prnu, dsnu_map=dsnu,
-            dark_mean_e=0.0, sigma_d_e=1.0, K_e_per_DN=k, black_level_DN=16.0,
-            full_well_e=8000.0, use_poisson=True, seed=3,
+            mu_e=0.0,
+            n_frames=80,
+            prnu_map=prnu,
+            dsnu_map=dsnu,
+            dark_mean_e=0.0,
+            sigma_d_e=1.0,
+            K_e_per_DN=k,
+            black_level_DN=16.0,
+            full_well_e=8000.0,
+            use_poisson=True,
+            seed=3,
         )
         bright = simulate_uniform_stack(
-            mu_e=2000.0, n_frames=80, prnu_map=prnu, dsnu_map=dsnu,
-            dark_mean_e=0.0, sigma_d_e=1.0, K_e_per_DN=k, black_level_DN=16.0,
-            full_well_e=8000.0, use_poisson=True, seed=4,
+            mu_e=2000.0,
+            n_frames=80,
+            prnu_map=prnu,
+            dsnu_map=dsnu,
+            dark_mean_e=0.0,
+            sigma_d_e=1.0,
+            K_e_per_DN=k,
+            black_level_DN=16.0,
+            full_well_e=8000.0,
+            use_poisson=True,
+            seed=4,
         )
         dsnu_m = emva1288_dsnu(dark, k)
         prnu_m = emva1288_prnu(dark, bright)
@@ -178,8 +206,11 @@ class TestEmva1288DsnuPrnu(unittest.TestCase):
         rng = np.random.default_rng(5)
         dark_mean, dsnu_std = 20.0, 5.0
         offset = dsnu_offset_map(
-            (256, 256), dsnu_std_e=dsnu_std, dark_mean_e=dark_mean,
-            rng=rng, model="lognormal",
+            (256, 256),
+            dsnu_std_e=dsnu_std,
+            dark_mean_e=dark_mean,
+            rng=rng,
+            model="lognormal",
         )
         self.assertLess(abs(float(offset.mean())), 0.4)
         self.assertAlmostEqual(float(offset.std(ddof=1)), dsnu_std, delta=0.6)

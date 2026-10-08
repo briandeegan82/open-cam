@@ -116,9 +116,7 @@ def test_constructing_with_scenario_id_matches_clicking_it(dpg_context, app_cls)
     dpg.create_context()
     from_click = _built(app_cls)
     from_click._on_scenario_click(user_data=sid)
-    assert {
-        k: v for k, v in vars(from_click).items() if isinstance(v, (int, float, str, bool))
-    } == scalars
+    assert {k: v for k, v in vars(from_click).items() if isinstance(v, (int, float, str, bool))} == scalars
 
 
 def test_isp_cfa_scenarios_load_the_named_qe_curves(dpg_context):

@@ -30,16 +30,86 @@ CMF_WAVELENGTH_NM = np.arange(380, 781, 5, dtype=np.float64)
 
 CMF_X = np.array(
     [
-        0.001368, 0.002236, 0.004243, 0.007650, 0.014310, 0.023120, 0.043510, 0.077630,
-        0.134380, 0.214770, 0.283900, 0.328500, 0.348280, 0.348060, 0.336200, 0.318700,
-        0.290800, 0.251100, 0.195360, 0.142100, 0.095640, 0.057950, 0.032010, 0.014700,
-        0.004900, 0.002400, 0.009300, 0.029100, 0.063270, 0.109600, 0.165500, 0.225750,
-        0.290400, 0.359700, 0.433450, 0.512050, 0.594500, 0.678400, 0.762100, 0.842500,
-        0.916300, 0.978600, 1.026300, 1.056700, 1.062200, 1.045600, 1.002600, 0.938400,
-        0.854450, 0.751400, 0.642400, 0.541900, 0.447900, 0.360800, 0.283500, 0.218700,
-        0.164900, 0.121200, 0.087400, 0.063600, 0.046770, 0.032900, 0.022700, 0.015840,
-        0.011359, 0.008111, 0.005790, 0.004109, 0.002899, 0.002049, 0.001440, 0.001000,
-        0.000690, 0.000476, 0.000332, 0.000235, 0.000166, 0.000117, 0.000083, 0.000059,
+        0.001368,
+        0.002236,
+        0.004243,
+        0.007650,
+        0.014310,
+        0.023120,
+        0.043510,
+        0.077630,
+        0.134380,
+        0.214770,
+        0.283900,
+        0.328500,
+        0.348280,
+        0.348060,
+        0.336200,
+        0.318700,
+        0.290800,
+        0.251100,
+        0.195360,
+        0.142100,
+        0.095640,
+        0.057950,
+        0.032010,
+        0.014700,
+        0.004900,
+        0.002400,
+        0.009300,
+        0.029100,
+        0.063270,
+        0.109600,
+        0.165500,
+        0.225750,
+        0.290400,
+        0.359700,
+        0.433450,
+        0.512050,
+        0.594500,
+        0.678400,
+        0.762100,
+        0.842500,
+        0.916300,
+        0.978600,
+        1.026300,
+        1.056700,
+        1.062200,
+        1.045600,
+        1.002600,
+        0.938400,
+        0.854450,
+        0.751400,
+        0.642400,
+        0.541900,
+        0.447900,
+        0.360800,
+        0.283500,
+        0.218700,
+        0.164900,
+        0.121200,
+        0.087400,
+        0.063600,
+        0.046770,
+        0.032900,
+        0.022700,
+        0.015840,
+        0.011359,
+        0.008111,
+        0.005790,
+        0.004109,
+        0.002899,
+        0.002049,
+        0.001440,
+        0.001000,
+        0.000690,
+        0.000476,
+        0.000332,
+        0.000235,
+        0.000166,
+        0.000117,
+        0.000083,
+        0.000059,
         0.000042,
     ],
     dtype=np.float64,
@@ -47,16 +117,86 @@ CMF_X = np.array(
 
 CMF_Y = np.array(
     [
-        0.000039, 0.000064, 0.000120, 0.000217, 0.000396, 0.000640, 0.001210, 0.002180,
-        0.004000, 0.007300, 0.011600, 0.016840, 0.023000, 0.029800, 0.038000, 0.048000,
-        0.060000, 0.073900, 0.090980, 0.112600, 0.139020, 0.169300, 0.208020, 0.258600,
-        0.323000, 0.407300, 0.503000, 0.608200, 0.710000, 0.793200, 0.862000, 0.914850,
-        0.954000, 0.980300, 0.995000, 1.000000, 0.995000, 0.978600, 0.952000, 0.915400,
-        0.870000, 0.816300, 0.757000, 0.694900, 0.631000, 0.566800, 0.503000, 0.441200,
-        0.381000, 0.321000, 0.265000, 0.217000, 0.175000, 0.138200, 0.107000, 0.081600,
-        0.061000, 0.044580, 0.032000, 0.023200, 0.017000, 0.011920, 0.008210, 0.005723,
-        0.004102, 0.002929, 0.002091, 0.001484, 0.001047, 0.000740, 0.000520, 0.000361,
-        0.000249, 0.000172, 0.000120, 0.000083, 0.000057, 0.000039, 0.000027, 0.000018,
+        0.000039,
+        0.000064,
+        0.000120,
+        0.000217,
+        0.000396,
+        0.000640,
+        0.001210,
+        0.002180,
+        0.004000,
+        0.007300,
+        0.011600,
+        0.016840,
+        0.023000,
+        0.029800,
+        0.038000,
+        0.048000,
+        0.060000,
+        0.073900,
+        0.090980,
+        0.112600,
+        0.139020,
+        0.169300,
+        0.208020,
+        0.258600,
+        0.323000,
+        0.407300,
+        0.503000,
+        0.608200,
+        0.710000,
+        0.793200,
+        0.862000,
+        0.914850,
+        0.954000,
+        0.980300,
+        0.995000,
+        1.000000,
+        0.995000,
+        0.978600,
+        0.952000,
+        0.915400,
+        0.870000,
+        0.816300,
+        0.757000,
+        0.694900,
+        0.631000,
+        0.566800,
+        0.503000,
+        0.441200,
+        0.381000,
+        0.321000,
+        0.265000,
+        0.217000,
+        0.175000,
+        0.138200,
+        0.107000,
+        0.081600,
+        0.061000,
+        0.044580,
+        0.032000,
+        0.023200,
+        0.017000,
+        0.011920,
+        0.008210,
+        0.005723,
+        0.004102,
+        0.002929,
+        0.002091,
+        0.001484,
+        0.001047,
+        0.000740,
+        0.000520,
+        0.000361,
+        0.000249,
+        0.000172,
+        0.000120,
+        0.000083,
+        0.000057,
+        0.000039,
+        0.000027,
+        0.000018,
         0.000012,
     ],
     dtype=np.float64,
@@ -64,16 +204,86 @@ CMF_Y = np.array(
 
 CMF_Z = np.array(
     [
-        0.006450, 0.010550, 0.020050, 0.036210, 0.067850, 0.110200, 0.207400, 0.371300,
-        0.645600, 1.039050, 1.385600, 1.622960, 1.747060, 1.782600, 1.772110, 1.744100,
-        1.669200, 1.528100, 1.287640, 1.041900, 0.812950, 0.616200, 0.465180, 0.353300,
-        0.272000, 0.212300, 0.158200, 0.111700, 0.078250, 0.057250, 0.042160, 0.029840,
-        0.020300, 0.013400, 0.008750, 0.005750, 0.003900, 0.002750, 0.002100, 0.001800,
-        0.001650, 0.001400, 0.001100, 0.001000, 0.001800, 0.002900, 0.004900, 0.007400,
-        0.009300, 0.008800, 0.007700, 0.005900, 0.004500, 0.003400, 0.002400, 0.001800,
-        0.001400, 0.001100, 0.001000, 0.001000, 0.001000, 0.001000, 0.001000, 0.001000,
-        0.001000, 0.001000, 0.001000, 0.001000, 0.001000, 0.001000, 0.001000, 0.001000,
-        0.001000, 0.001000, 0.001000, 0.001000, 0.001000, 0.001000, 0.001000, 0.001000,
+        0.006450,
+        0.010550,
+        0.020050,
+        0.036210,
+        0.067850,
+        0.110200,
+        0.207400,
+        0.371300,
+        0.645600,
+        1.039050,
+        1.385600,
+        1.622960,
+        1.747060,
+        1.782600,
+        1.772110,
+        1.744100,
+        1.669200,
+        1.528100,
+        1.287640,
+        1.041900,
+        0.812950,
+        0.616200,
+        0.465180,
+        0.353300,
+        0.272000,
+        0.212300,
+        0.158200,
+        0.111700,
+        0.078250,
+        0.057250,
+        0.042160,
+        0.029840,
+        0.020300,
+        0.013400,
+        0.008750,
+        0.005750,
+        0.003900,
+        0.002750,
+        0.002100,
+        0.001800,
+        0.001650,
+        0.001400,
+        0.001100,
+        0.001000,
+        0.001800,
+        0.002900,
+        0.004900,
+        0.007400,
+        0.009300,
+        0.008800,
+        0.007700,
+        0.005900,
+        0.004500,
+        0.003400,
+        0.002400,
+        0.001800,
+        0.001400,
+        0.001100,
+        0.001000,
+        0.001000,
+        0.001000,
+        0.001000,
+        0.001000,
+        0.001000,
+        0.001000,
+        0.001000,
+        0.001000,
+        0.001000,
+        0.001000,
+        0.001000,
+        0.001000,
+        0.001000,
+        0.001000,
+        0.001000,
+        0.001000,
+        0.001000,
+        0.001000,
+        0.001000,
+        0.001000,
+        0.001000,
         0.001000,
     ],
     dtype=np.float64,
@@ -83,11 +293,13 @@ CMF_Z = np.array(
 def cmf_on_grid(wavelength_nm: np.ndarray) -> np.ndarray:
     """The observer resampled onto *wavelength_nm*, shape ``(3, K)``."""
     wl = np.asarray(wavelength_nm, dtype=np.float64)
-    return np.stack([
-        np.interp(wl, CMF_WAVELENGTH_NM, CMF_X, left=0.0, right=0.0),
-        np.interp(wl, CMF_WAVELENGTH_NM, CMF_Y, left=0.0, right=0.0),
-        np.interp(wl, CMF_WAVELENGTH_NM, CMF_Z, left=0.0, right=0.0),
-    ])
+    return np.stack(
+        [
+            np.interp(wl, CMF_WAVELENGTH_NM, CMF_X, left=0.0, right=0.0),
+            np.interp(wl, CMF_WAVELENGTH_NM, CMF_Y, left=0.0, right=0.0),
+            np.interp(wl, CMF_WAVELENGTH_NM, CMF_Z, left=0.0, right=0.0),
+        ]
+    )
 
 
 def tristimulus(wavelength_nm: np.ndarray, spd: np.ndarray) -> tuple[float, float, float]:
@@ -99,8 +311,7 @@ def tristimulus(wavelength_nm: np.ndarray, spd: np.ndarray) -> tuple[float, floa
 # =====================================================================
 # Spectral integration
 # =====================================================================
-def integrate_spectra(wavelength_nm: np.ndarray, spectra: np.ndarray,
-                      responses: np.ndarray) -> np.ndarray:
+def integrate_spectra(wavelength_nm: np.ndarray, spectra: np.ndarray, responses: np.ndarray) -> np.ndarray:
     """Integrate each spectrum against each response curve.
 
     ``spectra`` is ``(N, K)`` and ``responses`` is ``(C, K)`` on the shared
@@ -111,8 +322,8 @@ def integrate_spectra(wavelength_nm: np.ndarray, spectra: np.ndarray,
     r = np.atleast_2d(np.asarray(responses, dtype=np.float64))
     if s.shape[1] != wl.size or r.shape[1] != wl.size:
         raise ValueError(
-            f"spectra {s.shape} and responses {r.shape} must both be sampled on the "
-            f"{wl.size}-point wavelength grid")
+            f"spectra {s.shape} and responses {r.shape} must both be sampled on the {wl.size}-point wavelength grid"
+        )
     return _trapz(s[:, None, :] * r[None, :, :], wl, axis=2)
 
 
@@ -127,8 +338,9 @@ def radiance_spectra(reflectance: np.ndarray, illuminant: np.ndarray) -> np.ndar
     return refl * np.asarray(illuminant, dtype=np.float64)[None, :]
 
 
-def xyz_from_spectra(wavelength_nm: np.ndarray, reflectance: np.ndarray,
-                     illuminant: np.ndarray, *, normalise: bool = True) -> np.ndarray:
+def xyz_from_spectra(
+    wavelength_nm: np.ndarray, reflectance: np.ndarray, illuminant: np.ndarray, *, normalise: bool = True
+) -> np.ndarray:
     """``(N, 3)`` CIE XYZ for each reflectance under *illuminant*.
 
     With ``normalise`` the scale is set so a perfect white diffuser gives
@@ -142,9 +354,14 @@ def xyz_from_spectra(wavelength_nm: np.ndarray, reflectance: np.ndarray,
     return xyz
 
 
-def camera_rgb_from_spectra(wavelength_nm: np.ndarray, reflectance: np.ndarray,
-                            illuminant: np.ndarray, qe_rgb: np.ndarray,
-                            *, normalise: bool = True) -> np.ndarray:
+def camera_rgb_from_spectra(
+    wavelength_nm: np.ndarray,
+    reflectance: np.ndarray,
+    illuminant: np.ndarray,
+    qe_rgb: np.ndarray,
+    *,
+    normalise: bool = True,
+) -> np.ndarray:
     """``(N, 3)`` raw camera RGB for each reflectance under *illuminant*.
 
     The same integral as :func:`xyz_from_spectra` with the observer swapped for
@@ -179,11 +396,14 @@ def luther_condition_error(wavelength_nm: np.ndarray, qe_rgb: np.ndarray) -> flo
 # XYZ / sRGB / Lab
 # =====================================================================
 #: Linear sRGB primaries, D65 white (IEC 61966-2-1).
-XYZ_FROM_SRGB = np.array([
-    [0.4124564, 0.3575761, 0.1804375],
-    [0.2126729, 0.7151522, 0.0721750],
-    [0.0193339, 0.1191920, 0.9503041],
-], dtype=np.float64)
+XYZ_FROM_SRGB = np.array(
+    [
+        [0.4124564, 0.3575761, 0.1804375],
+        [0.2126729, 0.7151522, 0.0721750],
+        [0.0193339, 0.1191920, 0.9503041],
+    ],
+    dtype=np.float64,
+)
 
 SRGB_FROM_XYZ = np.linalg.inv(XYZ_FROM_SRGB)
 
@@ -191,11 +411,14 @@ SRGB_FROM_XYZ = np.linalg.inv(XYZ_FROM_SRGB)
 WHITE_D65 = np.array([0.95047, 1.00000, 1.08883], dtype=np.float64)
 
 #: Bradford cone response, for chromatic adaptation between white points.
-_BRADFORD = np.array([
-    [0.8951, 0.2664, -0.1614],
-    [-0.7502, 1.7135, 0.0367],
-    [0.0389, -0.0685, 1.0296],
-], dtype=np.float64)
+_BRADFORD = np.array(
+    [
+        [0.8951, 0.2664, -0.1614],
+        [-0.7502, 1.7135, 0.0367],
+        [0.0389, -0.0685, 1.0296],
+    ],
+    dtype=np.float64,
+)
 
 
 def xyz_to_srgb_linear(xyz: np.ndarray) -> np.ndarray:
@@ -207,8 +430,7 @@ def srgb_linear_to_xyz(rgb: np.ndarray) -> np.ndarray:
     return np.asarray(rgb, dtype=np.float64) @ XYZ_FROM_SRGB.T
 
 
-def chromatic_adaptation_matrix(source_white: np.ndarray,
-                                target_white: np.ndarray) -> np.ndarray:
+def chromatic_adaptation_matrix(source_white: np.ndarray, target_white: np.ndarray) -> np.ndarray:
     """Bradford adaptation from one white point to another.
 
     This is what "white balance done properly" means: not a per-channel gain in
@@ -229,7 +451,7 @@ def xy_chromaticity(xyz: np.ndarray) -> np.ndarray:
     """CIE xy, dropping luminance so colours can be compared on one diagram."""
     a = np.atleast_2d(np.asarray(xyz, dtype=np.float64))
     total = np.maximum(a.sum(axis=1, keepdims=True), 1e-12)
-    return (a[:, :2] / total)
+    return a[:, :2] / total
 
 
 def correlated_colour_temperature(xy: np.ndarray) -> float:
@@ -239,7 +461,7 @@ def correlated_colour_temperature(xy: np.ndarray) -> float:
     if abs(denominator) < 1e-12:
         return float("nan")
     n = (x - 0.3320) / denominator
-    return 449.0 * n ** 3 + 3525.0 * n ** 2 + 6823.3 * n + 5520.33
+    return 449.0 * n**3 + 3525.0 * n**2 + 6823.3 * n + 5520.33
 
 
 def xyz_to_lab(xyz: np.ndarray, white: np.ndarray = WHITE_D65) -> np.ndarray:
@@ -247,11 +469,14 @@ def xyz_to_lab(xyz: np.ndarray, white: np.ndarray = WHITE_D65) -> np.ndarray:
     ratio = np.atleast_2d(np.asarray(xyz, dtype=np.float64)) / np.asarray(white, dtype=np.float64)
     eps, kappa = 216.0 / 24389.0, 24389.0 / 27.0
     f = np.where(ratio > eps, np.cbrt(np.maximum(ratio, 0.0)), (kappa * ratio + 16.0) / 116.0)
-    return np.stack([
-        116.0 * f[:, 1] - 16.0,
-        500.0 * (f[:, 0] - f[:, 1]),
-        200.0 * (f[:, 1] - f[:, 2]),
-    ], axis=1)
+    return np.stack(
+        [
+            116.0 * f[:, 1] - 16.0,
+            500.0 * (f[:, 0] - f[:, 1]),
+            200.0 * (f[:, 1] - f[:, 2]),
+        ],
+        axis=1,
+    )
 
 
 def delta_e_76(lab_a: np.ndarray, lab_b: np.ndarray) -> np.ndarray:
@@ -274,7 +499,7 @@ def delta_e_2000(lab_a: np.ndarray, lab_b: np.ndarray) -> np.ndarray:
 
     C1, C2 = np.hypot(a1, b1), np.hypot(a2, b2)
     C_bar = 0.5 * (C1 + C2)
-    G = 0.5 * (1.0 - np.sqrt(C_bar ** 7 / (C_bar ** 7 + 25.0 ** 7)))
+    G = 0.5 * (1.0 - np.sqrt(C_bar**7 / (C_bar**7 + 25.0**7)))
     a1p, a2p = (1.0 + G) * a1, (1.0 + G) * a2
     C1p, C2p = np.hypot(a1p, b1), np.hypot(a2p, b2)
     h1p = np.degrees(np.arctan2(b1, a1p)) % 360.0
@@ -291,30 +516,28 @@ def delta_e_2000(lab_a: np.ndarray, lab_b: np.ndarray) -> np.ndarray:
     Cp_bar = 0.5 * (C1p + C2p)
     h_sum, h_diff = h1p + h2p, np.abs(h1p - h2p)
     hp_bar = np.where(
-        C1p * C2p == 0.0, h_sum,
-        np.where(h_diff <= 180.0, 0.5 * h_sum,
-                 np.where(h_sum < 360.0, 0.5 * (h_sum + 360.0), 0.5 * (h_sum - 360.0))))
+        C1p * C2p == 0.0,
+        h_sum,
+        np.where(h_diff <= 180.0, 0.5 * h_sum, np.where(h_sum < 360.0, 0.5 * (h_sum + 360.0), 0.5 * (h_sum - 360.0))),
+    )
 
-    T = (1.0
-         - 0.17 * np.cos(np.radians(hp_bar - 30.0))
-         + 0.24 * np.cos(np.radians(2.0 * hp_bar))
-         + 0.32 * np.cos(np.radians(3.0 * hp_bar + 6.0))
-         - 0.20 * np.cos(np.radians(4.0 * hp_bar - 63.0)))
+    T = (
+        1.0
+        - 0.17 * np.cos(np.radians(hp_bar - 30.0))
+        + 0.24 * np.cos(np.radians(2.0 * hp_bar))
+        + 0.32 * np.cos(np.radians(3.0 * hp_bar + 6.0))
+        - 0.20 * np.cos(np.radians(4.0 * hp_bar - 63.0))
+    )
 
     S_L = 1.0 + (0.015 * (Lp_bar - 50.0) ** 2) / np.sqrt(20.0 + (Lp_bar - 50.0) ** 2)
     S_C = 1.0 + 0.045 * Cp_bar
     S_H = 1.0 + 0.015 * Cp_bar * T
 
     d_theta = 30.0 * np.exp(-(((hp_bar - 275.0) / 25.0) ** 2))
-    R_C = 2.0 * np.sqrt(Cp_bar ** 7 / (Cp_bar ** 7 + 25.0 ** 7))
+    R_C = 2.0 * np.sqrt(Cp_bar**7 / (Cp_bar**7 + 25.0**7))
     R_T = -R_C * np.sin(np.radians(2.0 * d_theta))
 
-    return np.sqrt(
-        (dLp / S_L) ** 2
-        + (dCp / S_C) ** 2
-        + (dHp / S_H) ** 2
-        + R_T * (dCp / S_C) * (dHp / S_H)
-    )
+    return np.sqrt((dLp / S_L) ** 2 + (dCp / S_C) ** 2 + (dHp / S_H) ** 2 + R_T * (dCp / S_C) * (dHp / S_H))
 
 
 # =====================================================================
@@ -330,7 +553,7 @@ class SpectralChart:
     """Reflectance spectra for a chart, on a shared wavelength grid."""
 
     wavelength_nm: np.ndarray
-    reflectance: np.ndarray       # (N, K)
+    reflectance: np.ndarray  # (N, K)
     names: tuple[str, ...]
 
 
@@ -352,14 +575,14 @@ def load_colorchecker(repo_root: Path, wavelength_nm: np.ndarray | None = None) 
     return SpectralChart(wavelength_nm=grid, reflectance=refl, names=names)
 
 
-def load_illuminant(repo_root: Path, illuminant_id: str,
-                    wavelength_nm: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray]:
+def load_illuminant(
+    repo_root: Path, illuminant_id: str, wavelength_nm: np.ndarray | None = None
+) -> tuple[np.ndarray, np.ndarray]:
     """An illuminant SPD from ``spectra/illuminant/interpolated/``."""
     path = Path(repo_root) / "spectra" / "illuminant" / "interpolated" / f"{illuminant_id}.csv"
     if not path.is_file():
         available = sorted(p.stem for p in path.parent.glob("*.csv"))
-        raise FileNotFoundError(
-            f"unknown illuminant {illuminant_id!r}; available: {', '.join(available)}")
+        raise FileNotFoundError(f"unknown illuminant {illuminant_id!r}; available: {', '.join(available)}")
     wl, spd = _read_csv_curve(path)
     if wavelength_nm is None:
         return wl, spd
@@ -372,8 +595,7 @@ def list_illuminant_ids(repo_root: Path) -> list[str]:
     return sorted(p.stem for p in d.glob("*.csv"))
 
 
-def load_qe_rgb(repo_root: Path, paths: dict[str, str],
-                wavelength_nm: np.ndarray) -> np.ndarray:
+def load_qe_rgb(repo_root: Path, paths: dict[str, str], wavelength_nm: np.ndarray) -> np.ndarray:
     """QE curves resampled onto a shared grid, shape ``(3, K)``.
 
     ``paths`` maps ``"red"``/``"green"``/``"blue"`` (and optionally ``"ircf"``)

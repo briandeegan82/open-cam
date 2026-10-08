@@ -207,14 +207,18 @@ def main() -> None:
     optics_t_csv = cal.get("optics_transmittance_csv", None)
     spatial_cfg = cal.get("optics_transmittance_spatial", {}) or {}
 
-    out_npz = (args.out or (repo / cfg.get("output", {}).get("electrons_npz", "out/sensor_forward_electrons.npz"))).resolve()
+    out_npz = (
+        args.out or (repo / cfg.get("output", {}).get("electrons_npz", "out/sensor_forward_electrons.npz"))
+    ).resolve()
     out_npz.parent.mkdir(parents=True, exist_ok=True)
 
     exr_path = args.exr if args.exr.is_absolute() else (repo / args.exr).resolve()
     if not exr_path.is_file():
         raise FileNotFoundError(exr_path)
 
-    manifest_raw = args.scene_manifest_json or cfg.get("inputs", {}).get("scene_manifest_json", "scenes/generated/colorchecker_manifest.json")
+    manifest_raw = args.scene_manifest_json or cfg.get("inputs", {}).get(
+        "scene_manifest_json", "scenes/generated/colorchecker_manifest.json"
+    )
     manifest_path = (
         manifest_raw.resolve()
         if isinstance(manifest_raw, Path) and manifest_raw.is_absolute()
@@ -250,7 +254,7 @@ def main() -> None:
         rad_to_e = np.pi / (4.0 * max(1e-12, f_number**2) * _magnification_factor)
     else:
         raise ValueError(
-            'model.pbrt_spectral_exr.radiance_to_irradiance must be '
+            "model.pbrt_spectral_exr.radiance_to_irradiance must be "
             '"thin_lens" or "pinhole" when radiance_to_irradiance_scale is unset'
         )
 
@@ -271,10 +275,7 @@ def main() -> None:
     exr_autocal_scale = 1.0
     if auto_cal_mode not in ("off", "none", "disabled", "false", "0"):
         if auto_cal_mode != "mean_photopic_lux":
-            raise ValueError(
-                "model.pbrt_spectral_exr.radiometric_autocalibration must be "
-                '"off" or "mean_photopic_lux"'
-            )
+            raise ValueError('model.pbrt_spectral_exr.radiometric_autocalibration must be "off" or "mean_photopic_lux"')
         target_lux = cal.get("target_illuminance_lux", None)
         if target_lux is None:
             print(

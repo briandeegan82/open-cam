@@ -67,8 +67,7 @@ def load_qe_curves_rgb(
     if r_peak < g_peak and b_peak > g_peak:
         if strict_qe_validation:
             raise ValueError(
-                "strict QE validation: detected likely QE red/blue inversion; "
-                "fix channel assignments in QE CSVs"
+                "strict QE validation: detected likely QE red/blue inversion; fix channel assignments in QE CSVs"
             )
         print(
             "warning: detected likely QE red/blue inversion; swapping channels "

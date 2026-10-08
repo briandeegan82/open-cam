@@ -78,6 +78,7 @@ _RGB_CENTER_NM: dict[str, float] = {"R": 620.0, "G": 540.0, "B": 460.0}
 # Gaussian helpers (separable, fast)
 # ---------------------------------------------------------------------------
 
+
 def _gaussian_kernel_1d(sigma: float) -> np.ndarray:
     if sigma <= 0:
         return np.ones(1, dtype=np.float64)
@@ -211,6 +212,7 @@ def airy_disk_convolve(img: np.ndarray, rho0_px: float, sigma_geom_px: float = 0
 # Lateral chromatic aberration (wavelength-dependent magnification)
 # ---------------------------------------------------------------------------
 
+
 def apply_lateral_ca(
     arr: np.ndarray,
     wavelength_nm: float,
@@ -252,9 +254,7 @@ def apply_lateral_ca(
     i_in = cx + (i_out - cx) / M
     j_in = cy + (j_out - cy) / M
 
-    out = map_coordinates(
-        arr.astype(np.float64), [j_in, i_in], order=1, mode="nearest"
-    )
+    out = map_coordinates(arr.astype(np.float64), [j_in, i_in], order=1, mode="nearest")
     return out.astype(np.float32)
 
 
@@ -262,14 +262,15 @@ def apply_lateral_ca(
 # Stray light — veiling glare, halo, ghost reflections, aperture diffraction
 # ---------------------------------------------------------------------------
 
+
 def _n_polygon_mask(n_blades: int, size: int, rotation_deg: float = 0.0) -> np.ndarray:
     """Binary aperture mask for a regular N-gon (N-blade iris), (size × size)."""
     cy, cx = (size - 1) / 2.0, (size - 1) / 2.0
-    r_inner = (size / 2.0) - 0.5          # just inside the array boundary
+    r_inner = (size / 2.0) - 0.5  # just inside the array boundary
     angle0 = np.deg2rad(rotation_deg)
     angles = angle0 + np.linspace(0, 2 * np.pi, n_blades, endpoint=False)
-    vx = cx + r_inner * np.cos(angles)    # vertex x-coords
-    vy = cy + r_inner * np.sin(angles)    # vertex y-coords
+    vx = cx + r_inner * np.cos(angles)  # vertex x-coords
+    vy = cy + r_inner * np.sin(angles)  # vertex y-coords
 
     # Point-in-polygon test via winding-number / cross-product for each edge.
     gy, gx = np.mgrid[0:size, 0:size].astype(np.float64)
@@ -280,7 +281,7 @@ def _n_polygon_mask(n_blades: int, size: int, rotation_deg: float = 0.0) -> np.n
         ey = vy[i1] - vy[i]
         # cross product: (P - V_i) × edge ≥ 0 means point is on the left of edge
         cross = (gx - vx[i]) * ey - (gy - vy[i]) * ex
-        inside &= cross <= 0.0   # clockwise winding in image coords (y-down)
+        inside &= cross <= 0.0  # clockwise winding in image coords (y-down)
     return inside.astype(np.float64)
 
 
@@ -351,6 +352,7 @@ def apply_stray_light(arr: np.ndarray, cfg: dict) -> np.ndarray:
     diff_cfg = cfg.get("aperture_diffraction", {}) or {}
     if bool(diff_cfg.get("enabled", False)):
         from scipy.signal import fftconvolve  # noqa: PLC0415
+
         n_blades = max(3, int(diff_cfg.get("n_blades", 6)))
         strength = float(np.clip(diff_cfg.get("strength", 0.05), 0.0, 1.0))
         rotation_deg = float(diff_cfg.get("rotation_deg", 0.0))
@@ -365,6 +367,7 @@ def apply_stray_light(arr: np.ndarray, cfg: dict) -> np.ndarray:
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)

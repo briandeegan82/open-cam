@@ -160,9 +160,7 @@ class ExposureApp(DemoApp):
         self._draw_status(point)
 
     def _draw_triangle(self, point: ee.ExposurePoint) -> None:
-        tri = ee.exposure_triangle(
-            f_number=self.f_number, integration_time_s=self.integration_time_s
-        )
+        tri = ee.exposure_triangle(f_number=self.f_number, integration_time_s=self.integration_time_s)
         for i, (ev, shutter) in enumerate(tri.ev_lines):
             dpg.set_value(f"ev_line_{i}", [tri.f_number.tolist(), shutter.tolist()])
             dpg.configure_item(f"ev_line_{i}", label=f"EV {ev:.1f}")
@@ -172,10 +170,14 @@ class ExposureApp(DemoApp):
         # the point -- the trade is free as far as the sensor is concerned.
         signal = ee.exposure_point(
             scene_luminance_cd_m2=self.scene_luminance_cd_m2,
-            f_number=self.f_number, integration_time_s=self.integration_time_s,
-            iso_gain=self.iso_gain, pixel_pitch_um=self.pixel_pitch_um,
-            quantum_efficiency=self.quantum_efficiency, K_e_per_DN=self.K_e_per_DN,
-            full_well_e=self.full_well_e, sigma_d_e=self.sigma_d_e,
+            f_number=self.f_number,
+            integration_time_s=self.integration_time_s,
+            iso_gain=self.iso_gain,
+            pixel_pitch_um=self.pixel_pitch_um,
+            quantum_efficiency=self.quantum_efficiency,
+            K_e_per_DN=self.K_e_per_DN,
+            full_well_e=self.full_well_e,
+            sigma_d_e=self.sigma_d_e,
         ).signal_e
         dpg.set_value(
             "triangle_caption",
@@ -249,14 +251,14 @@ class ExposureApp(DemoApp):
                 f"Row profile spread {rows.std():.2f} DN, column profile spread {cols.std():.2f} DN. "
                 f"Collapsing a row averages its read noise down by sqrt(width), so banding well "
                 f"below the per-pixel noise floor shows up here first.\n"
-                f"ADC peak deviation: INL {adc.inl_peak_lsb:.1f} LSB, DNL {adc.dnl_peak_lsb:.2f} LSB."
-                + extra
+                f"ADC peak deviation: INL {adc.inl_peak_lsb:.1f} LSB, DNL {adc.dnl_peak_lsb:.2f} LSB." + extra
             ),
         )
 
     def _draw_status(self, point: ee.ExposurePoint) -> None:
         headroom = (
-            "clipped" if point.saturation_fraction >= 1.0
+            "clipped"
+            if point.saturation_fraction >= 1.0
             else f"{-np.log2(max(point.saturation_fraction, 1e-9)):.1f} stops of headroom left"
         )
         dpg.set_value(
@@ -291,75 +293,122 @@ class ExposureApp(DemoApp):
     def build_controls(self) -> None:
         dpg.add_text("Exposure")
         dpg.add_slider_float(
-            tag="scene_luminance", label="Scene luminance (cd/m2)",
-            default_value=self.scene_luminance_cd_m2, min_value=0.1, max_value=8000.0,
+            tag="scene_luminance",
+            label="Scene luminance (cd/m2)",
+            default_value=self.scene_luminance_cd_m2,
+            min_value=0.1,
+            max_value=8000.0,
             callback=self.on_control_change,
         )
         dpg.add_slider_float(
-            tag="f_number", label="f-number (N)", default_value=self.f_number,
-            min_value=1.0, max_value=32.0, callback=self.on_control_change,
-        )
-        dpg.add_slider_float(
-            tag="shutter_denom", label="Shutter 1/x (s)",
-            default_value=1.0 / self.integration_time_s, min_value=0.5, max_value=4000.0,
+            tag="f_number",
+            label="f-number (N)",
+            default_value=self.f_number,
+            min_value=1.0,
+            max_value=32.0,
             callback=self.on_control_change,
         )
         dpg.add_slider_float(
-            tag="iso_gain", label="ISO gain (x)", default_value=self.iso_gain,
-            min_value=1.0, max_value=64.0, callback=self.on_control_change,
+            tag="shutter_denom",
+            label="Shutter 1/x (s)",
+            default_value=1.0 / self.integration_time_s,
+            min_value=0.5,
+            max_value=4000.0,
+            callback=self.on_control_change,
+        )
+        dpg.add_slider_float(
+            tag="iso_gain",
+            label="ISO gain (x)",
+            default_value=self.iso_gain,
+            min_value=1.0,
+            max_value=64.0,
+            callback=self.on_control_change,
         )
 
         dpg.add_separator()
         dpg.add_text("Defects")
         for d in ee.DEFECTS:
             dpg.add_checkbox(
-                tag=f"defect_{d}", label=ee.DEFECT_LABELS[d],
-                default_value=d in self.defects, callback=self.on_control_change,
+                tag=f"defect_{d}",
+                label=ee.DEFECT_LABELS[d],
+                default_value=d in self.defects,
+                callback=self.on_control_change,
             )
 
         with dpg.group(tag="advanced_controls"):
             dpg.add_separator()
             dpg.add_text("Advanced")
             dpg.add_slider_float(
-                tag="quantum_efficiency", label="Quantum efficiency",
-                default_value=self.quantum_efficiency, min_value=0.05, max_value=1.0,
+                tag="quantum_efficiency",
+                label="Quantum efficiency",
+                default_value=self.quantum_efficiency,
+                min_value=0.05,
+                max_value=1.0,
                 callback=self.on_control_change,
             )
             dpg.add_slider_float(
-                tag="pixel_pitch_um", label="Pixel pitch (um)",
-                default_value=self.pixel_pitch_um, min_value=0.7, max_value=9.0,
+                tag="pixel_pitch_um",
+                label="Pixel pitch (um)",
+                default_value=self.pixel_pitch_um,
+                min_value=0.7,
+                max_value=9.0,
                 callback=self.on_control_change,
             )
             dpg.add_slider_float(
-                tag="sigma_amp", label="Amplifier noise at 1x (e)",
-                default_value=self.sigma_amp_e, min_value=0.0, max_value=3.0,
+                tag="sigma_amp",
+                label="Amplifier noise at 1x (e)",
+                default_value=self.sigma_amp_e,
+                min_value=0.0,
+                max_value=3.0,
                 callback=self.on_control_change,
             )
             dpg.add_slider_float(
-                tag="temperature_c", label="Sensor temperature (C)",
-                default_value=self.temperature_c, min_value=-20.0, max_value=80.0,
+                tag="temperature_c",
+                label="Sensor temperature (C)",
+                default_value=self.temperature_c,
+                min_value=-20.0,
+                max_value=80.0,
                 callback=self.on_control_change,
             )
             dpg.add_slider_float(
-                tag="row_fpn_std", label="Row FPN sigma (e)", default_value=self.row_fpn_std_e,
-                min_value=0.0, max_value=60.0, callback=self.on_control_change,
-            )
-            dpg.add_slider_float(
-                tag="col_fpn_std", label="Column FPN sigma (e)", default_value=self.col_fpn_std_e,
-                min_value=0.0, max_value=60.0, callback=self.on_control_change,
-            )
-            dpg.add_slider_float(
-                tag="flicker_std", label="1/f flicker sigma (e)", default_value=self.flicker_std_e,
-                min_value=0.0, max_value=60.0, callback=self.on_control_change,
-            )
-            dpg.add_slider_float(
-                tag="adc_inl", label="ADC INL (fraction of range)",
-                default_value=self.adc_inl_fraction, min_value=0.0, max_value=0.10,
+                tag="row_fpn_std",
+                label="Row FPN sigma (e)",
+                default_value=self.row_fpn_std_e,
+                min_value=0.0,
+                max_value=60.0,
                 callback=self.on_control_change,
             )
             dpg.add_slider_float(
-                tag="adc_dnl", label="ADC DNL sigma (LSB)", default_value=self.adc_dnl_std_lsb,
-                min_value=0.0, max_value=3.0, callback=self.on_control_change,
+                tag="col_fpn_std",
+                label="Column FPN sigma (e)",
+                default_value=self.col_fpn_std_e,
+                min_value=0.0,
+                max_value=60.0,
+                callback=self.on_control_change,
+            )
+            dpg.add_slider_float(
+                tag="flicker_std",
+                label="1/f flicker sigma (e)",
+                default_value=self.flicker_std_e,
+                min_value=0.0,
+                max_value=60.0,
+                callback=self.on_control_change,
+            )
+            dpg.add_slider_float(
+                tag="adc_inl",
+                label="ADC INL (fraction of range)",
+                default_value=self.adc_inl_fraction,
+                min_value=0.0,
+                max_value=0.10,
+                callback=self.on_control_change,
+            )
+            dpg.add_slider_float(
+                tag="adc_dnl",
+                label="ADC DNL sigma (LSB)",
+                default_value=self.adc_dnl_std_lsb,
+                min_value=0.0,
+                max_value=3.0,
+                callback=self.on_control_change,
             )
 
     def build_content(self) -> None:

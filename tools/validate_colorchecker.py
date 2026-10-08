@@ -58,7 +58,9 @@ def summarize_exr(path: Path, imgtool: Optional[Path]) -> None:
     if img.ndim == 2:
         img = img[:, :, np.newaxis]
     flat = np.reshape(img, (-1, img.shape[-1]))
-    print(f"EXR {path}: shape={img.shape} mean={np.mean(flat, axis=0)} min={np.min(flat, axis=0)} max={np.max(flat, axis=0)}")
+    print(
+        f"EXR {path}: shape={img.shape} mean={np.mean(flat, axis=0)} min={np.min(flat, axis=0)} max={np.max(flat, axis=0)}"
+    )
 
 
 def main() -> None:

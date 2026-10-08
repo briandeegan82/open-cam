@@ -59,10 +59,14 @@ def _camera_cli_args(camera_model_config: Path, cam_dist: float) -> list[str]:
         radius = float(lens.get("thinlens_lens_radius", 0.03))
         focal = float(lens.get("thinlens_focal_distance", cam_dist))
         return [
-            "--camera", "thinlens",
-            "--fov", str(fov),
-            "--thinlens-lens-radius", str(radius),
-            "--thinlens-focal-distance", str(focal),
+            "--camera",
+            "thinlens",
+            "--fov",
+            str(fov),
+            "--thinlens-lens-radius",
+            str(radius),
+            "--thinlens-focal-distance",
+            str(focal),
         ]
     fov = float(lens.get("pinhole_fov_deg", 35.0))
     return ["--camera", "pinhole", "--fov", str(fov)]
@@ -207,6 +211,7 @@ def _run_steps(steps: list[Step], *, dry_run: bool, on_output: OutputCallback | 
 # fast_analytic: ColorChecker only, no PBRT
 # ---------------------------------------------------------------------------
 
+
 def _fast_analytic_steps(req: GenerationRequest) -> list[Step]:
     repo = repo_root()
     py = python_executable()
@@ -216,25 +221,39 @@ def _fast_analytic_steps(req: GenerationRequest) -> list[Step]:
     build_cmd = [
         py,
         str(tools / "build_colorchecker_scene.py"),
-        "--repo-root", str(repo),
-        "--illuminant", str(repo / illuminant),
-        "--light-scale", "2.0",
-        "--cam-dist", "4.25",
-        "--xres", str(req.xres),
-        "--yres", str(req.yres),
-        "--pixelsamples", str(req.pixelsamples),
-        "--film", "spectral",
-        "--camera", "pinhole",
-        "--fov", "35",
-        "--spectral-nbuckets", "32",
+        "--repo-root",
+        str(repo),
+        "--illuminant",
+        str(repo / illuminant),
+        "--light-scale",
+        "2.0",
+        "--cam-dist",
+        "4.25",
+        "--xres",
+        str(req.xres),
+        "--yres",
+        str(req.yres),
+        "--pixelsamples",
+        str(req.pixelsamples),
+        "--film",
+        "spectral",
+        "--camera",
+        "pinhole",
+        "--fov",
+        "35",
+        "--spectral-nbuckets",
+        "32",
     ]
 
     forward_cmd = [
         py,
         str(tools / "spectral_sensor_forward.py"),
-        "--repo-root", str(repo),
-        "--camera-model-config", str(req.camera_model_config),
-        "--target-illuminance-lux", str(req.target_illuminance_lux),
+        "--repo-root",
+        str(repo),
+        "--camera-model-config",
+        str(req.camera_model_config),
+        "--target-illuminance-lux",
+        str(req.target_illuminance_lux),
     ]
     if req.exposure_time_s is not None:
         forward_cmd.extend(["--integration-time-s", str(req.exposure_time_s)])
@@ -242,11 +261,16 @@ def _fast_analytic_steps(req: GenerationRequest) -> list[Step]:
     noise_cmd = [
         py,
         str(tools / "apply_emva_noise.py"),
-        "--repo-root", str(repo),
-        "--camera-model-config", str(req.camera_model_config),
-        "--seed", str(req.seed),
-        "--electrons-npz", str(repo / "out" / "sensor_forward_electrons.npz"),
-        "--preview-percentile", "99.5",
+        "--repo-root",
+        str(repo),
+        "--camera-model-config",
+        str(req.camera_model_config),
+        "--seed",
+        str(req.seed),
+        "--electrons-npz",
+        str(repo / "out" / "sensor_forward_electrons.npz"),
+        "--preview-percentile",
+        "99.5",
     ]
     if req.exposure_time_s is not None:
         noise_cmd.extend(["--integration-time-s", str(req.exposure_time_s)])
@@ -261,6 +285,7 @@ def _fast_analytic_steps(req: GenerationRequest) -> list[Step]:
 # ---------------------------------------------------------------------------
 # pbrt_accurate: ColorChecker via tools/run_pipeline.py
 # ---------------------------------------------------------------------------
+
 
 def _write_colorchecker_pipeline_yaml(req: GenerationRequest) -> Path:
     repo = repo_root()
@@ -301,9 +326,12 @@ def _pbrt_accurate_colorchecker_steps(req: GenerationRequest) -> list[Step]:
     argv = [
         py,
         str(repo / "tools" / "run_pipeline.py"),
-        "--repo-root", str(repo),
-        "--config", str(cfg_path),
-        "--name", req.run_label,
+        "--repo-root",
+        str(repo),
+        "--config",
+        str(cfg_path),
+        "--name",
+        req.run_label,
     ]
     return [Step("Full pipeline (scene -> PBRT render -> sensor forward -> EMVA noise)", argv)]
 
@@ -311,6 +339,7 @@ def _pbrt_accurate_colorchecker_steps(req: GenerationRequest) -> list[Step]:
 # ---------------------------------------------------------------------------
 # pbrt_accurate: IQ targets, mirroring scripts/generate_iq_target_image.sh
 # ---------------------------------------------------------------------------
+
 
 def _pbrt_accurate_iq_target_steps(req: GenerationRequest, scene: Scene) -> list[Step]:
     repo = repo_root()
@@ -327,14 +356,22 @@ def _pbrt_accurate_iq_target_steps(req: GenerationRequest, scene: Scene) -> list
     build_cmd = [
         py,
         str(tools / "build_image_quality_targets.py"),
-        "--repo-root", str(repo),
-        "--out-dir", str(scene_dir),
-        "--target", target,
-        "--film", "spectral",
-        "--xres", str(req.xres),
-        "--yres", str(req.yres),
-        "--pixelsamples", str(req.pixelsamples),
-        "--cam-dist", "3.2",
+        "--repo-root",
+        str(repo),
+        "--out-dir",
+        str(scene_dir),
+        "--target",
+        target,
+        "--film",
+        "spectral",
+        "--xres",
+        str(req.xres),
+        "--yres",
+        str(req.yres),
+        "--pixelsamples",
+        str(req.pixelsamples),
+        "--cam-dist",
+        "3.2",
         *_camera_cli_args(req.camera_model_config, cam_dist=3.2),
     ]
 
@@ -343,10 +380,14 @@ def _pbrt_accurate_iq_target_steps(req: GenerationRequest, scene: Scene) -> list
     forward_cmd = [
         py,
         str(tools / "pbrt_spectral_exr_to_electrons.py"),
-        "--repo-root", str(repo),
-        "--exr", str(exr_path),
-        "--camera-model-config", str(req.camera_model_config),
-        "--out", str(npz_path),
+        "--repo-root",
+        str(repo),
+        "--exr",
+        str(exr_path),
+        "--camera-model-config",
+        str(req.camera_model_config),
+        "--out",
+        str(npz_path),
     ]
     if req.target_illuminance_lux:
         forward_cmd.extend(["--target-illuminance-lux", str(req.target_illuminance_lux)])
@@ -356,11 +397,16 @@ def _pbrt_accurate_iq_target_steps(req: GenerationRequest, scene: Scene) -> list
     noise_cmd = [
         py,
         str(tools / "apply_emva_noise.py"),
-        "--repo-root", str(repo),
-        "--camera-model-config", str(req.camera_model_config),
-        "--seed", str(req.seed),
-        "--electrons-npz", str(npz_path),
-        "--preview-percentile", "99.5",
+        "--repo-root",
+        str(repo),
+        "--camera-model-config",
+        str(req.camera_model_config),
+        "--seed",
+        str(req.seed),
+        "--electrons-npz",
+        str(npz_path),
+        "--preview-percentile",
+        "99.5",
     ]
     if req.exposure_time_s is not None:
         noise_cmd.extend(["--integration-time-s", str(req.exposure_time_s)])
@@ -377,6 +423,7 @@ def _pbrt_accurate_iq_target_steps(req: GenerationRequest, scene: Scene) -> list
 # ---------------------------------------------------------------------------
 # public entry point
 # ---------------------------------------------------------------------------
+
 
 def build_plan(req: GenerationRequest) -> list[Step]:
     scene = SCENES[req.scene_id]

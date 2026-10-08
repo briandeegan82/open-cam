@@ -136,8 +136,7 @@ def main() -> None:
     calibration_tier_policy = str(strict_physical_accuracy.get("calibration_tier_policy", "research")).strip().lower()
     if calibration_tier_policy not in ("strict", "semi_strict", "research"):
         raise ValueError(
-            "strict_physical_accuracy.calibration_tier_policy must be one of "
-            '"strict", "semi_strict", "research"'
+            'strict_physical_accuracy.calibration_tier_policy must be one of "strict", "semi_strict", "research"'
         )
     realistic_focus_distance_override = cfg.get("realistic_focus_distance_override", None)
     if realistic_focus_distance_override is not None:
@@ -150,7 +149,9 @@ def main() -> None:
     pbrt_bin = p(repo, paths.get("pbrt", "third_party/pbrt-v4/build/pbrt"))
     noise_tool = p(repo, paths.get("noise_tool", "tools/apply_emva_noise.py"))
     sensor_forward_tool = p(repo, paths.get("sensor_forward_tool", "tools/spectral_sensor_forward.py"))
-    pbrt_exr_electrons_tool = p(repo, paths.get("pbrt_exr_to_electrons_tool", "tools/pbrt_spectral_exr_to_electrons.py"))
+    pbrt_exr_electrons_tool = p(
+        repo, paths.get("pbrt_exr_to_electrons_tool", "tools/pbrt_spectral_exr_to_electrons.py")
+    )
     validate_tool = p(repo, paths.get("validate_tool", "tools/validate_colorchecker.py"))
     validate_demosaic_tool = p(repo, paths.get("validate_demosaic_tool", "tools/validate_demosaic_linear.py"))
     validate_emva_tool = p(repo, paths.get("validate_emva_tool", "tools/validate_emva_model.py"))
@@ -218,10 +219,7 @@ def main() -> None:
     build_cmd.extend(["--cam-dist", str(float(render.get("cam_dist", 4.25)))])
     cam = lens_type_override or str(lens_cfg.get("camera", "perspective")).lower()
     if cam not in ("perspective", "pinhole", "thinlens", "realistic"):
-        raise ValueError(
-            'lens.camera must be one of "perspective", "pinhole", "thinlens", "realistic", '
-            f"got {cam!r}"
-        )
+        raise ValueError(f'lens.camera must be one of "perspective", "pinhole", "thinlens", "realistic", got {cam!r}')
     build_cmd.extend(["--camera", cam])
     if cam == "thinlens":
         thin_fov = pick_override(
@@ -359,7 +357,14 @@ def main() -> None:
             if strict_qe_validation:
                 sf_cmd.append("--strict-qe-validation")
         elif sf_mode == "analytic":
-            sf_cmd = [py, str(sensor_forward_tool), "--repo-root", str(repo), "--camera-model-config", str(camera_model_cfg)]
+            sf_cmd = [
+                py,
+                str(sensor_forward_tool),
+                "--repo-root",
+                str(repo),
+                "--camera-model-config",
+                str(camera_model_cfg),
+            ]
             if sf_target_lux is not None:
                 sf_cmd.extend(["--target-illuminance-lux", str(float(sf_target_lux))])
             if integration_time_override_s is not None:

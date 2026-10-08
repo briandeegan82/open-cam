@@ -18,8 +18,12 @@ def test_chromatic_sigma_matches_tool_module_directly():
 
 def test_compute_psf_kernel_chromatic_gaussian_peak_normalised():
     result = oe.compute_psf_kernel(
-        mode="chromatic_gaussian", wavelength_nm=550.0, f_number=2.8,
-        pixel_pitch_um=1.4, sigma_geometric_px=0.5, size=33,
+        mode="chromatic_gaussian",
+        wavelength_nm=550.0,
+        f_number=2.8,
+        pixel_pitch_um=1.4,
+        sigma_geometric_px=0.5,
+        size=33,
     )
     assert result.kernel.shape == (33, 33)
     assert np.isclose(result.kernel.max(), 1.0)
@@ -28,8 +32,12 @@ def test_compute_psf_kernel_chromatic_gaussian_peak_normalised():
 
 def test_compute_psf_kernel_airy_disk_has_rho0():
     result = oe.compute_psf_kernel(
-        mode="airy_disk", wavelength_nm=550.0, f_number=8.0,
-        pixel_pitch_um=1.4, sigma_geometric_px=0.0, size=65,
+        mode="airy_disk",
+        wavelength_nm=550.0,
+        f_number=8.0,
+        pixel_pitch_um=1.4,
+        sigma_geometric_px=0.0,
+        size=65,
     )
     assert result.rho0_px > 0.0
     assert np.isclose(result.kernel.max(), 1.0)
@@ -37,20 +45,32 @@ def test_compute_psf_kernel_airy_disk_has_rho0():
 
 def test_larger_f_number_widens_the_psf():
     narrow = oe.compute_psf_kernel(
-        mode="chromatic_gaussian", wavelength_nm=550.0, f_number=1.8,
-        pixel_pitch_um=1.4, sigma_geometric_px=0.0, size=65,
+        mode="chromatic_gaussian",
+        wavelength_nm=550.0,
+        f_number=1.8,
+        pixel_pitch_um=1.4,
+        sigma_geometric_px=0.0,
+        size=65,
     )
     wide = oe.compute_psf_kernel(
-        mode="chromatic_gaussian", wavelength_nm=550.0, f_number=16.0,
-        pixel_pitch_um=1.4, sigma_geometric_px=0.0, size=65,
+        mode="chromatic_gaussian",
+        wavelength_nm=550.0,
+        f_number=16.0,
+        pixel_pitch_um=1.4,
+        sigma_geometric_px=0.0,
+        size=65,
     )
     assert wide.sigma_total_px > narrow.sigma_total_px
 
 
 def test_radial_profile_is_monotonic_decreasing_for_gaussian():
     result = oe.compute_psf_kernel(
-        mode="chromatic_gaussian", wavelength_nm=550.0, f_number=4.0,
-        pixel_pitch_um=1.4, sigma_geometric_px=1.0, size=65,
+        mode="chromatic_gaussian",
+        wavelength_nm=550.0,
+        f_number=4.0,
+        pixel_pitch_um=1.4,
+        sigma_geometric_px=1.0,
+        size=65,
     )
     radii, profile = oe.radial_profile(result.kernel)
     # Compare near the peak, not the far tail: a small-sigma Gaussian underflows
@@ -136,9 +156,7 @@ def test_more_veiling_glare_costs_more_contrast():
 
 def test_halo_spreads_light_around_the_bright_source():
     clean = oe.stray_light_test_image(96)
-    strayed = oe.apply_stray_light(
-        clean, oe.stray_light_config(halo_sigma_pixels=12.0, halo_strength=0.2)
-    )
+    strayed = oe.apply_stray_light(clean, oe.stray_light_config(halo_sigma_pixels=12.0, halo_strength=0.2))
     # Scatter is additive: it lifts the dark surround near the source.
     assert strayed.sum() > clean.sum()
     assert strayed[5, 5] > clean[5, 5]
@@ -147,9 +165,7 @@ def test_halo_spreads_light_around_the_bright_source():
 def test_ghost_is_a_rotated_copy_of_the_scene():
     clean = oe.stray_light_test_image(96)
     strength = 0.1
-    strayed = oe.apply_stray_light(
-        clean, oe.stray_light_config(ghost_enabled=True, ghost_strength=strength)
-    )
+    strayed = oe.apply_stray_light(clean, oe.stray_light_config(ghost_enabled=True, ghost_strength=strength))
     np.testing.assert_allclose(strayed, clean + strength * np.rot90(clean, k=2), rtol=1e-5)
 
 

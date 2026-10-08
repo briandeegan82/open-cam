@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 import yaml
+
 try:
     from camera_model import load_camera_model
 except ModuleNotFoundError:  # pragma: no cover - import path variant for tests
@@ -104,7 +105,10 @@ def main() -> None:
     export("EXR_OUT_REL", paths.get("exr_out", "out/colorchecker.exr"))
     export("CAMERA_MODEL_CONFIG_REL", camera_model_rel)
     export("SENSOR_FORWARD_NPZ_REL", paths.get("sensor_forward_electrons_npz", "out/sensor_forward_electrons.npz"))
-    export("PBRT_EXR_TO_ELECTRONS_TOOL_REL", paths.get("pbrt_exr_to_electrons_tool", "tools/pbrt_spectral_exr_to_electrons.py"))
+    export(
+        "PBRT_EXR_TO_ELECTRONS_TOOL_REL",
+        paths.get("pbrt_exr_to_electrons_tool", "tools/pbrt_spectral_exr_to_electrons.py"),
+    )
     export("DEMOSAIC_METRICS_JSON_REL", paths.get("demosaic_metrics_json", "out/demosaic_linear_metrics.json"))
 
     export("LIGHT_SCALE", render.get("light_scale", 2.0))

@@ -68,8 +68,7 @@ def write_separate_channels_exr(path: Path, channels: dict[str, np.ndarray]) -> 
     # New OpenEXR >= 3.x API: Channel objects accept pixel arrays directly.
     try:
         ch = {
-            name: OpenEXR.Channel(pixels=np.ascontiguousarray(arr, dtype=np.float32))
-            for name, arr in channels.items()
+            name: OpenEXR.Channel(pixels=np.ascontiguousarray(arr, dtype=np.float32)) for name, arr in channels.items()
         }
         with OpenEXR.File(channels=ch) as f:
             f.write(str(Path(path)))
@@ -91,9 +90,7 @@ def write_separate_channels_exr(path: Path, channels: dict[str, np.ndarray]) -> 
     pt = Imath.PixelType(Imath.PixelType.FLOAT)
     header["channels"] = {name: Imath.Channel(pt) for name in channels}
     out = OpenEXR.OutputFile(str(path), header)
-    payload = {
-        name: np.ascontiguousarray(arr, dtype=np.float32).tobytes() for name, arr in channels.items()
-    }
+    payload = {name: np.ascontiguousarray(arr, dtype=np.float32).tobytes() for name, arr in channels.items()}
     out.writePixels(payload)
     out.close()
 

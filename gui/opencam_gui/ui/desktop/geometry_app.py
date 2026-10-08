@@ -165,9 +165,7 @@ class GeometryApp(DemoApp):
         )
 
     def _draw_field_of_view(self, s: ge.GeometrySummary) -> None:
-        focal, fov = ge.fov_vs_focal_length(
-            sensor_width_mm=s.sensor_width_mm, sensor_height_mm=s.sensor_height_mm
-        )
+        focal, fov = ge.fov_vs_focal_length(sensor_width_mm=s.sensor_width_mm, sensor_height_mm=s.sensor_height_mm)
         dpg.set_value("fov_curve", [focal.tolist(), fov.tolist()])
         dpg.set_value("fov_marker", [[s.focal_length_mm], [s.fov_diagonal_deg]])
 
@@ -313,17 +311,29 @@ class GeometryApp(DemoApp):
     def build_controls(self) -> None:
         dpg.add_text("Core controls")
         dpg.add_slider_float(
-            tag="focal_length", label="Focal length (mm)", default_value=self.focal_length_mm,
-            min_value=4.0, max_value=300.0, callback=self.on_control_change,
+            tag="focal_length",
+            label="Focal length (mm)",
+            default_value=self.focal_length_mm,
+            min_value=4.0,
+            max_value=300.0,
+            callback=self.on_control_change,
         )
         dpg.add_slider_float(
-            tag="f_number", label="f-number (N)", default_value=self.f_number,
-            min_value=1.0, max_value=32.0, callback=self.on_control_change,
+            tag="f_number",
+            label="f-number (N)",
+            default_value=self.f_number,
+            min_value=1.0,
+            max_value=32.0,
+            callback=self.on_control_change,
         )
         dpg.add_slider_float(
-            tag="focus_log10_m", label="Focus distance",
+            tag="focus_log10_m",
+            label="Focus distance",
             default_value=math.log10(self.focus_distance_mm / 1000.0),
-            min_value=-1.7, max_value=2.0, format="%.2f", callback=self.on_control_change,
+            min_value=-1.7,
+            max_value=2.0,
+            format="%.2f",
+            callback=self.on_control_change,
         )
         dpg.add_text("Sensor format")
         dpg.add_combo(
@@ -337,24 +347,44 @@ class GeometryApp(DemoApp):
             dpg.add_separator()
             dpg.add_text("Advanced")
             dpg.add_slider_float(
-                tag="pixel_pitch_um", label="Pixel pitch (um)", default_value=self.pixel_pitch_um,
-                min_value=0.7, max_value=9.0, callback=self.on_control_change,
+                tag="pixel_pitch_um",
+                label="Pixel pitch (um)",
+                default_value=self.pixel_pitch_um,
+                min_value=0.7,
+                max_value=9.0,
+                callback=self.on_control_change,
             )
             dpg.add_checkbox(
-                tag="use_pixel_coc", label="Pixel-level CoC (2 px) instead of print",
-                default_value=self.use_pixel_coc, callback=self.on_control_change,
+                tag="use_pixel_coc",
+                label="Pixel-level CoC (2 px) instead of print",
+                default_value=self.use_pixel_coc,
+                callback=self.on_control_change,
             )
             dpg.add_slider_float(
-                tag="object_height", label="Subject height (mm)", default_value=self.object_height_mm,
-                min_value=10.0, max_value=3000.0, callback=self.on_control_change,
+                tag="object_height",
+                label="Subject height (mm)",
+                default_value=self.object_height_mm,
+                min_value=10.0,
+                max_value=3000.0,
+                callback=self.on_control_change,
             )
             dpg.add_slider_float(
-                tag="distortion_k1", label="Distortion k1", default_value=self.distortion_k1,
-                min_value=-0.4, max_value=0.4, format="%.3f", callback=self.on_control_change,
+                tag="distortion_k1",
+                label="Distortion k1",
+                default_value=self.distortion_k1,
+                min_value=-0.4,
+                max_value=0.4,
+                format="%.3f",
+                callback=self.on_control_change,
             )
             dpg.add_slider_float(
-                tag="distortion_k2", label="Distortion k2", default_value=self.distortion_k2,
-                min_value=-0.2, max_value=0.2, format="%.3f", callback=self.on_control_change,
+                tag="distortion_k2",
+                label="Distortion k2",
+                default_value=self.distortion_k2,
+                min_value=-0.2,
+                max_value=0.2,
+                format="%.3f",
+                callback=self.on_control_change,
             )
 
     def build_content(self) -> None:
@@ -407,7 +437,9 @@ class GeometryApp(DemoApp):
             with dpg.group(horizontal=True):
                 with dpg.plot(label="Defocus blur vs where the object is", height=300, width=520):
                     dpg.add_plot_legend()
-                    dpg.add_plot_axis(dpg.mvXAxis, label="object distance (m)", tag="blur_x", scale=dpg.mvPlotScale_Log10)
+                    dpg.add_plot_axis(
+                        dpg.mvXAxis, label="object distance (m)", tag="blur_x", scale=dpg.mvPlotScale_Log10
+                    )
                     with dpg.plot_axis(dpg.mvYAxis, label="blur disc (um)", tag="blur_y"):
                         dpg.add_line_series([1.0], [0.0], label="blur diameter", tag="blur_curve")
                         dpg.add_line_series([1.0], [0.0], label="circle of confusion", tag="blur_coc")

@@ -1,4 +1,3 @@
-
 from opencam_gui.core import pipeline as pl
 from opencam_gui.core.catalog import find_recipe
 from opencam_gui.core.repo import pbrt_available

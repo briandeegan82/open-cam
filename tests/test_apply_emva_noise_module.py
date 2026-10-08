@@ -41,8 +41,15 @@ class _EmvaCase(unittest.TestCase):
     def tearDown(self) -> None:
         self._tmp.cleanup()
 
-    def _config(self, *, exr: Path | None = None, bayer: dict | None = None, processing: dict | None = None,
-                emva: dict | None = None, adc: dict | None = None) -> dict:
+    def _config(
+        self,
+        *,
+        exr: Path | None = None,
+        bayer: dict | None = None,
+        processing: dict | None = None,
+        emva: dict | None = None,
+        adc: dict | None = None,
+    ) -> dict:
         cfg = {
             "sensor": {
                 "pixel_pitch_um": 3.0,
@@ -119,10 +126,12 @@ class TestRgbPath(_EmvaCase):
             self._run()
 
     def test_preview_wb_and_ccm_run_against_exr_reference(self) -> None:
-        self._config(processing={
-            "preview_white_balance": {"enabled": True, "method": "gray_world"},
-            "preview_color_correction": {"enabled": True, "method": "lstsq_exr_reference"},
-        })
+        self._config(
+            processing={
+                "preview_white_balance": {"enabled": True, "method": "gray_world"},
+                "preview_color_correction": {"enabled": True, "method": "lstsq_exr_reference"},
+            }
+        )
         stats, _ = self._run()
         self.assertEqual(stats["preview_color_correction_source"], "lstsq_exr_reference")
         ccm = np.asarray(stats["preview_color_correction_matrix_3x3"])
@@ -141,8 +150,10 @@ class TestBayerPath(_EmvaCase):
 
     def test_mosaic_carries_per_site_colour(self) -> None:
         # Red bar (cols 8..15): R sites must read brighter than B sites under an RGGB mosaic.
-        self._config(bayer={"enabled": True, "pattern": "RGGB", "demosaic": False},
-                     emva={"sigma_d_e": 0.0, "dsnu_std_e": 0.0, "prnu_std_fraction": 0.0})
+        self._config(
+            bayer={"enabled": True, "pattern": "RGGB", "demosaic": False},
+            emva={"sigma_d_e": 0.0, "dsnu_std_e": 0.0, "prnu_std_fraction": 0.0},
+        )
         stats, raw = self._run()
         self.assertIsNone(stats["demosaic"])
         red_bar = raw[:, 8:16].astype(np.float64)
@@ -151,12 +162,20 @@ class TestBayerPath(_EmvaCase):
     def test_optional_sensor_effects_run_and_defect_map_persists(self) -> None:
         defect_map = self.tmp / "defects.npz"
         self._config(
-            bayer={"enabled": True, "pattern": "RGGB", "demosaic": "malvar",
-                   "spatial_crosstalk": {"enabled": True, "sigma_pixels": 0.4}},
+            bayer={
+                "enabled": True,
+                "pattern": "RGGB",
+                "demosaic": "malvar",
+                "spatial_crosstalk": {"enabled": True, "sigma_pixels": 0.4},
+            },
             emva={
                 "blooming": {"enabled": True, "spread_fraction": 0.5},
-                "defect_pixels": {"enabled": True, "hot_pixel_rate": 0.02, "stuck_high_rate": 0.01,
-                                  "persistent_map_npz": str(defect_map)},
+                "defect_pixels": {
+                    "enabled": True,
+                    "hot_pixel_rate": 0.02,
+                    "stuck_high_rate": 0.01,
+                    "persistent_map_npz": str(defect_map),
+                },
             },
         )
         first, raw_a = self._run(seed=1)

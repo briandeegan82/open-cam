@@ -141,11 +141,16 @@ class TestPbrtSpectralExrToElectronsModule(_TmpDirCase):
         run_tool_main(
             pbrt_spectral_exr_to_electrons.main,
             [
-                "--exr", str(self.exr),
-                "--sensor-config", str(self.sensor_cfg),
-                "--noise-config", str(self.noise_cfg),
-                "--scene-manifest-json", str(self.manifest),
-                "--out", str(self.out),
+                "--exr",
+                str(self.exr),
+                "--sensor-config",
+                str(self.sensor_cfg),
+                "--noise-config",
+                str(self.noise_cfg),
+                "--scene-manifest-json",
+                str(self.manifest),
+                "--out",
+                str(self.out),
                 *extra,
             ],
         )

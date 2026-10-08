@@ -51,23 +51,18 @@ class TestIsoGain(unittest.TestCase):
 
 class TestKtcNoise(unittest.TestCase):
     def test_matches_sqrt_ktc_over_q(self):
-        sigma = aen.ktc_sigma_e(temperature_c=20.0, K_e_per_DN=0.8,
-                                bit_depth=12, node_capacitance_fF=5.0)
+        sigma = aen.ktc_sigma_e(temperature_c=20.0, K_e_per_DN=0.8, bit_depth=12, node_capacitance_fF=5.0)
         want = float(np.sqrt(K_B_J * 293.15 * 5e-15) / Q_E)
         self.assertAlmostEqual(sigma, want, places=9)
 
     def test_scales_as_the_square_root_of_absolute_temperature(self):
-        cold = aen.ktc_sigma_e(temperature_c=-23.15, K_e_per_DN=0.8,
-                               bit_depth=12, node_capacitance_fF=5.0)
-        hot = aen.ktc_sigma_e(temperature_c=76.85, K_e_per_DN=0.8,
-                              bit_depth=12, node_capacitance_fF=5.0)
+        cold = aen.ktc_sigma_e(temperature_c=-23.15, K_e_per_DN=0.8, bit_depth=12, node_capacitance_fF=5.0)
+        hot = aen.ktc_sigma_e(temperature_c=76.85, K_e_per_DN=0.8, bit_depth=12, node_capacitance_fF=5.0)
         self.assertAlmostEqual(hot / cold, float(np.sqrt(350.0 / 250.0)), places=9)
 
     def test_scales_as_the_square_root_of_capacitance(self):
-        small = aen.ktc_sigma_e(temperature_c=20.0, K_e_per_DN=0.8,
-                                bit_depth=12, node_capacitance_fF=2.0)
-        big = aen.ktc_sigma_e(temperature_c=20.0, K_e_per_DN=0.8,
-                              bit_depth=12, node_capacitance_fF=8.0)
+        small = aen.ktc_sigma_e(temperature_c=20.0, K_e_per_DN=0.8, bit_depth=12, node_capacitance_fF=2.0)
+        big = aen.ktc_sigma_e(temperature_c=20.0, K_e_per_DN=0.8, bit_depth=12, node_capacitance_fF=8.0)
         self.assertAlmostEqual(big / small, 2.0, places=9)
 
     def test_capacitance_derived_from_conversion_gain_when_not_measured(self):
@@ -78,8 +73,7 @@ class TestKtcNoise(unittest.TestCase):
     def test_a_realistic_sense_node_gives_a_handful_of_electrons(self):
         """A few fF at room temperature is tens of electrons -- large enough that
         cancelling it with CDS is not optional."""
-        sigma = aen.ktc_sigma_e(temperature_c=20.0, K_e_per_DN=0.8,
-                                bit_depth=12, node_capacitance_fF=3.0)
+        sigma = aen.ktc_sigma_e(temperature_c=20.0, K_e_per_DN=0.8, bit_depth=12, node_capacitance_fF=3.0)
         self.assertGreater(sigma, 5.0)
         self.assertLess(sigma, 100.0)
 
@@ -134,8 +128,7 @@ class TestFlickerNoise(unittest.TestCase):
         rng = np.random.default_rng(3)
         pink = aen.flicker_row_offsets(4096, 1.0, rng)
         white = rng.normal(0.0, 1.0, size=4096)
-        self.assertLess(float(np.abs(np.diff(pink)).mean()),
-                        0.6 * float(np.abs(np.diff(white)).mean()))
+        self.assertLess(float(np.abs(np.diff(pink)).mean()), 0.6 * float(np.abs(np.diff(white)).mean()))
 
     def test_the_power_spectrum_falls_as_one_over_f(self):
         """The defining property. Fitting log power against log frequency should
@@ -153,7 +146,7 @@ class TestFlickerNoise(unittest.TestCase):
         pink = aen.flicker_row_offsets(4096, 1.0, np.random.default_rng(4))
         power = np.abs(np.fft.rfft(pink)) ** 2
         n = power.size
-        self.assertGreater(power[1:n // 16].mean(), 20.0 * power[n // 2:].mean())
+        self.assertGreater(power[1 : n // 16].mean(), 20.0 * power[n // 2 :].mean())
 
     def test_a_row_count_that_is_not_a_power_of_two_still_works(self):
         pink = aen.flicker_row_offsets(1000, 2.0, np.random.default_rng(5))
@@ -164,8 +157,7 @@ class TestFlickerNoise(unittest.TestCase):
 class TestAdcNonlinearity(unittest.TestCase):
     def test_inl_vanishes_at_both_ends_and_bows_in_the_middle(self):
         ramp = np.linspace(0.0, 4095.0, 512)
-        out = aen.apply_adc_inl(ramp.copy(), black_dn=0.0, max_dn=4095.0,
-                                quadratic_fraction=0.03)
+        out = aen.apply_adc_inl(ramp.copy(), black_dn=0.0, max_dn=4095.0, quadratic_fraction=0.03)
         dev = out - ramp
         self.assertAlmostEqual(float(dev[0]), 0.0, places=6)
         self.assertAlmostEqual(float(dev[-1]), 0.0, places=6)
@@ -173,9 +165,9 @@ class TestAdcNonlinearity(unittest.TestCase):
 
     def test_zero_inl_is_a_no_op(self):
         ramp = np.linspace(0.0, 4095.0, 64)
-        self.assertTrue(np.array_equal(
-            aen.apply_adc_inl(ramp.copy(), black_dn=0.0, max_dn=4095.0,
-                              quadratic_fraction=0.0), ramp))
+        self.assertTrue(
+            np.array_equal(aen.apply_adc_inl(ramp.copy(), black_dn=0.0, max_dn=4095.0, quadratic_fraction=0.0), ramp)
+        )
 
     def test_inl_never_pushes_a_code_out_of_range(self):
         ramp = np.linspace(0.0, 4095.0, 512)

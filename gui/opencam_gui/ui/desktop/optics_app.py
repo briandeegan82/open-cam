@@ -263,64 +263,107 @@ class OpticsApp(DemoApp):
     def build_controls(self) -> None:
         dpg.add_text("Core controls")
         dpg.add_slider_float(
-            tag="f_number", label="f-number (N)", default_value=self.f_number,
-            min_value=1.0, max_value=22.0, callback=self.on_control_change,
+            tag="f_number",
+            label="f-number (N)",
+            default_value=self.f_number,
+            min_value=1.0,
+            max_value=22.0,
+            callback=self.on_control_change,
         )
         dpg.add_slider_float(
-            tag="pixel_pitch_um", label="Pixel pitch (um)", default_value=self.pixel_pitch_um,
-            min_value=0.7, max_value=8.0, callback=self.on_control_change,
+            tag="pixel_pitch_um",
+            label="Pixel pitch (um)",
+            default_value=self.pixel_pitch_um,
+            min_value=0.7,
+            max_value=8.0,
+            callback=self.on_control_change,
         )
         dpg.add_combo(
-            tag="psf_mode", label="PSF mode", items=["chromatic_gaussian", "airy_disk"],
-            default_value=self.mode, callback=self.on_control_change,
+            tag="psf_mode",
+            label="PSF mode",
+            items=["chromatic_gaussian", "airy_disk"],
+            default_value=self.mode,
+            callback=self.on_control_change,
         )
 
         dpg.add_separator()
         dpg.add_checkbox(
-            tag="stray_enabled", label="Stray light enabled",
-            default_value=self.stray_light_enabled, callback=self.on_control_change,
+            tag="stray_enabled",
+            label="Stray light enabled",
+            default_value=self.stray_light_enabled,
+            callback=self.on_control_change,
         )
         with dpg.collapsing_header(label="Stray light terms", default_open=True):
             dpg.add_slider_float(
-                tag="veiling", label="Veiling glare fraction",
-                default_value=self.veiling_glare_fraction, min_value=0.0, max_value=0.25,
-                format="%.3f", callback=self.on_control_change,
+                tag="veiling",
+                label="Veiling glare fraction",
+                default_value=self.veiling_glare_fraction,
+                min_value=0.0,
+                max_value=0.25,
+                format="%.3f",
+                callback=self.on_control_change,
             )
             dpg.add_slider_float(
-                tag="halo_strength", label="Halo strength",
-                default_value=self.halo_strength, min_value=0.0, max_value=0.25,
-                format="%.3f", callback=self.on_control_change,
+                tag="halo_strength",
+                label="Halo strength",
+                default_value=self.halo_strength,
+                min_value=0.0,
+                max_value=0.25,
+                format="%.3f",
+                callback=self.on_control_change,
             )
             dpg.add_slider_float(
-                tag="halo_sigma", label="Halo sigma (px)",
-                default_value=self.halo_sigma_pixels, min_value=1.0, max_value=60.0,
+                tag="halo_sigma",
+                label="Halo sigma (px)",
+                default_value=self.halo_sigma_pixels,
+                min_value=1.0,
+                max_value=60.0,
                 callback=self.on_control_change,
             )
             dpg.add_checkbox(
-                tag="ghost_enabled", label="Ghost reflection",
-                default_value=self.ghost_enabled, callback=self.on_control_change,
+                tag="ghost_enabled",
+                label="Ghost reflection",
+                default_value=self.ghost_enabled,
+                callback=self.on_control_change,
             )
             dpg.add_slider_float(
-                tag="ghost_strength", label="Ghost strength",
-                default_value=self.ghost_strength, min_value=0.0, max_value=0.2,
-                format="%.3f", callback=self.on_control_change,
+                tag="ghost_strength",
+                label="Ghost strength",
+                default_value=self.ghost_strength,
+                min_value=0.0,
+                max_value=0.2,
+                format="%.3f",
+                callback=self.on_control_change,
             )
             dpg.add_checkbox(
-                tag="diffraction_enabled", label="Aperture blade diffraction",
-                default_value=self.aperture_diffraction_enabled, callback=self.on_control_change,
+                tag="diffraction_enabled",
+                label="Aperture blade diffraction",
+                default_value=self.aperture_diffraction_enabled,
+                callback=self.on_control_change,
             )
             dpg.add_slider_int(
-                tag="n_blades", label="Iris blades", default_value=self.n_blades,
-                min_value=3, max_value=14, callback=self.on_control_change,
+                tag="n_blades",
+                label="Iris blades",
+                default_value=self.n_blades,
+                min_value=3,
+                max_value=14,
+                callback=self.on_control_change,
             )
             dpg.add_slider_float(
-                tag="diffraction_strength", label="Starburst strength",
-                default_value=self.diffraction_strength, min_value=0.0, max_value=0.4,
-                format="%.3f", callback=self.on_control_change,
+                tag="diffraction_strength",
+                label="Starburst strength",
+                default_value=self.diffraction_strength,
+                min_value=0.0,
+                max_value=0.4,
+                format="%.3f",
+                callback=self.on_control_change,
             )
             dpg.add_slider_float(
-                tag="blade_rotation", label="Blade rotation (deg)",
-                default_value=self.blade_rotation_deg, min_value=0.0, max_value=90.0,
+                tag="blade_rotation",
+                label="Blade rotation (deg)",
+                default_value=self.blade_rotation_deg,
+                min_value=0.0,
+                max_value=90.0,
                 callback=self.on_control_change,
             )
 
@@ -328,13 +371,19 @@ class OpticsApp(DemoApp):
             dpg.add_separator()
             dpg.add_text("Advanced")
             dpg.add_slider_float(
-                tag="sigma_geom", label="Geometric aberration sigma (px)",
-                default_value=self.sigma_geometric_px, min_value=0.0, max_value=3.0,
+                tag="sigma_geom",
+                label="Geometric aberration sigma (px)",
+                default_value=self.sigma_geometric_px,
+                min_value=0.0,
+                max_value=3.0,
                 callback=self.on_control_change,
             )
             dpg.add_slider_float(
-                tag="lca_coeff", label="Lateral CA coefficient",
-                default_value=self.lateral_ca_coefficient, min_value=0.0, max_value=0.05,
+                tag="lca_coeff",
+                label="Lateral CA coefficient",
+                default_value=self.lateral_ca_coefficient,
+                min_value=0.0,
+                max_value=0.05,
                 callback=self.on_control_change,
             )
 
@@ -368,8 +417,11 @@ class OpticsApp(DemoApp):
 
     def _build_psf_tab(self) -> None:
         with dpg.table(
-            header_row=True, borders_innerH=True, borders_outerH=True,
-            borders_innerV=True, borders_outerV=True,
+            header_row=True,
+            borders_innerH=True,
+            borders_outerH=True,
+            borders_innerV=True,
+            borders_outerV=True,
         ):
             dpg.add_table_column(label="Channel")
             dpg.add_table_column(label="lambda (nm)")

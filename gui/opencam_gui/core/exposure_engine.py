@@ -84,12 +84,17 @@ def exposure_point(
     """Run one exposure through the photometric chain and classify the result."""
     rad, noise = _rad(), _noise()
 
-    signal_e = float(rad.electrons_from_exposure(
-        scene_luminance_cd_m2, f_number, integration_time_s,
-        pixel_pitch_um=pixel_pitch_um,
-        quantum_efficiency=quantum_efficiency,
-        fill_factor=fill_factor,
-        transmission=transmission))
+    signal_e = float(
+        rad.electrons_from_exposure(
+            scene_luminance_cd_m2,
+            f_number,
+            integration_time_s,
+            pixel_pitch_um=pixel_pitch_um,
+            quantum_efficiency=quantum_efficiency,
+            fill_factor=fill_factor,
+            transmission=transmission,
+        )
+    )
 
     # ISO is amplifier gain: it rescales the ADC path, so the same electrons land
     # on a different code and the well clips sooner.
@@ -98,7 +103,7 @@ def exposure_point(
 
     captured_e = min(signal_e, well_eff)
     shot_e = float(np.sqrt(max(captured_e, 0.0)))
-    total_e = float(np.sqrt(shot_e ** 2 + read_e ** 2))
+    total_e = float(np.sqrt(shot_e**2 + read_e**2))
     max_dn = float((1 << bit_depth) - 1)
     mean_dn = min(captured_e / k_eff + black_level_DN, max_dn)
 
@@ -116,8 +121,9 @@ def exposure_point(
         iso_gain=float(iso_gain),
         ev=float(rad.exposure_value(f_number, integration_time_s)),
         ev100_scene=float(rad.ev100_from_luminance(scene_luminance_cd_m2)),
-        illuminance_lux=float(rad.image_plane_illuminance_lux(
-            scene_luminance_cd_m2, f_number, transmission=transmission)),
+        illuminance_lux=float(
+            rad.image_plane_illuminance_lux(scene_luminance_cd_m2, f_number, transmission=transmission)
+        ),
         signal_e=signal_e,
         full_well_e=float(well_eff),
         K_e_per_DN=float(k_eff),
@@ -137,7 +143,7 @@ class ExposureTriangle:
     """Iso-exposure lines in the (f-number, shutter) plane."""
 
     f_number: np.ndarray
-    shutter_s: np.ndarray            # the line through the current setting
+    shutter_s: np.ndarray  # the line through the current setting
     ev_lines: list[tuple[float, np.ndarray]]
     current_f_number: float
     current_shutter_s: float
@@ -163,8 +169,7 @@ def exposure_triangle(
     f_axis = np.geomspace(f_min, f_max, n_points)
     base_ev = float(rad.exposure_value(f_number, integration_time_s))
 
-    lines = [(base_ev + off, np.asarray(rad.shutter_for_exposure_value(f_axis, base_ev + off)))
-             for off in ev_offsets]
+    lines = [(base_ev + off, np.asarray(rad.shutter_for_exposure_value(f_axis, base_ev + off))) for off in ev_offsets]
     return ExposureTriangle(
         f_number=f_axis,
         shutter_s=np.asarray(rad.shutter_for_exposure_value(f_axis, base_ev)),
@@ -209,7 +214,7 @@ def iso_sweep(
     well = np.array([noise.iso_scaled_conversion(K_e_per_DN, full_well_e, float(x))[1] for x in g])
 
     captured = np.minimum(signal_e, well)
-    total = np.sqrt(captured + read ** 2)
+    total = np.sqrt(captured + read**2)
     return IsoSweep(
         iso_gain=g,
         read_noise_e=read,
@@ -262,7 +267,7 @@ def base_frame_e(
     y, x = np.mgrid[0:size, 0:size]
     cy = cx = (size - 1) / 2.0
     frame = np.full((size, size), full_well_e * background_fraction, dtype=np.float64)
-    disc = ((x - cx) ** 2 + (y - cy) ** 2) <= highlight_radius_px ** 2
+    disc = ((x - cx) ** 2 + (y - cy) ** 2) <= highlight_radius_px**2
     frame[disc] = full_well_e * highlight_fraction
     return frame
 
@@ -319,22 +324,29 @@ def render_defects(
     hot_count = 0
     if "hot_pixels" in wanted:
         frame, hot_info = noise.apply_hot_stuck_pixel_model(
-            frame.astype(np.float32), fixed_rng,
-            {"enabled": True,
-             "hot_pixel_rate": hot_pixel_fraction,
-             "stuck_high_rate": hot_pixel_fraction / 4.0,
-             "stuck_low_rate": hot_pixel_fraction / 4.0,
-             "hot_dark_e_min": full_well_e * 0.05,
-             "hot_dark_e_max": full_well_e * 0.8},
-            full_well_e)
+            frame.astype(np.float32),
+            fixed_rng,
+            {
+                "enabled": True,
+                "hot_pixel_rate": hot_pixel_fraction,
+                "stuck_high_rate": hot_pixel_fraction / 4.0,
+                "stuck_low_rate": hot_pixel_fraction / 4.0,
+                "hot_dark_e_min": full_well_e * 0.05,
+                "hot_dark_e_max": full_well_e * 0.8,
+            },
+            full_well_e,
+        )
         frame = np.asarray(frame, dtype=np.float64)
-        hot_count = int(hot_info.get("hot_pixel_count", 0)
-                        + hot_info.get("stuck_high_count", 0)
-                        + hot_info.get("stuck_low_count", 0))
+        hot_count = int(
+            hot_info.get("hot_pixel_count", 0)
+            + hot_info.get("stuck_high_count", 0)
+            + hot_info.get("stuck_low_count", 0)
+        )
 
     if "blooming" in wanted:
-        frame = np.asarray(noise.apply_blooming(
-            frame.astype(np.float32), full_well_e, spread_fraction=bloom_spread), dtype=np.float64)
+        frame = np.asarray(
+            noise.apply_blooming(frame.astype(np.float32), full_well_e, spread_fraction=bloom_spread), dtype=np.float64
+        )
     else:
         frame = np.minimum(frame, full_well_e)
 
@@ -345,15 +357,15 @@ def render_defects(
             frame.shape,
             row_fpn_std_e if "row_fpn" in wanted else 0.0,
             col_fpn_std_e if "column_fpn" in wanted else 0.0,
-            fixed_rng)
+            fixed_rng,
+        )
         offsets = offsets + row + col
     if "flicker" in wanted:
         offsets = offsets + noise.flicker_row_offsets(frame.shape[0], flicker_std_e, rng)[:, None]
 
     sigma_ktc = 0.0
     if "ktc" in wanted:
-        sigma_ktc = noise.ktc_sigma_e(
-            temperature_c=temperature_c, K_e_per_DN=K_e_per_DN, bit_depth=bit_depth)
+        sigma_ktc = noise.ktc_sigma_e(temperature_c=temperature_c, K_e_per_DN=K_e_per_DN, bit_depth=bit_depth)
 
     read = rng.normal(0.0, sigma_d_e, size=frame.shape)
     if sigma_ktc > 0.0:
@@ -364,8 +376,7 @@ def render_defects(
     max_dn = float((1 << bit_depth) - 1)
     dn = np.clip(electrons / K_e_per_DN + black_level_DN, 0.0, max_dn)
     if "adc_inl" in wanted:
-        dn = noise.apply_adc_inl(dn, black_dn=black_level_DN, max_dn=max_dn,
-                                 quadratic_fraction=adc_inl_fraction)
+        dn = noise.apply_adc_inl(dn, black_dn=black_level_DN, max_dn=max_dn, quadratic_fraction=adc_inl_fraction)
     if "adc_dnl" in wanted:
         dn = noise.apply_adc_dnl(dn, noise.adc_dnl_table(max_dn, adc_dnl_std_lsb, fixed_rng), max_dn)
 
@@ -410,8 +421,7 @@ def adc_transfer(
     max_dn = float((1 << bit_depth) - 1)
     ramp = np.linspace(0.0, max_dn, n_points)
 
-    out = noise.apply_adc_inl(ramp.copy(), black_dn=black_level_DN, max_dn=max_dn,
-                              quadratic_fraction=inl_fraction)
+    out = noise.apply_adc_inl(ramp.copy(), black_dn=black_level_DN, max_dn=max_dn, quadratic_fraction=inl_fraction)
     inl_peak = float(np.max(np.abs(out - ramp)))
     if dnl_std_lsb > 0.0:
         table = noise.adc_dnl_table(max_dn, dnl_std_lsb, np.random.default_rng(seed))
