@@ -171,7 +171,8 @@ class TestPbrtHighwayHaze(unittest.TestCase):
         (scene / "probe.pbrt").write_text(
             head
             + f'\nMaterial "diffuse" "spectrum reflectance" [300 {albedo} 900 {albedo}]\n'
-            + f'Shape "bilinearmesh" "point3 P" [{-w} 0 {-w} {w} 0 {-w} {-w} 0 {w} {w} 0 {w}]\n'
+            + f'Shape "trianglemesh" "point3 P" [{-w} 0 {-w} {w} 0 {-w} {-w} 0 {w} {w} 0 {w}]'
+            + ' "integer indices" [0 1 2 2 1 3]\n'
         )
         subprocess.run([str(PBRT), "--quiet", "--seed", "1", str(scene / "probe.pbrt")], check=True)
         return float((read_rgb_exr(exr) @ LUMA).mean()), rho
