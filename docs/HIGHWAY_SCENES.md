@@ -74,3 +74,74 @@ surfaces); the tests use it.
 - No participating medium (haze), wet road, or road curvature; texture colour maps only modulate
   luminance.
 - Asset car materials other than paint/glass/tyres are the authors' RGB values.
+
+## In-car camera effects
+
+`tools/highway_incar.py` (hooks in `build_highway_scene.py`) and `tools/render_time_slices.py`
+make the view look like a windscreen-mounted ADAS camera. Everything is opt-in; without these
+flags the scene and manifest are unchanged.
+
+```bash
+venv/bin/python tools/build_highway_scene.py \
+    --exposure-s 0.004 --rolling-shutter-line-time-us 15 \
+    --ego-speed-kmh 100 --traffic-speed-kmh lanes \
+    --windscreen --windscreen-dirt 0.03 --windscreen-rain 0.08 --vms
+venv/bin/python tools/render_time_slices.py scenes/generated/highway --spp 64 --bands 24 --jobs 2
+```
+
+**Windscreen** (`--windscreen`, `--windscreen-rake-deg 27`, `--windscreen-distance-m`,
+`--windscreen-radius-h-m/-v-m` for curvature). A closed laminated shell, 2.1 mm glass /
+0.76 mm PVB / 2.1 mm glass, raked 27 deg from horizontal (so the optical axis meets it at
+~64 deg incidence), attached to the ego car. pbrt `dielectric` (n = 1.52; PVB, n ~ 1.48, is
+treated as index-matched) bounding a `homogeneous` absorbing medium, so it needs the `volpath`
+integrator (switched on automatically). The absorption is a smooth model of green iron-bearing
+soda-lime glass: the Fe2+ band at ~1050 nm absorbs red/NIR, Fe3+ and the PVB UV absorber cut
+below ~380 nm (Bamford, *Colour Generation and Control in Glass*, 1977; Volotinen et al.,
+J. Non-Cryst. Solids 354, 2008). Luminous transmittance (CIE A, ISO 9050) is 0.80 at normal
+incidence (legal minimum 0.70: UN ECE R43, FMVSS 205 / ANSI Z26.1) and ~0.67 along the camera
+axis because of the oblique Fresnel losses; T is ~0.45 at 800 nm and ~0.16 at 1000 nm. Use
+`--windscreen-transmittance-csv nm,T` for a measured curve. The default distance keeps the
+glass ~1 cm clear of the lens (pinhole: 5 cm; realistic: front element + 1 cm).
+`--windscreen-dirt f` adds a stochastic-alpha `diffusetransmission` film (soil reflectance,
+40 % diffuse transmission) with mean coverage f; `--windscreen-rain f` adds non-overlapping
+spherical-cap water drops (n = 1.333, log-normal base radius, median 0.8 mm,
+`--rain-contact-angle-deg 45`) covering fraction f of the glass the camera sees (mesh sizes:
+~1000 drops per 10 % coverage). The windscreen sits in front of the camera, not over the road,
+so `lighting.reference_illuminance_*` (scene illuminance) is unchanged: the glass attenuation
+shows up in the rendered radiance/irradiance and therefore in the electrons, as it would in a car.
+`manifest["windscreen"]` records the geometry and the normal/axis luminous transmittance.
+
+**Exposure and motion blur** (`--exposure-s T`). The camera gets
+`shutteropen 0 / shutterclose T` and `manifest["exposure"]["integration_time_s"] = T`;
+`pbrt_spectral_exr_to_electrons.py` uses that as the integration time (an explicit
+`--integration-time-s` that differs prints a warning), so the blur and the electron count
+use the same exposure. Pass the same value to `apply_emva_noise.py --integration-time-s` for
+dark current. Ego motion (`--ego-speed-kmh`, `--ego-yaw-rate-deg-s`) animates the camera and
+the windscreen; each car gets a forward velocity (`--traffic-speed-kmh`: one value, a per-car
+comma list, or `lanes` = 125/110/95 km/h by lane and 105 km/h oncoming) via
+`TransformTimes 0 <span>` + `ActiveTransform EndTime` (`span` covers the rolling-shutter
+readout). Speeds go into `manifest["cars"]` and `manifest["ego_motion"]`. pbrt-v4 cannot
+animate area lights ("Animated area lights are not supported"), so a car whose include has an
+`AreaLightSource` is kept static and listed in `manifest["incar_warnings"]`.
+
+**Rolling shutter** (`--rolling-shutter-line-time-us`). pbrt has a global shutter, so
+`render_time_slices.py` renders row bands (`--pixelbounds`) with the shutter window of the
+band's centre row, `[r * line_time, r * line_time + T]`, and composites them. With `--bands B`
+the timing error is <= (yres / 2B) line times (24 bands at 720 rows: 15 rows). Each band re-reads
+the scene, so render time grows by ~B x scene-load time; `--jobs` runs bands concurrently.
+
+**LED flicker** (`--vms`, `--vms-pwm-hz 100`, `--vms-duty 0.25`, `--vms-phase-ms`). A
+roadside dot-matrix variable-message sign: amber AlInGaP LEDs (592 nm, 17 nm FWHM;
+Schubert, *Light-Emitting Diodes*, 2006), 24 mm dots on a 40 mm pitch,
+`--vms-luminance-cd-m2` time-averaged face luminance (EN 12966 class L3 ~ 6000 cd/m2 is the
+default), so each dot runs at L / (fill x duty) while on. Flickering emitters use a generic
+contract, `highway_incar.write_emitter(out_dir, id, lines_for_level, pwm=PWM(f, duty, phase),
+exposure_window_s=...)`: it writes `emitters/<id>.pbrt` (the level averaged over the exposure,
+or the duty cycle without one), `emitters/<id>.on.pbrt` and `.off.pbrt`, and returns the
+`Include` line and a `manifest["emitters"]` entry. Any emitter registered this way (e.g.
+vehicle LED lamps) flickers. `render_time_slices.py` splits each band's window at the PWM
+edges of all emitters and renders every sub-interval with the matching on/off includes, so a
+4 ms exposure of a 100 Hz / 25 % sign captures 2.5 ms of on-time or none at all, depending on
+the phase and the row (bands across the sign). A plain `pbrt` render of the same scene uses the
+exposure-averaged level instead (no row dependence). Samples per pixel are split in
+proportion to slice duration, so the composite has the same total spp as a plain render.
