@@ -167,6 +167,12 @@ def _radial_map(yres: int, xres: int, edge_factor: float, exponent: float) -> np
     return np.clip(m, 0.0, 1.0).astype(np.float32)
 
 
+def spatial_transmission_cfg(model: dict) -> dict:
+    """``optics_transmittance_spatial`` block from ``model.calibration`` or ``model``."""
+    cal = model.get("calibration", {}) or {}
+    return cal.get("optics_transmittance_spatial") or model.get("optics_transmittance_spatial") or {}
+
+
 def build_spatial_transmission_map(
     yres: int,
     xres: int,
@@ -362,7 +368,7 @@ def main() -> None:
     else:
         tau_lambda = np.full_like(wl, float(np.clip(optics_t, 0.0, 1.0)))
         optics_mode = "scalar"
-    spatial_cfg = cal.get("optics_transmittance_spatial", {}) or {}
+    spatial_cfg = spatial_transmission_cfg(model)
 
     lighting = (manifest.get("lighting") or {}).get("distant") or {}
     from_pt = np.asarray(lighting.get("from", [0.12, 0.55, 2.9]), dtype=np.float64)
