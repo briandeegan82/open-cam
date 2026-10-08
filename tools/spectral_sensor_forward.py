@@ -250,6 +250,9 @@ def main() -> None:
         action="store_true",
         help="Fail on QE wavelength-axis auto-remap or likely R/B swap detection.",
     )
+    ap.add_argument("--scene-manifest-json", type=Path, default=None, help="Scene manifest override.")
+    ap.add_argument("--spectral-reference-npz", type=Path, default=None, help="Spectral reference override.")
+    ap.add_argument("--out", type=Path, default=None, help="Output electrons NPZ override.")
     args = ap.parse_args()
 
     repo = args.repo_root.resolve()
@@ -258,9 +261,9 @@ def main() -> None:
         camera_model = load_camera_model(cfg_path)
         cfg = sensor_forward_config_from_camera_model(
             camera_model,
-            spectral_reference_npz="scenes/generated/spectral_reference_1nm.npz",
-            scene_manifest_json="scenes/generated/colorchecker_manifest.json",
-            electrons_npz="out/sensor_forward_electrons.npz",
+            spectral_reference_npz=str(args.spectral_reference_npz or "scenes/generated/spectral_reference_1nm.npz"),
+            scene_manifest_json=str(args.scene_manifest_json or "scenes/generated/colorchecker_manifest.json"),
+            electrons_npz=str(args.out or "out/sensor_forward_electrons.npz"),
         )
     else:
         cfg_path = (args.config or (repo / "config" / "sensor_forward.yaml")).resolve()
@@ -439,7 +442,8 @@ def main() -> None:
                 raise RuntimeError("input illuminance <= 0; cannot normalize to target lux")
             illuminance_scale = float(target_lux) / illuminance_input_lux
         irr_scale_eff = irr_scale * illuminance_scale
-        base = E[None, :] * R * (irr_scale_eff * cos_theta) * tau_lambda[None, :]
+        # Lambertian chart: radiance L = E·R·cosθ/π; aperture_factor = π/(4N²(1+m)²) maps L to sensor irradiance.
+        base = E[None, :] * R * (irr_scale_eff * cos_theta / np.pi) * tau_lambda[None, :]
         patch_resp = np.zeros((24, 3), dtype=np.float64)
         for i in range(24):
             phi = photon_flux_density_from_irradiance(base[i], wl)
@@ -472,7 +476,7 @@ def main() -> None:
         surround_resp = np.zeros(3, dtype=np.float64)
         if cal_mode == "photon_counting":
             irr_scale = float(cal.get("irradiance_scale_W_m2nm_per_unit", 1.0e-3)) * illuminance_scale
-            s_irr = E * surround_reflectance * irr_scale * cos_theta * tau_lambda
+            s_irr = E * surround_reflectance * irr_scale * cos_theta * tau_lambda / np.pi
             phi_s = photon_flux_density_from_irradiance(s_irr, wl)
             geom = t_int * fill_factor * pixel_area * aperture_factor
             for c in range(3):

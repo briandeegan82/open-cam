@@ -33,6 +33,28 @@ from spectral_sensor_forward import (
 )
 
 _AUTOCAL_OFF = ("off", "none", "disabled", "false", "0")
+# pbrt-v4 SpectralFilm multiplies bucket values by CIE_Y_integral (film.h, SpectralFilm::AddSample).
+PBRT_CIE_Y_INTEGRAL = 106.856895
+
+
+def scene_radiometry_from_manifest(manifest: dict) -> dict:
+    """Absolute scale of a generated scene's spectral EXR, from its manifest (pbrt-v4 conventions).
+
+    * pbrt-v4 normalises a light's spectrum to unit luminance times ``scale`` and SpectralFilm
+      multiplies by ``CIE_Y_integral``, so the illuminance of the distant light (perpendicular to
+      it, i.e. the chart illuminance) is ``683 * CIE_Y_integral * scale`` lux in EXR units.
+    * A ``realistic`` camera integrates over the exit pupil and writes film-plane irradiance;
+      the other cameras write scene radiance.
+    """
+    cam = manifest.get("camera") or {}
+    out: dict = {"exr_quantity": "irradiance" if str(cam.get("type", "")).lower() == "realistic" else "radiance"}
+    focus = cam.get("focus_distance", cam.get("focal_distance", cam.get("cam_dist")))
+    if focus is not None:
+        out["focus_distance_m"] = float(focus)
+    light = (manifest.get("lighting") or {}).get("distant") or {}
+    if light.get("scale") is not None:
+        out["chart_illuminance_exr_lux"] = 683.0 * PBRT_CIE_Y_INTEGRAL * float(light["scale"])
+    return out
 
 
 def photometry_calibration_scale(
@@ -104,15 +126,16 @@ def qe_stack_on_lambdas(
     return np.stack(out, axis=0).astype(np.float32)
 
 
-def magnification_factor(lens_cfg: dict | None, cal: dict) -> float:
+def magnification_factor(lens_cfg: dict | None, cal: dict, *, focus_distance_m: float | None = None) -> float:
     """(1+|m|)² close-focus factor, with m = f/(u−f) at focus distance u.
 
-    Negligible at photographic distances (u >> f); ≈4 for 1:1 macro. Returns 1 when the
-    lens has no ``focal_length_mm``.
+    u is ``calibration.focus_distance_m``, else the scene's focus distance, else the lens
+    model's ``realistic_focus_distance``. Negligible at photographic distances (u >> f); ≈4 for
+    1:1 macro. Returns 1 when the lens has no ``focal_length_mm``.
     """
     lens = lens_cfg or {}
     fl_mm = lens.get("focal_length_mm", None)
-    focus_m = float(lens.get("realistic_focus_distance", None) or cal.get("focus_distance_m", 1e6))
+    focus_m = float(cal.get("focus_distance_m") or focus_distance_m or lens.get("realistic_focus_distance") or 1e6)
     if fl_mm is None or float(fl_mm) <= 0.0 or focus_m <= 0.0:
         return 1.0
     m = float(fl_mm) / (focus_m * 1000.0 - float(fl_mm))
@@ -130,6 +153,7 @@ def spectral_radiance_to_electrons(
     integration_time_s: float | None = None,
     strict_qe_validation: bool = False,
     tag: str = "pbrt_exr",
+    scene: dict | None = None,
 ) -> tuple[np.ndarray, dict]:
     """HxWxK spectral radiance [W/(m²·sr·nm) per EXR unit] → HxWx3 electrons.
 
@@ -143,7 +167,14 @@ def spectral_radiance_to_electrons(
     an ``illuminant_override_csv`` + ``target_illuminance_lux`` pair takes precedence;
     ``radiometric_autocalibration: mean_photopic_lux`` is used only without the CSV, and
     the two are never stacked.
+
+    ``scene`` (from :func:`scene_radiometry_from_manifest`) takes precedence over both: the
+    EXR is scaled so the chart illuminance equals ``target_illuminance_lux``, the same
+    definition ``spectral_sensor_forward`` uses. For a realistic-camera EXR (already film
+    irradiance) the π/(4N²(1+m)²) factor is not applied again.
     """
+    scene = scene or {}
+    exr_is_irradiance = scene.get("exr_quantity") == "irradiance"
     cal = model.get("calibration", {}) or {}
     pbrt_cfg = model.get("pbrt_spectral_exr", {}) or {}
     extra_scale = float(pbrt_cfg.get("extra_irradiance_scale", 1.0))
@@ -162,9 +193,16 @@ def spectral_radiance_to_electrons(
     pixel_pitch_um = float(sensor.get("pixel_pitch_um", 3.45))
 
     f_number = effective_f_number(sensor, lens_cfg, tag=tag)
-    mag = magnification_factor(lens_cfg, cal)
+    mag = (
+        1.0
+        if exr_is_irradiance
+        else magnification_factor(lens_cfg, cal, focus_distance_m=scene.get("focus_distance_m"))
+    )
     if rad_scale_user is not None:
         rad_to_e = float(rad_scale_user)
+    elif exr_is_irradiance:
+        rad_to_e = 1.0
+        rad_mode = "pbrt_film_irradiance"
     elif rad_mode in ("thin_lens", "pinhole"):
         rad_to_e = np.pi / (4.0 * max(1e-12, f_number**2) * mag)
     else:
@@ -188,11 +226,16 @@ def spectral_radiance_to_electrons(
 
     target_lux = cal.get("target_illuminance_lux", None)
     exr_autocal_scale = 1.0
-    if autocal_active and target_lux is not None and not cal.get("illuminant_override_csv"):
+    chart_lux_exr = scene.get("chart_illuminance_exr_lux")
+    if target_lux is not None and chart_lux_exr:
+        photometry_scale = float(target_lux) / float(chart_lux_exr)
+        photometric_calibration = "scene_chart_lux"
+    elif autocal_active and target_lux is not None and not cal.get("illuminant_override_csv"):
         # Absolute level comes from the render itself; irradiance_scale is not applied.
         photometry_scale = 1.0
         e_mean = np.mean(L, axis=(0, 1), dtype=np.float64) * irr_per_lambda
         scene_lux = illuminance_lux_from_irradiance(lam, e_mean)
+        photometric_calibration = "mean_photopic_lux"
         if scene_lux > 0:
             exr_autocal_scale = float(target_lux) / float(scene_lux)
         else:
@@ -205,6 +248,9 @@ def spectral_radiance_to_electrons(
                 file=sys.stderr,
             )
         photometry_scale = photometry_calibration_scale(repo, cal, auto_cal_mode=auto_cal_mode)
+        photometric_calibration = (
+            "illuminant_csv" if (target_lux is not None and cal.get("illuminant_override_csv")) else "none"
+        )
     irr_per_lambda = irr_per_lambda * (photometry_scale * exr_autocal_scale)
 
     qe = qe_stack_on_lambdas(
@@ -232,6 +278,7 @@ def spectral_radiance_to_electrons(
         "radiance_to_irradiance": rad_to_e,
         "extra_irradiance_scale": extra_scale,
         "photometry_calibration_scale": photometry_scale,
+        "photometric_calibration": photometric_calibration,
         "exr_radiometric_autocalibration": auto_cal_mode,
         "exr_radiometric_autocalibration_scale": exr_autocal_scale,
         "geometry_factor": geom,
@@ -355,8 +402,11 @@ def main() -> None:
         lens_cfg=lens_cfg,
         integration_time_s=args.integration_time_s,
         strict_qe_validation=args.strict_qe_validation,
+        scene=scene_radiometry_from_manifest(manifest),
     )
-    if meta["f_number"] != float(sensor.get("f_number", 2.8)):
+    if meta["radiance_to_irradiance_mode"] != "pbrt_film_irradiance" and meta["f_number"] != float(
+        sensor.get("f_number", 2.8)
+    ):
         print(
             f"info: realistic camera — effective f/{meta['f_number']:.3f} from the lens prescription "
             "replaces sensor.f_number for radiance→irradiance conversion.",

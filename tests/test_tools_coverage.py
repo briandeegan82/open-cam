@@ -80,7 +80,8 @@ class TestSpectralSensorForwardAnalytic(unittest.TestCase):
         self.assertAlmostEqual(float(out["illuminance_input_lux"]) * float(out["illuminance_scale"]), 500.0, places=6)
         irr = 100.0 * 1e-3 * float(out["illuminance_scale"])
         photons = _trapz(irr * self.wl * 1e-9 / (H_PLANCK * C_LIGHT) * 0.5, self.wl)
-        geom = 0.01 * (2e-6) ** 2 * np.pi / (4.0 * 2.0**2)
+        # Lambertian radiance E·R/π times the thin-lens factor π/(4N²).
+        geom = 0.01 * (2e-6) ** 2 / (4.0 * 2.0**2)
         expected = self.refl * photons * geom
         np.testing.assert_allclose(out["patch_electrons_rgb"], np.repeat(expected[:, None], 3, axis=1), rtol=1e-6)
         # Every patch value is rasterised into the image.
