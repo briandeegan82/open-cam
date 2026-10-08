@@ -200,8 +200,8 @@ def main() -> None:
     )
     args = ap.parse_args()
 
-    repo: Path = args.repo_root
-    out_dir = args.out_dir or (repo / "scenes" / "generated")
+    repo: Path = args.repo_root.resolve()
+    out_dir = (args.out_dir or (repo / "scenes" / "generated")).resolve()
     spd_dir = out_dir / "spd"
     ill_path = args.illuminant or (repo / "spectra" / "illuminant" / "interpolated" / "D55.csv")
     xrite_dir = repo / "spectra" / "xrite"
@@ -396,7 +396,7 @@ def main() -> None:
     scene_path.write_text("\n".join(pbrt_lines) + "\n")
 
     manifest = {
-        "scene": str(scene_path.relative_to(repo)),
+        "scene": _rel(repo, scene_path),
         "illuminant_csv": _rel(repo, ill_path),
         "patches": patches_meta,
         "geometry": {
