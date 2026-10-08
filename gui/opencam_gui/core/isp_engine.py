@@ -15,7 +15,6 @@ because a constant was swapped.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
 
 import numpy as np
 

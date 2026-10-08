@@ -21,6 +21,58 @@ def photon_flux_density_from_irradiance(
     return spectral_irradiance_W_m2nm * lam_m / (H_PLANCK * C_LIGHT)
 
 
+def spectral_electron_weights(
+    wavelength_nm: np.ndarray,
+    qe: np.ndarray,
+    bin_width_nm: np.ndarray,
+    irradiance_scale: np.ndarray | float,
+    geometry_factor: float,
+) -> np.ndarray:
+    """K x C weights so that ``electrons = planes @ weights`` for HxWxK irradiance-unit planes.
+
+    Folds the energy-to-photon conversion ``lambda / (h c)``, the per-bin QE, the
+    integration bin widths, any per-wavelength irradiance scale and the
+    pixel-area x integration-time x fill-factor geometry into one matrix, so the
+    per-pixel integral is a single matrix product instead of materialising a
+    float64 HxWxK photon-flux cube per channel.
+
+    ``qe`` is K x C (one column per colour channel).
+    """
+    lam = np.asarray(wavelength_nm, dtype=np.float64)
+    q = np.asarray(qe, dtype=np.float64)
+    if q.ndim != 2 or q.shape[0] != lam.size:
+        raise ValueError(f"qe must be K x C with K={lam.size}, got {q.shape}")
+    per_bin = (
+        np.asarray(bin_width_nm, dtype=np.float64)
+        * np.asarray(irradiance_scale, dtype=np.float64)
+        * photon_flux_density_from_irradiance(1.0, lam)
+        * float(geometry_factor)
+    )
+    return q * per_bin[:, np.newaxis]
+
+
+def integrate_spectral_planes(
+    planes: np.ndarray,
+    weights: np.ndarray,
+    *,
+    block_pixels: int = 1 << 18,
+) -> np.ndarray:
+    """``planes`` (HxWxK) @ ``weights`` (KxC) -> HxWxC float64, in pixel blocks.
+
+    Blocking keeps the float64 working copy bounded regardless of image size.
+    """
+    h, w, k = planes.shape
+    wts = np.asarray(weights, dtype=np.float64)
+    if wts.shape[0] != k:
+        raise ValueError(f"weights rows ({wts.shape[0]}) must match spectral planes ({k})")
+    flat = planes.reshape(-1, k)
+    out = np.empty((flat.shape[0], wts.shape[1]), dtype=np.float64)
+    for start in range(0, flat.shape[0], block_pixels):
+        stop = start + block_pixels
+        out[start:stop] = flat[start:stop].astype(np.float64) @ wts
+    return out.reshape(h, w, wts.shape[1])
+
+
 def cosine_illuminance_factor(
     surface_normal: np.ndarray,
     direction_to_light_world: np.ndarray,

@@ -62,13 +62,13 @@ from pathlib import Path
 
 import numpy as np
 import yaml
-
 from camera_model import load_camera_model
 from exr_multispectral import (
     parse_s0_wavelength_nm,
     read_separate_exr_channels,
     write_separate_channels_exr,
 )
+from scipy.ndimage import correlate1d
 
 # Representative center wavelengths (nm) for broadband R/G/B channels.
 _RGB_CENTER_NM: dict[str, float] = {"R": 620.0, "G": 540.0, "B": 460.0}
@@ -95,18 +95,10 @@ def separable_gaussian_blur_2d(img: np.ndarray, sigma: float) -> np.ndarray:
     k = _gaussian_kernel_1d(sigma)
     if k.size == 1:
         return np.asarray(img, dtype=np.float32)
-    pad = k.size // 2
+    # scipy "mirror" == numpy pad "reflect" (edge sample not repeated).
     acc = np.asarray(img, dtype=np.float64)
-    # horizontal
-    x = np.pad(acc, ((0, 0), (pad, pad)), mode="reflect")
-    tmp = np.empty_like(acc)
-    for i in range(acc.shape[0]):
-        tmp[i, :] = np.convolve(x[i, :], k, mode="valid")
-    # vertical
-    y = np.pad(tmp, ((pad, pad), (0, 0)), mode="reflect")
-    out = np.empty_like(acc)
-    for j in range(acc.shape[1]):
-        out[:, j] = np.convolve(y[:, j], k, mode="valid")
+    tmp = correlate1d(acc, k, axis=1, mode="mirror")
+    out = correlate1d(tmp, k, axis=0, mode="mirror")
     return out.astype(np.float32, copy=False)
 
 

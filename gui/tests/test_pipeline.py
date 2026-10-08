@@ -1,4 +1,3 @@
-from pathlib import Path
 
 from opencam_gui.core import pipeline as pl
 from opencam_gui.core.catalog import find_recipe
