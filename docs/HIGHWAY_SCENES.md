@@ -66,6 +66,45 @@ surfaces); the tests use it.
   Realistic-camera EXRs are film irradiance, pinhole/thin-lens EXRs radiance, as for the
   other builders. Daylight is bright: pick a short `--integration-time-s`.
 
+## Road surface wear
+
+`--road-wear none|light|moderate|heavy` (default `moderate`) ages the road with seeded,
+reproducible distress (`--road-wear-seed`, default `--seed`). The code lives in
+`tools/highway_road_wear.py`. The default `asphalt` material is replaced, and so are the clean
+`paint_*` quads. Only material fields change, so the manifest's absolute illuminance is not
+affected. The resulting area-weighted luminous reflectance is recorded in
+`road.wear.luminous_reflectance`. For the default level it is about 0.12 (p5-p95 0.11-0.13),
+which sits inside the measured aged-asphalt range: new asphalt is about 0.05 and aged asphalt
+0.10-0.18 (Pomerantz, Akbari et al., LBNL cool-pavement reports; Herold et al. 2004).
+
+- **Anti-tiling**: the `--road` ambientCG asphalt and Asphalt033 are each re-synthesised into a
+  6 m periodic tile. The method is variance-preserving stochastic tiling: random offset/rotated
+  copies blended on a cos² partition of unity (Heitz & Neyret 2018, without the histogram
+  transform). This covers luminance, roughness and normals, with normals rotated alongside the
+  image. The two asphalts are mixed with a 2.5 m noise mask.
+- **Wear maps** (one 97.5 m period, 2 cm texels, pbrt `planar` mapping; `--road-wear-texel-m`):
+  - Tyre wheel paths at ±0.88 m from each lane centre, with wander σ 0.32 m (MEPDG default
+    10 in wander SD convolved with the tyre width). They are weighted towards the slow lanes,
+    about 20% darker, and polished (roughness 0.35 → 0.12).
+  - Oil/drip stains along lane centres.
+  - Transverse and longitudinal (joint/wheel-path) cracks: unsealed 6-15 mm, or sealed with
+    60-120 mm rubberised sealant overbands.
+  - Pothole, wheel-path and full-lane patches with younger binder (~0.07) and sealed edges.
+  - Distress names and severities follow the LTPP Distress Identification Manual
+    (FHWA-RD-03-031).
+- **Markings**: the spectral mix of traffic paint and asphalt is area-weighted by a seeded
+  paint-loss map that models flaking, edge chipping and dash-to-dash variation. Intact paint
+  keeps a smoother coat (roughness 0.15, giving a glass-bead sheen in daylight). Worn areas take
+  the asphalt roughness.
+- **Raised pavement markers**: 100 x 100 x 18 mm geometry instances (ASTM D4280 height limit
+  ~20 mm). They sit in every other broken-line gap (2N = 24.4 m, MUTCD 3B.11-3B.14), with
+  clear/red lenses on lane lines and amber on the yellow edge, and about 10% are missing. Lenses
+  are smooth coated diffuse (daytime look only; retroreflection is not modelled).
+- **Normal maps**: pbrt-v4 decodes 8-bit JPEGs as sRGB even when a linear encoding is requested,
+  which tilted the asphalt normals and rendered the road ~7x too dark. The asphalt and grass
+  normal maps (with or without wear) are therefore converted to PNG
+  (`highway_road_wear.linear_normal_map`).
+
 ## Known approximations
 
 - No retroreflective BSDF in pbrt: markings use a glass-bead-like rough clear coat over a
