@@ -1,0 +1,155 @@
+diff --git a/src/pbrt/lights.cpp b/src/pbrt/lights.cpp
+index a182ccd..7817b3e 100644
+--- a/src/pbrt/lights.cpp
++++ b/src/pbrt/lights.cpp
+@@ -1006,7 +1006,8 @@ std::string UniformInfiniteLight::ToString() const {
+ // ImageInfiniteLight Method Definitions
+ ImageInfiniteLight::ImageInfiniteLight(Transform renderFromLight, Image im,
+                                        const RGBColorSpace *imageColorSpace, Float scale,
+-                                       std::string filename, Allocator alloc)
++                                       std::string filename, Allocator alloc,
++                                       const std::vector<Spectrum> &basisSpectra)
+     : LightBase(LightType::Infinite, renderFromLight, MediumInterface()),
+       image(std::move(im)),
+       imageColorSpace(imageColorSpace),
+@@ -1014,14 +1015,29 @@ ImageInfiniteLight::ImageInfiniteLight(Transform renderFromLight, Image im,
+       distribution(alloc),
+       compensatedDistribution(alloc) {
+     // ImageInfiniteLight constructor implementation
+-    // Initialize sampling PDFs for image infinite area light
+-    ImageChannelDesc channelDesc = image.GetChannelDesc({"R", "G", "B"});
+-    if (!channelDesc)
+-        ErrorExit("%s: image used for ImageInfiniteLight doesn't have R, G, B "
+-                  "channels.",
+-                  filename);
+-    CHECK_EQ(3, channelDesc.size());
+-    CHECK(channelDesc.IsIdentity());
++    if (!basisSpectra.empty()) {
++        // Spectral-basis map: one image channel per basis spectrum, each spectrum
++        // normalised to unit luminance (as for the "L" of other lights).
++        if (image.NChannels() != int(basisSpectra.size()))
++            ErrorExit("%s: spectral-basis infinite light has %d channels but %d "
++                      "spectra.",
++                      filename, image.NChannels(), int(basisSpectra.size()));
++        nBasis = int(basisSpectra.size());
++        basis = alloc.allocate_object<DenselySampledSpectrum>(nBasis);
++        for (int k = 0; k < nBasis; ++k) {
++            alloc.construct(&basis[k], basisSpectra[k], alloc);
++            basis[k].Scale(1 / SpectrumToPhotometric(basisSpectra[k]));
++        }
++    } else {
++        // Initialize sampling PDFs for image infinite area light
++        ImageChannelDesc channelDesc = image.GetChannelDesc({"R", "G", "B"});
++        if (!channelDesc)
++            ErrorExit("%s: image used for ImageInfiniteLight doesn't have R, G, B "
++                      "channels.",
++                      filename);
++        CHECK_EQ(3, channelDesc.size());
++        CHECK(channelDesc.IsIdentity());
++    }
+     if (image.Resolution().x != image.Resolution().y)
+         ErrorExit("%s: image resolution (%d, %d) is non-square. It's unlikely "
+                   "this is an equal area environment map.",
+@@ -1058,6 +1074,12 @@ SampledSpectrum ImageInfiniteLight::Phi(SampledWavelengths lambda) const {
+     int width = image.Resolution().x, height = image.Resolution().y;
+     for (int v = 0; v < height; ++v) {
+         for (int u = 0; u < width; ++u) {
++            if (nBasis > 0) {
++                for (int k = 0; k < nBasis; ++k)
++                    sumL += std::max<Float>(0, image.GetChannel({u, v}, k)) *
++                            basis[k].Sample(lambda);
++                continue;
++            }
+             RGB rgb;
+             for (int c = 0; c < 3; ++c)
+                 rgb[c] = image.GetChannel({u, v}, c, WrapMode::OctahedralSphere);
+@@ -1547,10 +1569,46 @@ Light Light::Create(const std::string &name, const ParameterDictionary &paramete
+             // Default: color space's std illuminant
+             light = alloc.new_object<UniformInfiniteLight>(
+                 renderFromLight, &colorSpace->illuminant, scale);
++        } else if (!L.empty() && !filename.empty() && portal.empty()) {
++            // open-cam patch: spectral-basis environment map. Image channels
++            // B0..B{n-1} are per-pixel luminance weights of the n "L" spectra.
++            ImageAndMetadata im = Image::Read(filename, alloc);
++            if (im.image.HasAnyInfinitePixels() || im.image.HasAnyNaNPixels())
++                ErrorExit(loc, "%s: image has infinite or NaN pixel values.", filename);
++            std::vector<std::string> names;
++            for (size_t k = 0; k < L.size(); ++k)
++                names.push_back(StringPrintf("B%d", int(k)));
++            ImageChannelDesc desc = im.image.GetChannelDesc(names);
++            if (!desc)
++                ErrorExit(loc,
++                          "%s: spectral-basis \"infinite\" light needs channels B0.."
++                          "B%d (one per \"L\" spectrum).",
++                          filename, int(L.size()) - 1);
++            Image image = im.image.SelectChannels(desc, alloc);
++            if (E_v > 0) {
++                // Upper-hemisphere illuminance of the map; basis spectra have unit
++                // luminance, so a pixel's luminance is the sum of its weights.
++                double illuminance = 0;
++                for (int y = 0; y < image.Resolution().y; ++y) {
++                    Float v = (y + 0.5f) / image.Resolution().y;
++                    for (int x = 0; x < image.Resolution().x; ++x) {
++                        Float u = (x + 0.5f) / image.Resolution().x;
++                        Vector3f w = EqualAreaSquareToSphere(Point2f(u, v));
++                        if (w.z <= 0)
++                            continue;
++                        for (int k = 0; k < image.NChannels(); ++k)
++                            illuminance +=
++                                std::max<Float>(0, image.GetChannel({x, y}, k)) *
++                                CosTheta(w);
++                    }
++                }
++                illuminance *= 2 * Pi / (image.Resolution().x * image.Resolution().y);
++                scale *= E_v / illuminance;
++            }
++            light = alloc.new_object<ImageInfiniteLight>(renderFromLight,
++                                                         std::move(image), colorSpace,
++                                                         scale, filename, alloc, L);
+         } else if (!L.empty() && portal.empty()) {
+-            if (!filename.empty())
+-                ErrorExit(loc, "Can't specify both emission \"L\" and "
+-                               "\"filename\" with ImageInfiniteLight");
+ 
+             // Scale the light spectrum to be equivalent to 1 nit
+             scale /= SpectrumToPhotometric(L[0]);
+diff --git a/src/pbrt/lights.h b/src/pbrt/lights.h
+index 76caca7..b59d91b 100644
+--- a/src/pbrt/lights.h
++++ b/src/pbrt/lights.h
+@@ -546,7 +546,8 @@ class ImageInfiniteLight : public LightBase {
+     // ImageInfiniteLight Public Methods
+     ImageInfiniteLight(Transform renderFromLight, Image image,
+                        const RGBColorSpace *imageColorSpace, Float scale,
+-                       std::string filename, Allocator alloc);
++                       std::string filename, Allocator alloc,
++                       const std::vector<Spectrum> &basisSpectra = {});
+ 
+     void Preprocess(const Bounds3f &sceneBounds) {
+         sceneBounds.BoundingSphere(&sceneCenter, &sceneRadius);
+@@ -610,6 +611,16 @@ class ImageInfiniteLight : public LightBase {
+     // ImageInfiniteLight Private Methods
+     PBRT_CPU_GPU
+     SampledSpectrum ImageLe(Point2f uv, const SampledWavelengths &lambda) const {
++        if (nBasis > 0) {
++            // Spectral basis: channel k weights unit-luminance spectrum basis[k]
++            SampledSpectrum L(0.f);
++            for (int k = 0; k < nBasis; ++k) {
++                Float w = image.LookupNearestChannel(uv, k, WrapMode::OctahedralSphere);
++                if (w > 0)
++                    L += w * basis[k].Sample(lambda);
++            }
++            return scale * L;
++        }
+         RGB rgb;
+         for (int c = 0; c < 3; ++c)
+             rgb[c] = image.LookupNearestChannel(uv, c, WrapMode::OctahedralSphere);
+@@ -619,6 +630,8 @@ class ImageInfiniteLight : public LightBase {
+ 
+     // ImageInfiniteLight Private Members
+     Image image;
++    DenselySampledSpectrum *basis = nullptr;
++    int nBasis = 0;
+     const RGBColorSpace *imageColorSpace;
+     Float scale;
+     Point3f sceneCenter;

@@ -12,6 +12,25 @@ CMake step enables GPU targets and the build fails. Unset it for a CPU build:
 
 The pbrt executable is: third_party/pbrt-v4/build/pbrt
 
+open-cam patches
+----------------
+open-cam carries small pbrt-v4 changes as patch files in third_party/patches/
+(never committed into the submodule). tools/build_pbrt.sh applies every patch
+(idempotently; already-applied ones are skipped) and then does the CPU build
+above, so prefer it over the raw cmake commands:
+
+  tools/build_pbrt.sh               # patch + build
+  tools/build_pbrt.sh --patch-only  # just apply the patches
+
+CI caches the binary keyed on the submodule SHA plus the hash of the patches.
+
+- pbrt-v4-spectral-basis-infinite-light.patch: an "infinite" light may give
+  both "filename" and n "L" spectra; the equal-area image then has channels
+  B0..B{n-1}, each a per-pixel luminance weight of the corresponding (unit-
+  luminance-normalised) spectrum, so Le(w) = scale * sum_k B_k(w) L_k(lambda).
+  "float illuminance" still sets the upper-hemisphere illuminance. Used by the
+  spectral highway sky (docs/HIGHWAY_SCENES.md). RGB maps are unaffected.
+
 GPU build
 ---------
 Install the OptiX SDK and point CMake at it:

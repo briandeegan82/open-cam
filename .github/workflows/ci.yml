@@ -56,7 +56,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: third_party/pbrt-v4/build/pbrt
-          key: pbrt-v4-cpu-${{ runner.os }}-${{ steps.pbrt.outputs.sha }}
+          key: pbrt-v4-cpu-${{ runner.os }}-${{ steps.pbrt.outputs.sha }}-${{ hashFiles('third_party/patches/*.patch') }}
       - name: Install runtime libraries
         run: |
           sudo apt-get update -q
@@ -64,9 +64,7 @@ jobs:
             libxi-dev libgl-dev libwayland-dev libxkbcommon-dev wayland-protocols pkg-config cmake
       - name: Build pbrt-v4 (CPU)
         if: steps.pbrt-cache.outputs.cache-hit != 'true'
-        run: |
-          cmake -S third_party/pbrt-v4 -B third_party/pbrt-v4/build -DCMAKE_BUILD_TYPE=Release
-          cmake --build third_party/pbrt-v4/build -j"$(nproc)" --target pbrt_exe
+        run: tools/build_pbrt.sh  # applies third_party/patches/*.patch, then builds
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
       - name: End-to-end render test

@@ -138,6 +138,32 @@ class TestPbrtEndToEnd(unittest.TestCase):
         self.assertTrue(np.all(np.diff(neutral) < 0), f"neutral row not monotonic: {neutral}")
 
 
+@unittest.skipUnless(PBRT.is_file(), f"pbrt binary not built ({PBRT}); see docs/BUILD_PBRT.txt")
+class TestPbrtSpectralSky(unittest.TestCase):
+    """Hosek-Wilkie daylight-basis sky; needs pbrt built by tools/build_pbrt.sh (spectral-basis patch)."""
+
+    def test_hosek_sky_render(self) -> None:
+        import yaml
+
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            m = yaml.safe_load((REPO / "config" / "highway_assets.yaml").read_text())
+            m["cache_dir"] = str(tmp / "empty_cache")
+            (tmp / "assets.yaml").write_text(yaml.safe_dump(m))
+            exr = tmp / "hw.exr"
+            args = ["--out-dir", str(tmp / "scene"), "--asset-manifest", str(tmp / "assets.yaml")]
+            args += ["--allow-missing-assets", "--film-output", str(exr), "--xres", "48", "--yres", "27"]
+            args += ["--pixelsamples", "64", "--spectral-nbuckets", "3", "--sky", "hosek", "--sun-elevation", "40"]
+            args += ["--spectral-lambda-min", "400", "--spectral-lambda-max", "700"]
+            subprocess.run([sys.executable, str(REPO / "tools" / "build_highway_scene.py"), *args], check=True)
+            subprocess.run([str(PBRT), "--quiet", "--seed", "1", str(tmp / "scene" / "highway.pbrt")], check=True)
+            L, _ = spectral_buckets_from_exr(exr)
+            self.assertTrue(np.isfinite(L).all())
+            sky = L[:6].reshape(-1, L.shape[-1]).mean(0)  # 450 / 550 / 650 nm buckets
+            self.assertGreater(sky[0], 1.2 * sky[2])  # blue clear sky
+            self.assertGreater(float(L[:6].mean()), float(L[-6:].mean()))
+
+
 if __name__ == "__main__":
     unittest.main()
 
