@@ -6,4 +6,4 @@ lens_model: canon_eos_20d
 sensor_model: default_rccg
 source:
   qe_variant: default_rccg
-  qe_variant_note: 'True periodic CFA via cfa.layout (per-channel spectral QE). quantum_efficiency keeps the legacy 3-channel proxy for RGB-only tools; set cfa.layout: null for the old proxy behaviour. Old note: RCCG approximated as RGB channels: R, C->G, G->B'
+  qe_variant_note: 'True periodic CFA via cfa.layout (per-channel spectral QE). quantum_efficiency keeps the legacy 3-channel proxy for RGB-only tools; set cfa.layout: null and cfa.demosaic: malvar for the old proxy behaviour. Old note: RCCG approximated as RGB channels: R, C->G, G->B'

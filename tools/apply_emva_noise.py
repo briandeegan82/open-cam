@@ -1321,7 +1321,8 @@ def main() -> None:
                     exr_in,
                     repo,
                     qe_cfg,
-                    sensor,
+                    # Generic CFA honours --integration-time-s for the signal (legacy path unchanged).
+                    sensor if cfa_layout is None else {**sensor, "integration_time_s": t_int_s},
                     _cal_cfg,
                     strict_qe_validation=strict_qe_validation,
                     lens_cfg=camera_model.get("lens", {}) if camera_model else None,
@@ -1699,7 +1700,7 @@ def main() -> None:
             "binning": cfa_binning,
             "output_tile": [list(r) for r in cfa_out_layout.tile],
         }
-        if demosaic_requested(bayer_cfg):
+        if str(bayer_cfg.get("demosaic", "gradient")).lower() not in ("false", "none", "0"):
             _cfa_rgb, _cfa_info = render_cfa_rgb(
                 [dn_clean, dn_noisy],
                 black_dn,

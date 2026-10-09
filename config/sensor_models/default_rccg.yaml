@@ -6,7 +6,7 @@ sensor:
     blue_csv: spectra/QE/interpolated/QE_green.csv
 source:
   qe_variant: default_rccg
-  qe_variant_note: 'True periodic CFA via cfa.layout (per-channel spectral QE). quantum_efficiency keeps the legacy 3-channel proxy for RGB-only tools; set cfa.layout: null for the old proxy behaviour. Old note: RCCG approximated as RGB channels: R, C->G, G->B'
+  qe_variant_note: 'True periodic CFA via cfa.layout (per-channel spectral QE). quantum_efficiency keeps the legacy 3-channel proxy for RGB-only tools; set cfa.layout: null and cfa.demosaic: malvar for the old proxy behaviour. Old note: RCCG approximated as RGB channels: R, C->G, G->B'
 model:
   name: default_rccg
   display_name: Default RCCG (true CFA)
