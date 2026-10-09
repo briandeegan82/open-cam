@@ -672,9 +672,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         L = night.strip_normal_map(L)
         for name in ("rw:asphaltA", "rw:asphaltB") if wear is not None else ():
             L = night.strip_normal_map(L, name)
-    wet_meta = None
-    if wet.enabled(args):
-        L, wet_meta = wet.apply_materials(L, args, wl, spd, out_dir, wear)
+    spray_meta = None
     L += fx.vms_lines(out_dir, wl, Layout.right_paved)
     paved = [
         (Layout.median_l, Layout.right_paved, ROAD_Z0, ROAD_Z1),
@@ -871,11 +869,10 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         if args.spray:
             heavy = [m in variety.HEAVY for _, _, m, _, _ in traffic]
             v_spray = [v or wet.nominal_speed_kmh(c[0]) for v, c in zip(speeds, traffic)]  # static scene: lane speed
-            spray, wet_meta["spray"] = wet.spray_lines(
-                cars_meta, v_spray, heavy, args, "haze" if atm else "", variety.place
+            spray, spray_meta = wet.spray_lines(
+                cars_meta, v_spray, heavy, args, "haze" if atm else "", variety.place, float(eye[2])
             )
             L += spray
-            wet_meta["spray"] = wet.manifest_spray(wet_meta["spray"])
 
     median_x = Layout.median_l + MEDIAN_W / 2 + LEFT_SHOULDER / 2 - 0.6
     L += variety.structures(var, out_dir, Layout, median_x, mesh, box, sign_legend, LANE_W)
@@ -896,6 +893,11 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
     L += night_lines
 
     L += fx.windscreen_lines(out_dir, wl, eye)
+    wet_meta = None
+    if wet.enabled(args):  # last: also wets the road-wear marking materials emitted with the geometry
+        L, wet_meta = wet.apply_materials(L, args, wl, spd, out_dir, wear)
+        if spray_meta is not None:
+            wet_meta["spray"] = wet.manifest_spray(spray_meta)
     scene_path = out_dir / "highway.pbrt"
     scene_path.write_text("\n".join(L) + "\n")
 

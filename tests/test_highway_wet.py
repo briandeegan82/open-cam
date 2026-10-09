@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import math
 import tempfile
@@ -95,6 +96,19 @@ class TestWetMarkingsAndSpray(unittest.TestCase):
         """Cars at motorway speeds on a wet road stay below the measured 0.2 m^-1 peak (Otxoterena 2021)."""
         for v in (90, 110, 130):
             self.assertLessEqual(wet.spray_extinction(v, "wet", False), wet.SPRAY_EXT_REF)
+
+    def test_spray_box_below_road_and_clear_of_camera(self) -> None:
+        rho = wet.spray_density(10, 8, 24, 2.4, 1.6, 15.0, -wet.SPRAY_FLOOR)
+        y = -wet.SPRAY_FLOOR + (np.arange(8) + 0.5) / 8 * (1.6 + wet.SPRAY_FLOOR)
+        self.assertEqual(float(rho[:, y < 0].max()), 0.0)
+        cars = [
+            {"id": "c", "x": 0.0, "distance_m": 8.0, "length_m": 4.0, "width_m": 1.8, "height_m": 1.5, "heading_deg": 0}
+        ]
+        args = argparse.Namespace(road_wetness="wet")
+        lines, meta = wet.spray_lines(cars, [120.0], [True], args, "", lambda x, y, z: [f"Translate {x} {y} {z}"])
+        z0 = 8.0 - 2.0 - 0.15
+        self.assertLess(meta[0]["length_m"], z0)  # the plume ends in front of the camera at z = 0
+        self.assertIn(f'"point3 p0" [-1.2 {-wet.SPRAY_FLOOR}', "\n".join(lines))
 
     def test_spray_box_outward_normals(self) -> None:
         """pbrt-v4: a ray leaving along +n enters MediumInterface 'outside', so box normals must point out."""

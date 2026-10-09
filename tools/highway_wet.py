@@ -94,7 +94,8 @@ WET_MARKING_CLASS = {
 SPRAY_EXT_REF = 0.2  # m^-1, Otxoterena Drake et al. 2021 (heavy vehicles)
 SPRAY_V_REF_KMH, SPRAY_V_ONSET_KMH = 90.0, 30.0  # assumed
 SPRAY_G = 0.85
-SPRAY_CAR_FACTOR = 0.5  # assumed (fewer, smaller tyres than a truck)
+SPRAY_CAR_FACTOR = 0.5
+SPRAY_FLOOR = 0.5  # m: spray box extends this far below the road surface (empty cells)  # assumed (fewer, smaller tyres than a truck)
 WET_SPDS = ("asphalt_aged", "asphalt_new", "asphalt_patch", "crack_sealant", "paint_road_white", "paint_road_yellow")
 ROAD_MATERIALS = ("asphalt", "rw:asphaltA", "rw:asphaltB", "rw:sealant", "paint_white", "paint_yellow")
 
@@ -223,17 +224,20 @@ def spray_length_m(speed_kmh: float) -> float:
     return max(3.0, 0.6 * abs(speed_kmh) / 3.6)
 
 
-def spray_density(nx: int, ny: int, nz: int, width: float, height: float, length: float) -> np.ndarray:
-    """Relative density (peak 1) on the grid, index (z * ny + y) * nx + x; z = 0 at the rear axle."""
+def spray_density(nx: int, ny: int, nz: int, width: float, height: float, length: float, y0: float = 0.0) -> np.ndarray:
+    """Relative density (peak 1) on the grid, index (z * ny + y) * nx + x; z = 0 at the rear axle.
+
+    The grid spans ``y0 .. height``; cells below the road surface (y < 0) are empty.
+    """
     x = (np.arange(nx) + 0.5) / nx * width - width / 2
-    y = (np.arange(ny) + 0.5) / ny * height
+    y = y0 + (np.arange(ny) + 0.5) / ny * (height - y0)
     z = (np.arange(nz) + 0.5) / nz * length
     Z, Y, X = np.meshgrid(z, y, x, indexing="ij")
     track = width / 2 - 0.45
     sx = 0.25 + 0.08 * Z
     sy = 0.3 + 0.1 * Z
     lat = np.exp(-0.5 * ((np.abs(X) - track) / sx) ** 2)
-    rho = lat * np.exp(-0.5 * (Y / sy) ** 2) * np.exp(-Z / (0.35 * length)) * (0.3 + 0.7 * np.exp(-Z / 2.0))
+    rho = lat * np.exp(-0.5 * (Y / sy) ** 2) * (Y >= 0) * np.exp(-Z / (0.35 * length)) * (0.3 + 0.7 * np.exp(-Z / 2.0))
     return rho / rho.max()
 
 
@@ -324,7 +328,8 @@ def apply_materials(
         elif '"coateddiffuse"' in head:
             blk = [spd_re.sub(r'"spd/wet_\1.spd"', ln) for ln in blk]
             blk[0] = _set_param(blk[0], "float roughness", f"[{rough:g}]")
-            blk[0] += f' "float eta" [{N_WATER}] "float thickness" [{THICKNESS}]'
+            blk[0] = _set_param(blk[0], "float eta", f"[{N_WATER}]")
+            blk[0] = _set_param(blk[0], "float thickness", f"[{THICKNESS}]")
             if lvl != "damp":  # the water surface hides the texture's micro-normals
                 blk = [ln for ln in blk if '"string normalmap"' not in ln]
         out += blk
@@ -411,9 +416,15 @@ def _puddle_lines(lines: list[str], wear, lvl: str) -> tuple[list[str], dict]:
 
 # ------------------------------------------------------------------ spray volumes
 def spray_lines(
-    cars: list[dict], speeds: list[float], heavy: list[bool], args, outside: str, place
+    cars: list[dict], speeds: list[float], heavy: list[bool], args, outside: str, place, eye_z: float = 0.0
 ) -> tuple[list[str], list[dict]]:
-    """One ``uniformgrid`` spray medium + invisible bounding box per moving vehicle."""
+    """One ``uniformgrid`` spray medium + invisible bounding box per moving vehicle.
+
+    The box bottom sits ``SPRAY_FLOOR`` below the road (the road plane then lies inside the medium,
+    avoiding a near-coplanar interface face that pbrt's ray offsets on the large road triangles
+    cross inconsistently), and plumes are clipped so the camera is never inside one (pbrt has no
+    per-camera medium here).
+    """
     lvl = args.road_wetness
     nx, ny, nz = 10, 8, 24
     L: list[str] = [f"# Vehicle spray ({lvl} road): HG g = {SPRAY_G}, sigma_a = 0 (tools/highway_wet.py)"]
@@ -434,13 +445,15 @@ def spray_lines(
         ]
         if behind:
             length = min(length, min(fwd * (rear - b) for b in behind) - 0.3)
+        z0 = rear - fwd * 0.15  # leave a gap to the body
+        if fwd * (z0 - eye_z) > 0:
+            length = min(length, fwd * (z0 - eye_z) - 0.5)
         if length < 1.0:
             continue
         width = c["width_m"] + 0.6
         height = min(2.5, 0.7 * c["height_m"] + 0.6)
-        rho = spray_density(nx, ny, nz, width, height, length)
+        rho = spray_density(nx, ny, nz, width, height, length, -SPRAY_FLOOR)
         name = f"spray:{c['id']}"
-        z0 = rear - fwd * 0.15  # leave a gap to the body
         L += [
             "AttributeBegin",
             *place(c["x"], 0.0, z0),
@@ -448,12 +461,12 @@ def spray_lines(
             f'MakeNamedMedium "{name}" "string type" "uniformgrid"',
             f'    "spectrum sigma_a" [300 0 900 0] "spectrum sigma_s" [300 1 900 1] "float scale" [{ext:.6g}]',
             f'    "float g" [{SPRAY_G}] "integer nx" [{nx}] "integer ny" [{ny}] "integer nz" [{nz}]',
-            f'    "point3 p0" [{-width / 2:.6g} 0.02 {-length:.6g}] "point3 p1" [{width / 2:.6g} {height:.6g} 0]',
+            f'    "point3 p0" [{-width / 2:.6g} {-SPRAY_FLOOR} {-length:.6g}] "point3 p1" [{width / 2:.6g} {height:.6g} 0]',
             # grid z runs p0 -> p1, i.e. from the far end of the plume to the vehicle
             '    "float density" [ ' + " ".join(f"{x:.4g}" for x in rho[::-1].ravel()) + " ]",
             f'MediumInterface "{name}" "{outside}"',
             'Material "interface"',
-            *_box(-width / 2, 0.02, -length, width / 2, height, 0.0),
+            *_box(-width / 2, -SPRAY_FLOOR, -length, width / 2, height, 0.0),
             "AttributeEnd",
         ]
         meta.append({"id": c["id"], "speed_kmh": v, "heavy": hv, "peak_extinction_m": ext, "length_m": length})
