@@ -95,6 +95,7 @@ SPRAY_EXT_REF = 0.2  # m^-1, Otxoterena Drake et al. 2021 (heavy vehicles)
 SPRAY_V_REF_KMH, SPRAY_V_ONSET_KMH = 90.0, 30.0  # assumed
 SPRAY_G = 0.85
 SPRAY_CAR_FACTOR = 0.5
+SPRAY_SEGMENTS = 4  # homogeneous slabs along the plume (see spray_lines)
 SPRAY_FLOOR = 0.5  # m: spray box extends this far below the road surface (empty cells)  # assumed (fewer, smaller tyres than a truck)
 WET_SPDS = ("asphalt_aged", "asphalt_new", "asphalt_patch", "crack_sealant", "paint_road_white", "paint_road_yellow")
 ROAD_MATERIALS = ("asphalt", "rw:asphaltA", "rw:asphaltB", "rw:sealant", "paint_white", "paint_yellow")
@@ -418,7 +419,12 @@ def _puddle_lines(lines: list[str], wear, lvl: str) -> tuple[list[str], dict]:
 def spray_lines(
     cars: list[dict], speeds: list[float], heavy: list[bool], args, outside: str, place, eye_z: float = 0.0
 ) -> tuple[list[str], list[dict]]:
-    """One ``uniformgrid`` spray medium + invisible bounding box per moving vehicle.
+    """Spray media behind every moving vehicle: ``SPRAY_SEGMENTS`` homogeneous slabs along the plume.
+
+    Each slab carries the mean extinction of ``spray_density`` over its cross-section, so the
+    downstream decay is kept but the lateral wheel-track / vertical structure is averaged out. (A
+    ``uniformgrid`` medium was tried first; with pbrt-v4's distant light its shadow rays came back
+    fully occluded, casting black wedges on the road, so homogeneous slabs are used instead.)
 
     The box bottom sits ``SPRAY_FLOOR`` below the road (the road plane then lies inside the medium,
     avoiding a near-coplanar interface face that pbrt's ray offsets on the large road triangles
@@ -452,24 +458,31 @@ def spray_lines(
             continue
         width = c["width_m"] + 0.6
         height = min(2.5, 0.7 * c["height_m"] + 0.6)
-        rho = spray_density(nx, ny, nz, width, height, length, -SPRAY_FLOOR)
-        name = f"spray:{c['id']}"
-        L += [
-            "AttributeBegin",
-            *place(c["x"], 0.0, z0),
-            *(["Rotate 180 0 1 0"] if fwd < 0 else []),
-            f'MakeNamedMedium "{name}" "string type" "uniformgrid"',
-            f'    "spectrum sigma_a" [300 0 900 0] "spectrum sigma_s" [300 1 900 1] "float scale" [{ext:.6g}]',
-            f'    "float g" [{SPRAY_G}] "integer nx" [{nx}] "integer ny" [{ny}] "integer nz" [{nz}]',
-            f'    "point3 p0" [{-width / 2:.6g} {-SPRAY_FLOOR} {-length:.6g}] "point3 p1" [{width / 2:.6g} {height:.6g} 0]',
-            # grid z runs p0 -> p1, i.e. from the far end of the plume to the vehicle
-            '    "float density" [ ' + " ".join(f"{x:.4g}" for x in rho[::-1].ravel()) + " ]",
-            f'MediumInterface "{name}" "{outside}"',
-            'Material "interface"',
-            *_box(-width / 2, -SPRAY_FLOOR, -length, width / 2, height, 0.0),
-            "AttributeEnd",
-        ]
-        meta.append({"id": c["id"], "speed_kmh": v, "heavy": hv, "peak_extinction_m": ext, "length_m": length})
+        rho = spray_density(nx, ny, nz, width, height, length)
+        seg = rho.reshape(SPRAY_SEGMENTS, -1).mean(axis=1) * ext  # mean extinction per z segment
+        dz = length / SPRAY_SEGMENTS
+        L += ["AttributeBegin", *place(c["x"], 0.0, z0), *(["Rotate 180 0 1 0"] if fwd < 0 else [])]
+        for k, e in enumerate(seg):
+            name = f"spray:{c['id']}:{k}"
+            L += [
+                f'MakeNamedMedium "{name}" "string type" "homogeneous"',
+                f'    "spectrum sigma_a" [300 0 900 0] "spectrum sigma_s" [300 1 900 1] "float scale" [{e:.6g}]',
+                f'    "float g" [{SPRAY_G}]',
+                f'MediumInterface "{name}" "{outside}"',
+                'Material "interface"',
+                *_box(-width / 2, -SPRAY_FLOOR, -(k + 1) * dz + 0.005, width / 2, height, -k * dz - 0.005),
+            ]
+        L.append("AttributeEnd")
+        meta.append(
+            {
+                "id": c["id"],
+                "speed_kmh": v,
+                "heavy": hv,
+                "peak_extinction_m": ext,
+                "length_m": length,
+                "segment_extinction_m": [round(float(e), 5) for e in seg],
+            }
+        )
     return L + [""], meta
 
 

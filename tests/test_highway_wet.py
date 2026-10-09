@@ -108,7 +108,9 @@ class TestWetMarkingsAndSpray(unittest.TestCase):
         lines, meta = wet.spray_lines(cars, [120.0], [True], args, "", lambda x, y, z: [f"Translate {x} {y} {z}"])
         z0 = 8.0 - 2.0 - 0.15
         self.assertLess(meta[0]["length_m"], z0)  # the plume ends in front of the camera at z = 0
-        self.assertIn(f'"point3 p0" [-1.2 {-wet.SPRAY_FLOOR}', "\n".join(lines))
+        self.assertIn(f"-1.2 {-wet.SPRAY_FLOOR:g} ", "\n".join(lines))  # box floor below the road
+        self.assertEqual(len(meta[0]["segment_extinction_m"]), wet.SPRAY_SEGMENTS)
+        self.assertLessEqual(max(meta[0]["segment_extinction_m"]), meta[0]["peak_extinction_m"])
 
     def test_spray_box_outward_normals(self) -> None:
         """pbrt-v4: a ray leaving along +n enters MediumInterface 'outside', so box normals must point out."""
@@ -152,7 +154,7 @@ class TestBuilderWet(unittest.TestCase):
                 '"spd/asphalt_aged.spd"', txt.split("# Road wear")[1].split('NamedMaterial "asphalt"\n')[0]
             )
             self.assertIn('"volpath"', txt)
-            self.assertIn('MakeNamedMedium "spray:car00"', txt)
+            self.assertIn('MakeNamedMedium "spray:', txt)
             self.assertGreater(w["puddles"]["area_fraction"], 0.0)
             self.assertLess(w["puddles"]["area_fraction"], 0.1)
             self.assertTrue(w["spray"]["vehicles"])
@@ -169,7 +171,7 @@ class TestBuilderWet(unittest.TestCase):
             self.assertIn("ra_wet_paint_white.spd", txt)
             self.assertNotIn('"spd/ra_paint_white.spd"', txt)
             self.assertEqual(m["road"]["wet"]["markings"]["rl_mcd_m2_lx"]["white"], 25.0)
-            self.assertIn('MediumInterface "spray:car00" "haze"', txt)
+            self.assertRegex(txt, r'MediumInterface "spray:[^"]+" "haze"')
 
     def test_flag_validation(self) -> None:
         with tempfile.TemporaryDirectory() as td:

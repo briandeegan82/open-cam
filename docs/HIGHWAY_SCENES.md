@@ -340,14 +340,16 @@ condition measured by ASTM E2177; flooded → RR1 25 (continuous wetting, ASTM E
 (FHWA-HRT-15-062 and the wet-retroreflectivity studies cited there) reporting wet R_L of
 standard paint/beads at a small fraction of dry. Sign sheeting keeps its dry R_A.
 
-**Spray** (`--spray`, wet/flooded). A `uniformgrid` medium behind every vehicle (width + 0.6 m,
+**Spray** (`--spray`, wet/flooded). A spray medium behind every vehicle (width + 0.6 m,
 height ≤ 2.5 m, length 10 m + speed/6 trimmed before the following car), purely scattering,
 Henyey–Greenstein g = 0.85 (drops 0.1–0.4 mm ≫ λ: forward-peaked, near-unit albedo; cf. Hansen
 & Travis 1974). Peak extinction 0.2 m⁻¹ for a heavy vehicle at 90 km/h on a wet road — the
 maximum measured by Otxoterena Drake et al., J. Wind Eng. Ind. Aerodyn. 217, 104734 (2021),
 doi:10.1016/j.jweia.2021.104734 — scaled linearly with speed above 30 km/h, ×0.5 for cars and ×2
 for flooded (assumptions, stated in the manifest). Density decays exponentially downstream and
-with height. Static scenes (`--traffic-speed-kmh 0`) use the nominal lane speeds
+with height; it is rendered as 4 homogeneous slabs along the plume, each with the mean extinction
+of its cross-section (a `uniformgrid` medium casts spurious black sun "shadows" in pbrt-v4 here, so
+the lateral wheel-track and vertical structure is averaged out). Static scenes (`--traffic-speed-kmh 0`) use the nominal lane speeds
 (125/110/95, oncoming 105 km/h) for spray. Spray forces `volpath`; with `--haze` the spray
 boxes are nested inside the haze medium. The (invisible) medium box extends 0.5 m below the road
 so the road plane lies inside it (a box face a few cm above the 2-triangle road plane is crossed
