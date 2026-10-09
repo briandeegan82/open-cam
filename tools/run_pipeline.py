@@ -309,6 +309,14 @@ def main() -> None:
             ]
             log.append(run_cmd(psf_cmd, repo, args.dry_run))
 
+    # 2c) Optional traced lens ghosts (tools/lens_ghosts.py). Runs for realistic cameras too:
+    # pbrt traces no inter-reflections. Must precede the radiance -> electrons conversion.
+    if bool((lens_cfg.get("traced_ghosts") or {}).get("enabled", False)):
+        ghost_tool = p(repo, paths.get("lens_ghosts_tool", "tools/lens_ghosts.py"))
+        ghost_cmd = [py, str(ghost_tool), "--repo-root", str(repo), "--camera-model-config", str(camera_model_cfg)]
+        ghost_cmd += ["--exr-in", str(exr_out), "--report-json", str(out_dir / "traced_ghosts_report.json")]
+        log.append(run_cmd(ghost_cmd, repo, args.dry_run))
+
     # 3) Validate scene/render
     if bool(validate.get("enabled", True)):
         validate_cmd = [py, str(validate_tool), "--repo-root", str(repo), "--exr", str(exr_out)]

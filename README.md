@@ -289,6 +289,7 @@ venv/bin/python tools/munsell_mat_to_sqlite.py --summary
 - `pbrt_exr` sensor-forward mode expects multispectral EXR and currently supports `photon_counting` calibration mode.
 - `cfa.demosaic` implements bilinear and Malvar-He-Cutler reconstruction.
 - Post-PSF is a simple Gaussian/stray-light approximation, not a full chromatic lens aberration model.
+- Traced lens ghosts (`lens.traced_ghosts`, opt-in; see `docs/LENS_GHOSTS.md`) are geometric two-reflection paths from bright sources only: no diffraction, glass dispersion/absorption, four-reflection paths, barrel scatter or cover glass.
 - PBRT spectral sampling remains Monte Carlo based; use validation and repeated runs for sensitive comparisons.
 
 ## Troubleshooting
