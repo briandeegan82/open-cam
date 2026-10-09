@@ -1336,8 +1336,7 @@ def main() -> None:
                     exr_in,
                     repo,
                     qe_cfg,
-                    # Generic CFA honours --integration-time-s for the signal (legacy path unchanged).
-                    sensor if cfa_layout is None else {**sensor, "integration_time_s": t_int_s},
+                    {**sensor, "integration_time_s": t_int_s},
                     _cal_cfg,
                     strict_qe_validation=strict_qe_validation,
                     lens_cfg=camera_model.get("lens", {}) if camera_model else None,

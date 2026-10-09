@@ -104,3 +104,34 @@ def test_bayer_and_rgb_paths_bit_identical(case: str) -> None:
         GOLDEN.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
         pytest.skip("recorded golden digests")
     assert digests == json.loads(GOLDEN.read_text())[case]
+
+
+def test_integrate_qe_signal_follows_integration_time_override() -> None:
+    """``--integration-time-s`` scales the integrate_qe signal, not only dark current."""
+    means = []
+    for t_int in ("0.01", "0.02"):
+        with tempfile.TemporaryDirectory() as d:
+            tmp = Path(d)
+            qe = write_gaussian_qe(tmp)
+            exr = write_spectral_exr(tmp / "scene.exr", _spectral_scene(), SPECTRAL_LAMBDAS_NM)
+            raw = tmp / "noisy.raw16"
+            cfg = {
+                "sensor": {
+                    "pixel_pitch_um": 3.0,
+                    "f_number": 2.8,
+                    "integration_time_s": 0.01,
+                    "fill_factor": 1.0,
+                    "quantum_efficiency": qe,
+                },
+                "emva": {"overall_system_gain_K_e_per_DN": 0.5, "sigma_d_e": 2.0, "spatial_noise_seed": 11},
+                "adc": {"full_well_e": 1.0e9, "bit_depth": 16},
+                "processing": {"linear_exr_mode": "integrate_qe", "exposure_scale_e_per_unit": 1.0},
+                "bayer": {"enabled": False},
+                "output": {"linear_rgb_in": str(exr), "raw_out": str(raw)},
+            }
+            cfg_path = write_yaml(tmp / "noise.yaml", cfg)
+            args = ["--repo-root", str(tmp), "--config", str(cfg_path), "--seed", "3", "--integration-time-s", t_int]
+            run_tool_main(apply_emva_noise.main, args)
+            stats = json.loads((raw.parent / f"{raw.stem}_png" / "run_stats.json").read_text())
+            means.append(np.asarray(stats["signal_e_mean_rgb"]))
+    np.testing.assert_allclose(means[1] / means[0], 2.0, rtol=1e-6)
