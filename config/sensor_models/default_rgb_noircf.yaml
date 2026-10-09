@@ -1,0 +1,16 @@
+# Delta from config/sensor_models/default.yaml — only overrides are listed.
+schema_version: 1
+source:
+  qe_variant: default_rgb_noircf
+  qe_variant_note: 'True periodic CFA via cfa.layout (see docs/CFA_NIR.md)'
+model:
+  name: default_rgb_noircf
+  display_name: Default RGGB without IR-cut filter, NIR-extended QE (true CFA)
+cfa:
+  layout: RGGB
+  demosaic: gradient
+  ircf: false
+  channels:
+    R: {qe_csv: spectra/QE/nir/QE_red_noircf.csv}
+    G: {qe_csv: spectra/QE/nir/QE_green_noircf.csv}
+    B: {qe_csv: spectra/QE/nir/QE_blue_noircf.csv}

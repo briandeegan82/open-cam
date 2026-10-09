@@ -57,7 +57,8 @@ def scene_radiometry_from_manifest(manifest: dict) -> dict:
         out["camera_geometry"] = geometry
     lighting = manifest.get("lighting") or {}
     light = lighting.get("distant") or {}
-    if light.get("scale") is not None:
+    # "photometric": false (NIR, --radiometric-light) has no lux scale; use calibration instead.
+    if light.get("scale") is not None and light.get("photometric", True):
         out["chart_illuminance_exr_lux"] = 683.0 * PBRT_CIE_Y_INTEGRAL * float(light["scale"])
     # Physically calibrated outdoor scenes (build_highway_scene.py): horizontal illuminance at
     # ground level, both in lux and in EXR units; it plays the role of the chart illuminance.
@@ -164,8 +165,12 @@ def spectral_radiance_to_electrons(
     strict_qe_validation: bool = False,
     tag: str = "pbrt_exr",
     scene: dict | None = None,
+    channel_qe=None,
 ) -> tuple[np.ndarray, dict]:
     """HxWxK spectral radiance [W/(m²·sr·nm) per EXR unit] → HxWx3 electrons.
+
+    ``channel_qe`` (callable ``lambdas_nm -> [C, K]``) replaces the R/G/B QE stack, giving
+    HxWxC electrons, one plane per CFA channel (see :mod:`cfa_mosaic`).
 
     Single radiometric chain shared by this tool and ``apply_emva_noise`` (integrate_qe)::
 
@@ -263,12 +268,15 @@ def spectral_radiance_to_electrons(
         )
     irr_per_lambda = irr_per_lambda * (photometry_scale * exr_autocal_scale)
 
-    qe = qe_stack_on_lambdas(
-        repo,
-        qe_cfg,
-        lam,
-        strict_qe_validation=bool(strict_qe_validation or qe_cfg.get("strict_validation", False)),
-    )
+    if channel_qe is not None:
+        qe = np.asarray(channel_qe(lam), dtype=np.float32)
+    else:
+        qe = qe_stack_on_lambdas(
+            repo,
+            qe_cfg,
+            lam,
+            strict_qe_validation=bool(strict_qe_validation or qe_cfg.get("strict_validation", False)),
+        )
     geom = t_int * fill_factor * (pixel_pitch_um * 1e-6) ** 2
     weights = spectral_electron_weights(lam, qe.T, w, irr_per_lambda, geom)
     par_cfg = pixel_angular_response_cfg(model)
