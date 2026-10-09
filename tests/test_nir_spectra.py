@@ -19,7 +19,8 @@ from pbrt_spectral_exr_to_electrons import scene_radiometry_from_manifest  # noq
 
 def test_alpha_matches_green_2008_table() -> None:
     # Green (2008) tabulates k = 6.37e-4 at 1000 nm -> alpha = 4 pi k / lambda = 80 /cm.
-    d = np.loadtxt(REPO / ns.SI_NK_CSV, delimiter=",", comments="#")
+    lines = (REPO / ns.SI_NK_CSV).read_text().splitlines()
+    d = np.loadtxt([ln for ln in lines if ln[:1].isdigit()], delimiter=",")
     k1000 = float(d[d[:, 0] == 1000.0, 2][0])
     alpha = ns.silicon_alpha_per_um(np.array([1000.0]))[0]
     assert alpha == pytest.approx(4 * np.pi * k1000 / 1.0, rel=1e-9)

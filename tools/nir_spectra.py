@@ -35,7 +35,8 @@ GRID_NM = np.arange(360.0, 1101.0, 1.0)
 
 
 def silicon_nk(lambdas_nm: np.ndarray, repo: Path = REPO) -> tuple[np.ndarray, np.ndarray]:
-    d = np.loadtxt(Path(repo) / SI_NK_CSV, delimiter=",", comments="#")
+    with open(Path(repo) / SI_NK_CSV, encoding="utf-8") as fh:  # skips "#" comments and header row
+        d = np.loadtxt([ln for ln in fh if ln[:1].isdigit()], delimiter=",")
     lam = np.asarray(lambdas_nm, dtype=np.float64)
     n = np.interp(lam, d[:, 0], d[:, 1])
     # k spans 13 decades: interpolate log k.

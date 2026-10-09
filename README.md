@@ -291,6 +291,7 @@ venv/bin/python tools/munsell_mat_to_sqlite.py --summary
 - NIR / no-IRCF: stock pbrt-v4 renders 360-830 nm; 850/940 nm needs the opt-in NIR pbrt build (`PBRT_LAMBDA_MAX_NM=1100`, patch 0002). NIR QE curves beyond the measured ~700 nm are a Si absorption model (Green 2008) with an assumed IR-transparent colour filter; ColorChecker and most material reflectances are measured only to 730 nm and held constant beyond (pbrt extrapolation). See [docs/CFA_NIR.md](docs/CFA_NIR.md).
 - Post-PSF is a simple Gaussian/stray-light approximation, not a full chromatic lens aberration model.
 - PBRT spectral sampling remains Monte Carlo based; use validation and repeated runs for sensitive comparisons.
+- Pixel angular response (CRA / microlens shift, lens + colour shading, optional optical crosstalk) is opt-in (`sensor_forward.model.pixel_angular_response`) and uses a geometric-optics microlens with a Gaussian diffraction term; wave-optical effects at sub-2 µm pitch and real stack data are not modelled — see [`docs/PIXEL_ANGULAR_RESPONSE.md`](docs/PIXEL_ANGULAR_RESPONSE.md). Off by default.
 
 ## Troubleshooting
 
