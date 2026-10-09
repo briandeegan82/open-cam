@@ -69,6 +69,20 @@ assets:
         extract: Asphalt026C
     maps: {color: Asphalt026C/Asphalt026C_2K-JPG_Color.jpg, normal: Asphalt026C/Asphalt026C_2K-JPG_NormalGL.jpg,
            roughness: Asphalt026C/Asphalt026C_2K-JPG_Roughness.jpg}
+  tex_asphalt033:
+    kind: texture
+    title: Asphalt 033 (dark granular asphalt; second base for road-wear anti-tiling)
+    source: https://ambientcg.com/view?id=Asphalt033
+    author: ambientCG (Lennart Demes)
+    license: CC0-1.0
+    tile_size_m: 2.5
+    files:
+      - url: https://ambientcg.com/get?file=Asphalt033_2K-JPG.zip
+        path: Asphalt033_2K-JPG.zip
+        sha256: ad7193b7635b1c7e20c1b70e3d55d0cf68166dd98c7b4c43850d13ffa1ac1b42
+        extract: Asphalt033
+    maps: {color: Asphalt033/Asphalt033_2K-JPG_Color.jpg, normal: Asphalt033/Asphalt033_2K-JPG_NormalGL.jpg,
+           roughness: Asphalt033/Asphalt033_2K-JPG_Roughness.jpg}
   tex_concrete031:
     kind: texture
     title: Concrete 031 (weathered cast concrete)

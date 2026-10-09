@@ -40,6 +40,7 @@ import highway_incar  # noqa: E402
 import highway_night as night  # noqa: E402
 import highway_variety as variety  # noqa: E402
 from fetch_highway_assets import cache_root, load_asset_manifest  # noqa: E402
+from highway_road_wear import WEAR_LEVELS, RoadWear, linear_normal_map  # noqa: E402
 from highway_sky import (  # noqa: E402
     analytic_clear_sky,
     clear_sky_illuminance_lux,
@@ -366,6 +367,9 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         help="Override the horizontal (sun + sky) illuminance at the road; default: clear-sky model.",
     )
     ap.add_argument("--road", choices=("asphalt031", "asphalt026c", "plain"), default="asphalt031")
+    ap.add_argument("--road-wear", choices=("none", *WEAR_LEVELS), default="moderate", help="Seeded road ageing.")
+    ap.add_argument("--road-wear-seed", type=int, default=None, help="Road-wear seed (default: --seed, else 7).")
+    ap.add_argument("--road-wear-texel-m", type=float, default=0.02, help="Wear-map texel size [m].")
     ap.add_argument("--traffic", choices=("default", "none"), default="default")
     ap.add_argument("--proxy-cars", action="store_true", help="Use box proxies instead of the CC0 car models.")
     ap.add_argument("--vegetation", choices=("full", "shrubs", "none"), default="full")
@@ -581,7 +585,30 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
     road_tex = None if args.road == "plain" else asset(f"tex_{args.road}")
     road_spd = "spd/asphalt_aged.spd"
     tile = 1.0
-    if road_tex is not None:
+    wear = None
+    if args.road_wear != "none":
+        lanes = [[(Layout.lane_center(s * i - (s < 0)), 0.6 + 0.2 * i) for i in range(N_LANES)] for s in (1, -1)]
+        geom = {
+            "x0": Layout.opp_paved,
+            "x1": Layout.right_paved,
+            "z0": ROAD_Z0,
+            "z1": ROAD_Z1,
+            "median_x": Layout.median_l + MEDIAN_W / 2,
+            "period": 8 * (DASH + GAP),
+            "carriageways": [
+                (Layout.median_l + MEDIAN_W, Layout.right_paved, lanes[0]),
+                (Layout.opp_paved, Layout.median_l, lanes[1]),
+            ],
+            "lane_lines": [x + s * k * LANE_W for s, x in ((1, 0.0), (-1, Layout.opp_inner)) for k in (1, 2)],
+        }
+        seed = args.road_wear_seed if args.road_wear_seed is not None else 7 if args.seed is None else args.seed
+        wear = RoadWear(args.road_wear, seed, out_dir, geom, args.road_wear_texel_m)
+        tiles = [(f"tex_{args.road}", *road_tex)] if road_tex is not None else []
+        b_tex = asset("tex_asphalt033") if road_tex is not None else None
+        tiles += [("tex_asphalt033", *b_tex)] if b_tex is not None else []
+        L += wear.material_lines(wl, spd, tiles)
+        tile = wear.tile_m
+    elif road_tex is not None:
         info, raw = road_tex
         tile = float(info["tile_size_m"])
         lum = out_dir / "textures" / f"{args.road}_lum.exr"
@@ -591,7 +618,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
             f'Texture "asphalt" "spectrum" "scale" "spectrum tex" "{road_spd}" "texture scale" "asphalt:lum"',
             'MakeNamedMaterial "asphalt" "string type" "coateddiffuse" "texture reflectance" "asphalt"',
             '    "float roughness" [0.35] "float thickness" [0.001]',
-            f'    "string normalmap" "{os.path.relpath(raw / info["maps"]["normal"], out_dir)}"',
+            f'    "string normalmap" "{os.path.relpath(linear_normal_map(raw / info["maps"]["normal"], out_dir / "textures"), out_dir)}"',
         ]
     else:
         L.append(
@@ -609,7 +636,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
             f'Texture "grass:lum" "float" "imagemap" "string filename" "{os.path.relpath(lum, out_dir)}"',
             'Texture "grass" "spectrum" "scale" "spectrum tex" "spd/grass.spd" "texture scale" "grass:lum"',
             'MakeNamedMaterial "grass" "string type" "diffuse" "texture reflectance" "grass"',
-            f'    "string normalmap" "{os.path.relpath(raw / info["maps"]["normal"], out_dir)}"',
+            f'    "string normalmap" "{os.path.relpath(linear_normal_map(raw / info["maps"]["normal"], out_dir / "textures"), out_dir)}"',
         ]
     else:
         L.append('MakeNamedMaterial "grass" "string type" "diffuse" "spectrum reflectance" "spd/grass.spd"')
@@ -638,6 +665,8 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         L = night.replace_named_materials(L, night.retro_material_lines(spd, out_dir, wl))
     if nopts["dark"]:
         L = night.strip_normal_map(L)
+        for name in ("rw:asphaltA", "rw:asphaltB") if wear is not None else ():
+            L = night.strip_normal_map(L, name)
     L += fx.vms_lines(out_dir, wl, Layout.right_paved)
     paved = [
         (Layout.median_l, Layout.right_paved, ROAD_Z0, ROAD_Z1),
@@ -660,9 +689,11 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         white.append((min(edge, edge - side * 0.2), max(edge, edge - side * 0.2), ROAD_Z0, ROAD_Z1))
         for k in (1, 2):
             white += dashes(inner + side * k * LANE_W, 0.15)
-    for mat, rects in (("paint_white", white), ("paint_yellow", yellow)):
+    for mat, rects in (("paint_white", white), ("paint_yellow", yellow)) if wear is None else ():
         p, t = quads_mesh(rects, 0.004)
         L += [f'NamedMaterial "{mat}"', *mesh(p, t), ""]
+    if wear is not None:
+        L += wear.marking_lines(white, yellow, DASH, GAP, mesh, variety.place, nopts["retroreflective"])
 
     # ---- concrete median barrier (single-slope ~ Jersey profile, 0.81 m tall)
     jersey = [(-0.30, 0.0), (-0.28, 0.08), (-0.18, 0.33), (-0.08, 0.81), (0.08, 0.81), (0.18, 0.33), (0.28, 0.08)]
@@ -919,6 +950,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
             "markings": "MUTCD: yellow left edge, broken white 3.05/9.14 m, solid white right edge",
             "surface": args.road,
             "length_m": ROAD_Z1 - ROAD_Z0,
+            "wear": wear.summary if wear is not None else None,
         },
         "cars": cars_meta,
         "vegetation": veg_meta,
