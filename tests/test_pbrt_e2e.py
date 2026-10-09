@@ -285,3 +285,44 @@ class TestPbrtHighwaySmoke(unittest.TestCase):
             e = next(v for k, v in npz.items() if np.asarray(v).ndim >= 2)
             self.assertTrue(np.isfinite(e).all())
             self.assertGreater(float(np.mean(e)), 0.0)
+
+    def test_incar_effects_time_slices(self) -> None:
+        """Windscreen + motion + rolling shutter + flickering VMS through render_time_slices."""
+        import render_time_slices
+        import yaml
+
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            m = yaml.safe_load((REPO / "config" / "highway_assets.yaml").read_text())
+            m["cache_dir"] = str(tmp / "empty_cache")
+            (tmp / "assets.yaml").write_text(yaml.safe_dump(m))
+            scene = tmp / "scene"
+            common = ["--asset-manifest", str(tmp / "assets.yaml"), "--allow-missing-assets"]
+            common += ["--xres", "64", "--yres", "36", "--pixelsamples", "4"]
+            common += ["--spectral-lambda-min", "400", "--spectral-lambda-max", "700"]
+            fx = ["--exposure-s", "0.004", "--rolling-shutter-line-time-us", "30", "--ego-speed-kmh", "100"]
+            fx += ["--traffic-speed-kmh", "lanes", "--windscreen", "--windscreen-rain", "0.05", "--vms"]
+            subprocess.run(
+                [sys.executable, str(REPO / "tools" / "build_highway_scene.py"), "--out-dir", str(scene), *common, *fx],
+                check=True,
+                capture_output=True,
+            )
+            exr = tmp / "rs.exr"
+            info = render_time_slices.render(scene, pbrt=PBRT, spp=4, bands=3, out=exr, jobs=1)
+            self.assertEqual(info["bands"], 3)
+            self.assertGreater(info["slices"], 3)  # PWM edges split the windows
+            L, _ = spectral_buckets_from_exr(exr)
+            self.assertEqual(L.shape[:2], (36, 64))
+            self.assertTrue(np.isfinite(L).all())
+            self.assertGreater(float(L[:12].mean()), float(L[-8:].mean()))
+            outs = []
+            for extra in ([], ["--integration-time-s", "0.004"]):
+                out = tmp / f"e{len(outs)}.npz"
+                run_tool_main(
+                    pbrt_tool.main,
+                    ["--exr", str(exr), "--camera-model-config", str(CAMERA_MODEL)]
+                    + ["--scene-manifest-json", str(scene / "highway_manifest.json"), "--out", str(out), *extra],
+                )
+                outs.append(np.load(out)["electrons_rgb"])
+            np.testing.assert_allclose(outs[0], outs[1])  # manifest exposure is the default integration time
+            self.assertGreater(float(outs[0].mean()), 0.0)

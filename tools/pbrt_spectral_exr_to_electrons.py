@@ -399,6 +399,20 @@ def main() -> None:
         # Absolute scene: its own illuminance replaces the recipe's chart target.
         model.setdefault("calibration", {})["target_illuminance_lux"] = scene_radiometry["scene_illuminance_lux"]
 
+    integration_time_s = args.integration_time_s
+    t_scene = (manifest.get("exposure") or {}).get("integration_time_s")
+    if t_scene is not None:
+        # Scene rendered with a shutter (motion blur / rolling shutter / flicker): its exposure
+        # is the sensor integration time unless explicitly overridden.
+        if integration_time_s is None:
+            integration_time_s = float(t_scene)
+        elif abs(float(integration_time_s) - float(t_scene)) > 1e-12:
+            print(
+                f"warning: --integration-time-s {integration_time_s} differs from the scene shutter "
+                f"{t_scene} s (motion blur/flicker were rendered for the scene value)",
+                file=sys.stderr,
+            )
+
     L, lambdas = spectral_buckets_from_exr(exr_path)
     if L.shape[:2] != (yres, xres):
         raise ValueError(f"EXR size {L.shape[:2]} does not match manifest {yres}x{xres}")
@@ -410,7 +424,7 @@ def main() -> None:
         sensor=sensor,
         model=model,
         lens_cfg=lens_cfg,
-        integration_time_s=args.integration_time_s,
+        integration_time_s=integration_time_s,
         strict_qe_validation=args.strict_qe_validation,
         scene=scene_radiometry,
     )
