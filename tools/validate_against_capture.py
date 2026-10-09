@@ -885,6 +885,16 @@ def synthesize(
     fw = rec["full_well_e"]
     levels = (0.0, *FLAT_FRACTIONS)
     work = out_dir / "_work"
+    work.mkdir(parents=True, exist_ok=True)
+    chain_recipe = recipe
+    if model["noise"]["emva"].get("spatial_noise_seed") is None:
+        # Pin the camera unit: by default apply_emva_noise seeds PRNU/DSNU from the recipe's
+        # absolute path, which would make the synthetic captures depend on the checkout location.
+        pinned = copy.deepcopy(model)
+        pinned.pop("resolved_from", None)
+        pinned["noise"]["emva"]["spatial_noise_seed"] = int(seed)
+        chain_recipe = work / "recipe_pinned_seed.yaml"
+        chain_recipe.write_text(yaml.safe_dump(pinned))
 
     def write(name: str, raw: np.ndarray) -> str:
         np.rint(raw).astype("<u2").tofile(out_dir / name)
@@ -894,7 +904,7 @@ def synthesize(
     darks: dict[float, list[str]] = {t: [] for t in dark_exposures}
     flats: list[list[str]] = [[] for _ in FLAT_FRACTIONS]
     for k in range(frames):
-        raw = run_sensor_chain(recipe, flat_img, flat_exposure, seed + 10 * k, work)
+        raw = run_sensor_chain(chain_recipe, flat_img, flat_exposure, seed + 10 * k, work)
         for i in range(len(levels)):
             tile_raw = raw[:, i * tw : (i + 1) * tw]
             if i == 0:
@@ -905,19 +915,19 @@ def synthesize(
         for t in dark_exposures:
             if t == flat_exposure:
                 continue
-            raw_d = run_sensor_chain(recipe, np.zeros((th, tw, 3)), t, seed + 10 * k + 1 + len(darks[t]), work)
+            raw_d = run_sensor_chain(chain_recipe, np.zeros((th, tw, 3)), t, seed + 10 * k + 1 + len(darks[t]), work)
             darks[t].append(write(f"ptc/dark_t{t:g}_f{k}.raw16", raw_d))
 
     patch_px = 24
     rel_e, _ = spectral_patch_electrons(model, illuminant)
     chart = chart_electron_image(rel_e * (0.6 * fw / rel_e[WHITE_PATCH, 1]), patch_px)
-    write("colorchecker.raw16", run_sensor_chain(recipe, chart, flat_exposure, seed + 7, work))
+    write("colorchecker.raw16", run_sensor_chain(chain_recipe, chart, flat_exposure, seed + 7, work))
 
     eh, ew = 192, 128
     unit = synthetic_edge_unit(eh, ew, edge_angle_deg, 1)
     unit = blur(unit, lambda s: optics_mtf_2d(s, model, edge_extra_blur_px))
     edge_e = np.repeat(((0.1 + 0.6 * unit) * fw)[..., None], 3, axis=-1)
-    write("slanted_edge.raw16", run_sensor_chain(recipe, edge_e, flat_exposure, seed + 8, work))
+    write("slanted_edge.raw16", run_sensor_chain(chain_recipe, edge_e, flat_exposure, seed + 8, work))
 
     for f in work.glob("*"):
         if f.is_file():
