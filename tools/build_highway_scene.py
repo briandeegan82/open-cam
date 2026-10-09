@@ -678,7 +678,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         (Layout.median_l, Layout.right_paved, ROAD_Z0, ROAD_Z1),
         (Layout.opp_paved, Layout.median_l, ROAD_Z0, ROAD_Z1),
     ]
-    p, t = quads_mesh(paved, 0.0)
+    p, t = quads_mesh(wet.road_rects(paved, args), 0.0)
     L += ['NamedMaterial "asphalt"', *mesh(p, t, p[:, [0, 2]] / tile), ""]
 
     # ---- markings (US: yellow left edge, broken white lane lines, solid white right edge)

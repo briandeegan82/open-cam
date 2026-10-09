@@ -347,9 +347,10 @@ Henyey–Greenstein g = 0.85 (drops 0.1–0.4 mm ≫ λ: forward-peaked, near-un
 maximum measured by Otxoterena Drake et al., J. Wind Eng. Ind. Aerodyn. 217, 104734 (2021),
 doi:10.1016/j.jweia.2021.104734 — scaled linearly with speed above 30 km/h, ×0.5 for cars and ×2
 for flooded (assumptions, stated in the manifest). Density decays exponentially downstream and
-with height; it is rendered as 4 homogeneous slabs along the plume, each with the mean extinction
-of its cross-section (a `uniformgrid` medium casts spurious black sun "shadows" in pbrt-v4 here, so
-the lateral wheel-track and vertical structure is averaged out). Static scenes (`--traffic-speed-kmh 0`) use the nominal lane speeds
+with height; it is rendered as one homogeneous box per vehicle with the plume-mean extinction,
+so the downstream, wheel-track and vertical structure is averaged out. With `--spray` the road is
+split into 2 m (25 m beyond 100 m) strips: on the default two 1.5 km road triangles pbrt-v4 loses
+track of the spray medium for rays that leave a box and hit the road (black road patches). Static scenes (`--traffic-speed-kmh 0`) use the nominal lane speeds
 (125/110/95, oncoming 105 km/h) for spray. Spray forces `volpath`; with `--haze` the spray
 boxes are nested inside the haze medium. The (invisible) medium box extends 0.5 m below the road
 so the road plane lies inside it (a box face a few cm above the 2-triangle road plane is crossed

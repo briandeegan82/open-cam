@@ -95,8 +95,8 @@ SPRAY_EXT_REF = 0.2  # m^-1, Otxoterena Drake et al. 2021 (heavy vehicles)
 SPRAY_V_REF_KMH, SPRAY_V_ONSET_KMH = 90.0, 30.0  # assumed
 SPRAY_G = 0.85
 SPRAY_CAR_FACTOR = 0.5
-SPRAY_SEGMENTS = 4  # homogeneous slabs along the plume (see spray_lines)
-SPRAY_FLOOR = 0.5  # m: spray box extends this far below the road surface (empty cells)  # assumed (fewer, smaller tyres than a truck)
+SPRAY_SEGMENTS = 1  # homogeneous slabs along the plume (see spray_lines)
+SPRAY_FLOOR = 0.5  # box floor below the road (see spray_lines)
 WET_SPDS = ("asphalt_aged", "asphalt_new", "asphalt_patch", "crack_sealant", "paint_road_white", "paint_road_yellow")
 ROAD_MATERIALS = ("asphalt", "rw:asphaltA", "rw:asphaltB", "rw:sealant", "paint_white", "paint_yellow")
 
@@ -419,12 +419,12 @@ def _puddle_lines(lines: list[str], wear, lvl: str) -> tuple[list[str], dict]:
 def spray_lines(
     cars: list[dict], speeds: list[float], heavy: list[bool], args, outside: str, place, eye_z: float = 0.0
 ) -> tuple[list[str], list[dict]]:
-    """Spray media behind every moving vehicle: ``SPRAY_SEGMENTS`` homogeneous slabs along the plume.
+    """Spray media behind every moving vehicle: ``SPRAY_SEGMENTS`` homogeneous slab(s) along the plume.
 
-    Each slab carries the mean extinction of ``spray_density`` over its cross-section, so the
-    downstream decay is kept but the lateral wheel-track / vertical structure is averaged out. (A
-    ``uniformgrid`` medium was tried first; with pbrt-v4's distant light its shadow rays came back
-    fully occluded, casting black wedges on the road, so homogeneous slabs are used instead.)
+    Each slab carries the mean extinction of ``spray_density`` over its volume, so the spatial
+    structure (downstream decay, wheel tracks, height) is averaged out; one box per vehicle is the
+    default (abutting slabs need small gaps between their faces). With spray on, the road is split
+    into short strips (``road_rects``).
 
     The box bottom sits ``SPRAY_FLOOR`` below the road (the road plane then lies inside the medium,
     avoiding a near-coplanar interface face that pbrt's ray offsets on the large road triangles
@@ -492,6 +492,23 @@ def _box(x0, y0, z0, x1, y1, z1) -> list[str]:
     idx = [i for a, b, c, d in q for i in (a, c, b, a, d, c)]  # outward normals (pbrt: +n = outside)
     pts = " ".join(f"{v:.6g}" for pt in p for v in pt)
     return [f'Shape "trianglemesh" "point3 P" [ {pts} ] "integer indices" [ {" ".join(map(str, idx))} ]']
+
+
+def road_rects(rects: list[tuple], args) -> list[tuple]:
+    """Split the paved road (x0, x1, z0, z1) rectangles into short z strips when spray is on.
+
+    On the default two 1.5 km road triangles pbrt-v4 loses track of the spray medium for camera
+    rays that leave a spray box and then hit the road (the road there renders black); 2 m strips
+    near the camera, 25 m beyond 100 m, remove it. Without spray the road is left untouched.
+    """
+    if not getattr(args, "spray", False):
+        return rects
+    zs = np.r_[np.arange(-40.0, 100.0, 2.0), np.arange(100.0, 1500.0, 25.0)]
+    out = []
+    for x0, x1, z0, z1 in rects:
+        zz = np.unique(np.r_[z0, zs[(zs > z0) & (zs < z1)], z1])
+        out += [(x0, x1, float(a), float(b)) for a, b in zip(zz[:-1], zz[1:], strict=True)]
+    return out
 
 
 def manifest_spray(meta: list[dict]) -> dict:

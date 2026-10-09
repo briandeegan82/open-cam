@@ -97,9 +97,17 @@ class TestWetMarkingsAndSpray(unittest.TestCase):
         for v in (90, 110, 130):
             self.assertLessEqual(wet.spray_extinction(v, "wet", False), wet.SPRAY_EXT_REF)
 
+    def test_road_split_only_with_spray(self) -> None:
+        rects = [(-3.2, 13.98, -40.0, 1500.0)]
+        self.assertEqual(wet.road_rects(rects, argparse.Namespace(spray=False)), rects)
+        split = wet.road_rects(rects, argparse.Namespace(spray=True))
+        self.assertEqual((split[0][2], split[-1][3]), (-40.0, 1500.0))
+        self.assertTrue(all(b[2] == a[3] for a, b in zip(split, split[1:])))
+        self.assertLessEqual(max(r[3] - r[2] for r in split if r[3] <= 100), 2.0)
+
     def test_spray_box_below_road_and_clear_of_camera(self) -> None:
-        rho = wet.spray_density(10, 8, 24, 2.4, 1.6, 15.0, -wet.SPRAY_FLOOR)
-        y = -wet.SPRAY_FLOOR + (np.arange(8) + 0.5) / 8 * (1.6 + wet.SPRAY_FLOOR)
+        rho = wet.spray_density(10, 8, 24, 2.4, 1.6, 15.0, -0.5)
+        y = -0.5 + (np.arange(8) + 0.5) / 8 * 2.1
         self.assertEqual(float(rho[:, y < 0].max()), 0.0)
         cars = [
             {"id": "c", "x": 0.0, "distance_m": 8.0, "length_m": 4.0, "width_m": 1.8, "height_m": 1.5, "heading_deg": 0}
@@ -108,7 +116,7 @@ class TestWetMarkingsAndSpray(unittest.TestCase):
         lines, meta = wet.spray_lines(cars, [120.0], [True], args, "", lambda x, y, z: [f"Translate {x} {y} {z}"])
         z0 = 8.0 - 2.0 - 0.15
         self.assertLess(meta[0]["length_m"], z0)  # the plume ends in front of the camera at z = 0
-        self.assertIn(f"-1.2 {-wet.SPRAY_FLOOR:g} ", "\n".join(lines))  # box floor below the road
+        self.assertIn(f"-1.2 {-wet.SPRAY_FLOOR:g} ", "\n".join(lines))  # box floor
         self.assertEqual(len(meta[0]["segment_extinction_m"]), wet.SPRAY_SEGMENTS)
         self.assertLessEqual(max(meta[0]["segment_extinction_m"]), meta[0]["peak_extinction_m"])
 
