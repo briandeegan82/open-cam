@@ -11,6 +11,10 @@
 - canon_powershot_g5_x
 - default
 - default_cmy
+- default_hdr_3exp
+- default_hdr_dcg
+- default_hdr_lofic
+- default_hdr_split_pixel
 - default_rccb
 - default_rccg
 - default_rggcy
@@ -52,6 +56,7 @@
 - panasonic_tz96
 - research_pinhole_baseline
 - research_realistic_wide22
+- research_realistic_wide22_cra
 - research_thinlens_macro
 - research_thinlens_normal
 - research_thinlens_tele

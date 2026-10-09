@@ -37,6 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import highway_atmosphere as atmosphere  # noqa: E402
 import highway_backdrop as backdrop  # noqa: E402
 import highway_incar  # noqa: E402
+import highway_materials as hmat  # noqa: E402
 import highway_night as night  # noqa: E402
 import highway_variety as variety  # noqa: E402
 import highway_wet as wet  # noqa: E402
@@ -403,6 +404,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     highway_incar.add_args(ap)
     variety.add_arguments(ap)
     wet.add_args(ap)
+    hmat.add_arguments(ap)
     return ap.parse_args(argv)
 
 
@@ -441,6 +443,8 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
     var = variety.resolve(args, CAR_MODELS, args.cam_lane)
     variety.activate(var)
     variety.write_paints(var, spd, wl, reflectance, write_spd)
+    mats = hmat.Materials(args, out_dir, wl, write_spd)
+    mats.write_spectra()
 
     # ---- sun & sky
     sky_aid = SKIES[args.sky]
@@ -749,6 +753,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         for px in (cx - w * 0.3, cx + w * 0.3) if w > 2 else (cx,):
             L += mesh(*box(px, -0.1, cz + 0.08, 0.12, y0 + h * 0.9, 0.12))
     L.append("")
+    L += mats.sign_lines(Layout.rail_right + 1.6, 95.0, mesh, box)
 
     # ---- verges + terrain (finely tessellated from the paved edge; no long thin triangles)
     L.append('NamedMaterial "grass"')
@@ -836,6 +841,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
             else:
                 body = variety.proxy_vehicle(model, paint_spd, inst, mesh, box) or proxy_car(paint_spd, inst)
                 yaw_model = heading
+            body = mats.car_body(body, var.paints.get(paint, (paint,))[0])
             inc = car_dir / f"{inst}.pbrt"
             inc.write_text("\n".join(body) + "\n")
             motion, motion_meta = fx.car_lines(inst, lane, speeds[k], "\n".join(body))
@@ -995,6 +1001,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
     }
     night.update_manifest(manifest, nopts, night_lighting, night_meta)
     manifest.update(fx.manifest())
+    manifest.update(mats.manifest())
     (out_dir / "highway_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     print(
         f"wrote {_rel(repo, scene_path)} (+ highway_manifest.json); horizontal illuminance "

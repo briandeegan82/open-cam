@@ -286,11 +286,14 @@ venv/bin/python tools/munsell_mat_to_sqlite.py --summary
 
 ## Known Limitations
 
+- Highway measured materials (`--car-paint measured`, `--spectral-library usgs`, `--fluorescent-sign`) are opt-in; RGL paints are a stand-in palette, asphalt BRDF is analytic (measured albedo only), and the Type XI fluorescent dye spectra are fitted to 23 CFR 655 colour limits, not measured (see docs/HIGHWAY_SCENES.md).
 - `pbrt_exr` sensor-forward mode expects multispectral EXR and currently supports `photon_counting` calibration mode.
 - `cfa.demosaic` implements bilinear and Malvar-He-Cutler reconstruction.
 - Post-PSF is a simple Gaussian/stray-light approximation, not a full chromatic lens aberration model.
 - Highway wet road (`--road-wetness`, `--puddles`, `--spray`): flat puddles, no raindrops/ripples on the road, spray density scaling partly assumed; see `docs/HIGHWAY_SCENES.md`.
 - PBRT spectral sampling remains Monte Carlo based; use validation and repeated runs for sensitive comparisons.
+- HDR pixel models (`noise.hdr`: DCG, split pixel, LOFIC, multi-exposure; opt-in) use deterministic-threshold SNR theory and omit row/column FPN, 1/f noise, blooming and ADC INL/DNL per capture; split-pixel SPD offset/crosstalk and LOFIC soft-knee effects are not modelled. Example HDR sensor models are illustrative, not datasheets. See [docs/HDR_PIXELS.md](docs/HDR_PIXELS.md).
+- Pixel angular response (CRA / microlens shift, lens + colour shading, optional optical crosstalk) is opt-in (`sensor_forward.model.pixel_angular_response`) and uses a geometric-optics microlens with a Gaussian diffraction term; wave-optical effects at sub-2 µm pitch and real stack data are not modelled — see [`docs/PIXEL_ANGULAR_RESPONSE.md`](docs/PIXEL_ANGULAR_RESPONSE.md). Off by default.
 
 ## Troubleshooting
 
