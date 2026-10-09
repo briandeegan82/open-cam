@@ -119,7 +119,7 @@ class TestBuilderHook(unittest.TestCase):
             text = (Path(td) / "scene" / "highway.pbrt").read_text()
             tex = sorted(p.name for p in (Path(td) / "scene" / "textures" / "road_wear").iterdir())
         self.assertIn('MakeNamedMaterial "asphalt" "string type" "mix"', text)
-        self.assertIn('"string mapping" "planar"', text)
+        self.assertIn('"string mapping" "uv"', text)
         self.assertIn('NamedMaterial "rw:paint_dash"', text)
         self.assertNotIn('NamedMaterial "paint_white"\n', text)
         wear = m["road"]["wear"]
@@ -143,6 +143,16 @@ class TestBuilderHook(unittest.TestCase):
                 Path(td), "--road-wear", "heavy", "--road-wear-seed", "11", "--road-wear-texel-m", "0.1"
             )
         self.assertEqual((m["road"]["wear"]["level"], m["road"]["wear"]["seed"]), ("heavy", 11))
+
+    def test_wear_follows_curved_alignment(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            m = build_without_assets(Path(td), "--curve-radius", "800", "--road-wear-texel-m", "0.1")
+            text = (Path(td) / "scene" / "highway.pbrt").read_text()
+        self.assertTrue(m["road"]["wear"]["raised_pavement_markers"]["placed"] > 200)
+        rpm = [ln for ln in text.splitlines() if 'ObjectInstance "rw:rpm_' in ln]
+        self.assertTrue(all("Rotate" in ln for ln in rpm))  # placed via the alignment hook
+        far = [ln for ln in rpm if float(ln.split()[4]) > 800.0]
+        self.assertTrue(far and all(abs(float(ln.split()[2])) > 50.0 for ln in far))  # bent away from x ~ 0
 
 
 if __name__ == "__main__":

@@ -2,7 +2,8 @@
 # tools/fetch_highway_assets.py into scenes/assets/highway/ (gitignored).
 # Every entry records where it comes from, its licence and a pinned checksum
 # (sha256 per file, or a pinned git commit for repository subtrees).
-# Only CC0 assets are listed; nothing here is committed to this repository.
+# Assets are CC0 except the heavy vehicles (CC-BY-4.0, attribution recorded per entry);
+# nothing here is committed to this repository.
 schema_version: 1
 cache_dir: scenes/assets/highway
 
@@ -82,6 +83,32 @@ assets:
         extract: Asphalt033
     maps: {color: Asphalt033/Asphalt033_2K-JPG_Color.jpg, normal: Asphalt033/Asphalt033_2K-JPG_NormalGL.jpg,
            roughness: Asphalt033/Asphalt033_2K-JPG_Roughness.jpg}
+  tex_concrete031:
+    kind: texture
+    title: Concrete 031 (weathered cast concrete)
+    source: https://ambientcg.com/view?id=Concrete031
+    author: ambientCG (Lennart Demes)
+    license: CC0-1.0
+    tile_size_m: 2.0
+    files:
+      - url: https://ambientcg.com/get?file=Concrete031_1K-JPG.zip
+        path: Concrete031_1K-JPG.zip
+        sha256: 3068e551435d3cdae3942017799d8871b940c88ebfaf5c2b87376972ae448fd6
+        extract: Concrete031
+    maps: {color: Concrete031/Concrete031_1K-JPG_Color.jpg, normal: Concrete031/Concrete031_1K-JPG_NormalGL.jpg}
+  tex_metal032:
+    kind: texture
+    title: Metal 032 (mottled grey sheet metal; used as zinc-patina mask)
+    source: https://ambientcg.com/view?id=Metal032
+    author: ambientCG (Lennart Demes)
+    license: CC0-1.0
+    tile_size_m: 1.0
+    files:
+      - url: https://ambientcg.com/get?file=Metal032_1K-JPG.zip
+        path: Metal032_1K-JPG.zip
+        sha256: 9e4f363905a647958c273154fa125d2a6440892d0e583f9b3af24bb08b5afc3c
+        extract: Metal032
+    maps: {color: Metal032/Metal032_1K-JPG_Color.jpg, roughness: Metal032/Metal032_1K-JPG_Roughness.jpg}
   tex_grass004:
     kind: texture
     title: Grass 004
@@ -175,3 +202,126 @@ assets:
       - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/shrub_02/shrub_02_1k.gltf, path: shrub_02/shrub_02_1k.gltf, sha256: 99de0a70fe88ad414615cc8d8e020617c8512e2abfe08b911b153a6fcc40d93e}
       - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/shrub_02/shrub_02.bin, path: shrub_02/shrub_02.bin, sha256: 5c1b79da1cfdbac90599542ccd1f75ba433a3a4d356b1ea03655adb39b0e2c96}
       - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/shrub_02/shrub_02_diff_1k.jpg, path: shrub_02/textures/shrub_02_diff_1k.jpg, sha256: 9956eff294034d70516d867e9668428a23d782feb3d4c34061dce5e44bacd5a8}
+  veg_searsia_lucida:
+    kind: gltf
+    title: Searsia Lucida
+    source: https://polyhaven.com/a/searsia_lucida
+    author: James Ray Cock, Jenelle van Heerden (Poly Haven)
+    license: CC0-1.0
+    gltf: searsia_lucida/searsia_lucida_1k.gltf
+    files:
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/searsia_lucida/searsia_lucida_1k.gltf, path: searsia_lucida/searsia_lucida_1k.gltf, sha256: ebdc8d776c058b9a6f9a04c57ca0540368531febd3bfa007d2e2d8af8d368f67}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/searsia_lucida/searsia_lucida.bin, path: searsia_lucida/searsia_lucida.bin, sha256: e0be13cac215725de1f8438d96e1010049d655512a0608c36eabe2ba5abff851}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/searsia_lucida/searsia_lucida_diff_1k.jpg, path: searsia_lucida/textures/searsia_lucida_diff_1k.jpg, sha256: 5d99ed106c6629d91cf5d29f067c1fd10ff4894df40634abb6c4694c59d3c764}
+
+  veg_fir_sapling_medium:
+    kind: gltf
+    title: Fir Sapling Medium
+    source: https://polyhaven.com/a/fir_sapling_medium
+    author: Rob Tuytel, Rico Cilliers (Poly Haven)
+    license: CC0-1.0
+    gltf: fir_sapling_medium/fir_sapling_medium_1k.gltf
+    files:
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/fir_sapling_medium/fir_sapling_medium_1k.gltf, path: fir_sapling_medium/fir_sapling_medium_1k.gltf, sha256: 2e80cd49d716c99bdead5a42aa6441e89443044d9a0edc31b56b5dbf87fc41de}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/fir_sapling_medium/fir_sapling_medium_branches_diff_1k.jpg, path: fir_sapling_medium/textures/fir_sapling_medium_branches_diff_1k.jpg, sha256: a5d25150ba1bee10008c039f98aa3c73b4477a404d6715c511ca9b5b0f4a9077}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/fir_sapling_medium/fir_sapling_medium_twigs_diff_1k.jpg, path: fir_sapling_medium/textures/fir_sapling_medium_twigs_diff_1k.jpg, sha256: db1113d37d68d960b84eb14ce67a4022d02bf10d6f0c078d689063f6296eaa1d}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/fir_sapling_medium/fir_sapling_medium.bin, path: fir_sapling_medium/fir_sapling_medium.bin, sha256: e3f3fabcaa1bacfc8b1feca5e6500b13c63a0e45cd812e663d01d31b042d73b1}
+
+  veg_pine_sapling_small:
+    kind: gltf
+    title: Pine Sapling Small
+    source: https://polyhaven.com/a/pine_sapling_small
+    author: Rob Tuytel, Rico Cilliers (Poly Haven)
+    license: CC0-1.0
+    gltf: pine_sapling_small/pine_sapling_small_1k.gltf
+    files:
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/pine_sapling_small/pine_sapling_small_1k.gltf, path: pine_sapling_small/pine_sapling_small_1k.gltf, sha256: f358c01926861dd082f32dba60f7c9fba232b585a985cf38c0d2229eecf4bc48}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/pine_sapling_small/pine_sapling_small_twig_diff_1k.jpg, path: pine_sapling_small/textures/pine_sapling_small_twig_diff_1k.jpg, sha256: 54af7d6fb664b5a38bcb118b557bc50e01e86ec54d6f1a573c3e32c649a53362}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/pine_sapling_small/pine_sapling_small.bin, path: pine_sapling_small/pine_sapling_small.bin, sha256: b4d2fc73d53f1d8717eb5ef9a2c66957d2a53152787e543aace88fcd6fca94ef}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/pine_sapling_small/pine_sapling_small_bark_diff_1k.jpg, path: pine_sapling_small/textures/pine_sapling_small_bark_diff_1k.jpg, sha256: 5c76836b01c3536fa0e24207b67bf4f3315b53ebe2b4ecc6f08dfcf3f8d74929}
+
+  veg_shrub_01:
+    kind: gltf
+    title: Shrub 01
+    source: https://polyhaven.com/a/shrub_01
+    author: Rico Cilliers (Poly Haven)
+    license: CC0-1.0
+    gltf: shrub_01/shrub_01_1k.gltf
+    files:
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/shrub_01/shrub_01_1k.gltf, path: shrub_01/shrub_01_1k.gltf, sha256: c3bb3340687d46c684b9dab82f5b2f92b7b0fe761842423d3c9e19f59a839393}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/shrub_01/shrub_01.bin, path: shrub_01/shrub_01.bin, sha256: a8646f51386c84b12a6be8324dd0c2357c393c9108aac911847a203cf490b426}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/shrub_01/shrub_01_diff_1k.jpg, path: shrub_01/textures/shrub_01_diff_1k.jpg, sha256: fe60e639d694e1807c0a3ae97dd1d5a7e7b3f84e5fc32d0610b868ce48f36331}
+
+  veg_shrub_04:
+    kind: gltf
+    title: Shrub 04
+    source: https://polyhaven.com/a/shrub_04
+    author: Rico Cilliers (Poly Haven)
+    license: CC0-1.0
+    gltf: shrub_04/shrub_04_1k.gltf
+    files:
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/shrub_04/shrub_04_1k.gltf, path: shrub_04/shrub_04_1k.gltf, sha256: 782832cbc57e96686b78c6ef9df6234c25f564f78421c8ed4bd42c3631f5aeae}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/shrub_04/shrub_04_diff_1k.jpg, path: shrub_04/textures/shrub_04_diff_1k.jpg, sha256: 0b0fa0a474753d13f3093858cea79d0de05da1e6a0c5d6e181cd351080980b6c}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/shrub_04/shrub_04.bin, path: shrub_04/shrub_04.bin, sha256: cb442c39682e54cc63f912aa78ab17a03566f947a61adbbbaaa6473166744f01}
+
+  # --- Heavy vehicles (Sketchfab CC-BY-4.0 via the public Objaverse mirror; glb -> PLY) --
+  truck_daf_cf_tractor:
+    kind: glb
+    title: Truck DAF CF 75.310
+    source: https://sketchfab.com/3d-models/2f2ced3e54f24b4f8bee695e3261bd30
+    author: Max-5532 (Sketchfab)
+    license: CC-BY-4.0
+    license_note: "Attribution required: 'Truck DAF CF 75.310' by Max-5532, https://sketchfab.com/3d-models/2f2ced3e54f24b4f8bee695e3261bd30, CC BY 4.0. Mirror: Objaverse (allenai/objaverse, ODC-By)."
+    glb: 2f2ced3e54f24b4f8bee695e3261bd30.glb
+    files:
+      - url: https://huggingface.co/datasets/allenai/objaverse/resolve/556637099bf4fa79ea7b239d0d9c328b8a2e9ac8/glbs/000-054/2f2ced3e54f24b4f8bee695e3261bd30.glb
+        path: 2f2ced3e54f24b4f8bee695e3261bd30.glb
+        sha256: 22bccd09809ec7e41042fe7a4a524537d0eade14788b399be01b3c0e6b5793d2
+  trailer_box:
+    kind: glb
+    title: Truck Trailer
+    source: https://sketchfab.com/3d-models/cd9a5677626f4b648a4a3b1e0d9ca5b9
+    author: cmitche1 (Sketchfab)
+    license: CC-BY-4.0
+    license_note: "Attribution required: 'Truck Trailer' by cmitche1, https://sketchfab.com/3d-models/cd9a5677626f4b648a4a3b1e0d9ca5b9, CC BY 4.0. Mirror: Objaverse (allenai/objaverse, ODC-By)."
+    glb: cd9a5677626f4b648a4a3b1e0d9ca5b9.glb
+    files:
+      - url: https://huggingface.co/datasets/allenai/objaverse/resolve/556637099bf4fa79ea7b239d0d9c328b8a2e9ac8/glbs/000-140/cd9a5677626f4b648a4a3b1e0d9ca5b9.glb
+        path: cd9a5677626f4b648a4a3b1e0d9ca5b9.glb
+        sha256: 4d348eb78c14d63d36bb7c49ecc33b3d37acb83707ed743f61a8ba89570cfbcf
+  truck_box:
+    kind: glb
+    title: Truck
+    source: https://sketchfab.com/3d-models/eda924f23ba04cd5b1e5160abf2320fa
+    author: roy.gearloft.in (Sketchfab)
+    license: CC-BY-4.0
+    license_note: "Attribution required: 'Truck' by roy.gearloft.in, https://sketchfab.com/3d-models/eda924f23ba04cd5b1e5160abf2320fa, CC BY 4.0. Mirror: Objaverse (allenai/objaverse, ODC-By)."
+    glb: eda924f23ba04cd5b1e5160abf2320fa.glb
+    files:
+      - url: https://huggingface.co/datasets/allenai/objaverse/resolve/556637099bf4fa79ea7b239d0d9c328b8a2e9ac8/glbs/000-086/eda924f23ba04cd5b1e5160abf2320fa.glb
+        path: eda924f23ba04cd5b1e5160abf2320fa.glb
+        sha256: debcf201db8b0004c26e991adb453f7f223b7608e203ecb55c825d5ef8e26d7d
+  van_sprinter:
+    kind: glb
+    title: Mercedes Benz Sprinter 2006
+    source: https://sketchfab.com/3d-models/f69de1315bb049c8946d57f6006acd73
+    author: Max-5532 (Sketchfab)
+    license: CC-BY-4.0
+    license_note: "Attribution required: 'Mercedes Benz Sprinter 2006' by Max-5532, https://sketchfab.com/3d-models/f69de1315bb049c8946d57f6006acd73, CC BY 4.0. Mirror: Objaverse (allenai/objaverse, ODC-By)."
+    glb: f69de1315bb049c8946d57f6006acd73.glb
+    files:
+      - url: https://huggingface.co/datasets/allenai/objaverse/resolve/556637099bf4fa79ea7b239d0d9c328b8a2e9ac8/glbs/000-001/f69de1315bb049c8946d57f6006acd73.glb
+        path: f69de1315bb049c8946d57f6006acd73.glb
+        sha256: 47507f1fd4922343ee70143959d0627ac9ac0c8b79e4d1330c641fe5e8be9330
+  bus_town:
+    kind: glb
+    title: Generic Town Bus
+    source: https://sketchfab.com/3d-models/14fe03d792914d51b6c6250b393c44fd
+    author: own.guest (Sketchfab)
+    license: CC-BY-4.0
+    license_note: "Attribution required: 'Generic Town Bus' by own.guest, https://sketchfab.com/3d-models/14fe03d792914d51b6c6250b393c44fd, CC BY 4.0. Mirror: Objaverse (allenai/objaverse, ODC-By)."
+    glb: 14fe03d792914d51b6c6250b393c44fd.glb
+    files:
+      - url: https://huggingface.co/datasets/allenai/objaverse/resolve/556637099bf4fa79ea7b239d0d9c328b8a2e9ac8/glbs/000-154/14fe03d792914d51b6c6250b393c44fd.glb
+        path: 14fe03d792914d51b6c6250b393c44fd.glb
+        sha256: a8750122cb211145706490e8fbd26ce821d6e8a4074f943974997b2331a02ab9

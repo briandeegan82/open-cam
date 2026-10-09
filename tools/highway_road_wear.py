@@ -9,7 +9,7 @@ centimetre-scale raised pavement markers, which are geometry).
   "High-performance by-example noise using a histogram-preserving blending operator", without the
   histogram transform). Two different asphalts (A = ``--road``, B = Asphalt033) are mixed with a 2.5 m
   correlated noise mask, so no 2 m repeat is visible along the 1.5 km road.
-* Wear maps (one 97.5 m x paved-width period, mapped with pbrt's planar mapping), all seeded:
+* Wear maps (one 97.5 m x paved-width period, mapped through the road mesh uv, so they follow a warped alignment), all seeded:
   - tyre wheel paths at +-0.88 m from each lane centre (half of a 1.75 m track width), lateral wander
     sigma 0.32 m (MEPDG default traffic-wander SD 10 in = 0.254 m, NCHRP 1-37A 2004, convolved with tyre
     width); slow lanes weighted heaviest. Wheel paths are slightly darker and much smoother (polished
@@ -382,9 +382,10 @@ class RoadWear:
         aged = np.loadtxt(spd_dir / "asphalt_aged.spd")[:, 1]
         self.summary["luminous_reflectance"] = self.reflectance_stats(maps, wl, aged)
         w_m = float(g["x1"] - g["x0"])
+        # Road uv is (x, z) / tile_m in the straight frame; map it to (x - x0) / width, -z / period.
         planar = (
-            f'"string mapping" "planar" "vector3 v1" [{1.0 / w_m:.8g} 0 0] '
-            f'"vector3 v2" [0 0 {-1.0 / g["period"]:.8g}] "float udelta" [{-g["x0"] / w_m:.8g}]'
+            f'"string mapping" "uv" "float uscale" [{self.tile_m / w_m:.8g}] '
+            f'"float vscale" [{-self.tile_m / g["period"]:.8g}] "float udelta" [{-g["x0"] / w_m:.8g}]'
         )
         L = [f"# Road wear: {self.level}, seed {self.seed} (tools/highway_road_wear.py)"]
         for k in maps:
@@ -460,7 +461,10 @@ class RoadWear:
         return tuple(self._rel(q) for q in paths)  # type: ignore[return-value]
 
     # ------------------------------------------------------------------ markings + RPMs
-    def marking_lines(self, white: list[tuple], yellow: list[tuple], dash: float, gap: float) -> list[str]:
+    def marking_lines(
+        self, white: list[tuple], yellow: list[tuple], dash: float, gap: float, mesh_fn=None, place_fn=None
+    ) -> list[str]:
+        """``mesh_fn``/``place_fn``: builder hooks that bend road-frame meshes/instances onto the alignment."""
         """Worn paint (replaces the clean paint_white/paint_yellow quads) and raised pavement markers."""
         rng, p = self.rng, self.p
         pm = 16 * (dash + gap)
@@ -501,8 +505,8 @@ class RoadWear:
                 uv += [(0, v0), (1, v0), (1, v1), (0, v1)]
                 b = 4 * i
                 tri += [(b, b + 2, b + 1), (b, b + 3, b + 2)]
-            L += _mesh(np.array(pts), np.array(tri), np.array(uv)) + [""]
-        L += self._rpm_lines(groups, dash, gap)
+            L += (mesh_fn or _mesh)(np.array(pts), np.array(tri), np.array(uv)) + [""]
+        L += self._rpm_lines(groups, dash, gap, place_fn or _translate)
         return L
 
     def _marking_wear(self, level: float, pm: float) -> np.ndarray:
@@ -519,7 +523,7 @@ class RoadWear:
         q = np.quantile(f, 1.0 - level)
         return np.clip((f - q) / 0.25 + 0.5, 0.0, 0.97).astype(np.float32)
 
-    def _rpm_lines(self, groups: dict[str, list[tuple]], dash: float, gap: float) -> list[str]:
+    def _rpm_lines(self, groups: dict[str, list[tuple]], dash: float, gap: float, place_fn) -> list[str]:
         rng = self.rng
         L = [
             'MakeNamedMaterial "rw:rpm_lens_clear" "string type" "coateddiffuse"'
@@ -563,9 +567,11 @@ class RoadWear:
             if rng.random() < self.p["rpm_missing"]:
                 missing += 1
                 return
-            rot = " Rotate 180 0 1 0" if oncoming else ""
+            rot = ["Rotate 180 0 1 0"] if oncoming else []
             L.append(
-                f'AttributeBegin Translate {x:.4f} {y:.4f} {z:.4f}{rot} ObjectInstance "rw:rpm_{name}" AttributeEnd'
+                " ".join(
+                    ["AttributeBegin", *place_fn(x, y, z), *rot, f'ObjectInstance "rw:rpm_{name}"', "AttributeEnd"]
+                )
             )
             placed += 1
 
@@ -588,6 +594,10 @@ class RoadWear:
             "spacing_m": 2.0 * (dash + gap),
         }
         return L + [""]
+
+
+def _translate(x: float, y: float, z: float) -> list[str]:
+    return [f"Translate {x:.4f} {y:.4f} {z:.4f}"]
 
 
 def _mesh(p: np.ndarray, tri: np.ndarray, uv: np.ndarray | None = None) -> list[str]:

@@ -36,6 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import highway_atmosphere as atmosphere  # noqa: E402
 import highway_backdrop as backdrop  # noqa: E402
+import highway_variety as variety  # noqa: E402
 from fetch_highway_assets import cache_root, load_asset_manifest  # noqa: E402
 from highway_road_wear import WEAR_LEVELS, RoadWear, linear_normal_map  # noqa: E402
 from highway_sky import (  # noqa: E402
@@ -92,6 +93,7 @@ def _pts(a: np.ndarray) -> str:
 
 
 def mesh(p: np.ndarray, tri: np.ndarray, uv: np.ndarray | None = None, n: np.ndarray | None = None) -> list[str]:
+    p, tri, uv, n = variety.warp_mesh(p, tri, uv, n)
     out = ['Shape "trianglemesh"', f'    "point3 P" [ {_pts(p)} ]', f'    "integer indices" [ {_pts(tri)} ]']
     if uv is not None:
         out.append(f'    "point2 uv" [ {_pts(uv)} ]')
@@ -355,12 +357,14 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     ap.add_argument("--road", choices=("asphalt031", "asphalt026c", "plain"), default="asphalt031")
     ap.add_argument("--road-wear", choices=("none", *WEAR_LEVELS), default="moderate", help="Seeded road ageing.")
-    ap.add_argument("--road-wear-seed", type=int, default=None, help="Road-wear seed (default: --seed).")
+    ap.add_argument("--road-wear-seed", type=int, default=None, help="Road-wear seed (default: --seed, else 7).")
     ap.add_argument("--road-wear-texel-m", type=float, default=0.02, help="Wear-map texel size [m].")
     ap.add_argument("--traffic", choices=("default", "none"), default="default")
     ap.add_argument("--proxy-cars", action="store_true", help="Use box proxies instead of the CC0 car models.")
     ap.add_argument("--vegetation", choices=("full", "shrubs", "none"), default="full")
-    ap.add_argument("--seed", type=int, default=7, help="Vegetation placement seed.")
+    ap.add_argument(
+        "--seed", type=int, default=None, help="Scene-variety seed (tools/highway_variety.py); default: fixed scene."
+    )
     ap.add_argument("--camera", choices=("perspective", "pinhole", "thinlens", "realistic"), default="pinhole")
     ap.add_argument("--lensfile", default=DEFAULT_REALISTIC_LENSFILE)
     ap.add_argument("--aperture-diameter-mm", type=float, default=4.0)
@@ -383,6 +387,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     ap.add_argument("--step-nm", type=float, default=5.0)
     atmosphere.add_cli_args(ap)
     backdrop.add_cli_args(ap)
+    variety.add_arguments(ap)
     return ap.parse_args(argv)
 
 
@@ -418,6 +423,9 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
     wl = np.arange(args.spectral_lambda_min, args.spectral_lambda_max + 1e-9, args.step_nm)
     for name in SURFACES:
         write_spd(spd / f"{name}.spd", wl, reflectance(name, wl))
+    var = variety.resolve(args, CAR_MODELS, args.cam_lane)
+    variety.activate(var)
+    variety.write_paints(var, spd, wl, reflectance, write_spd)
 
     # ---- sun & sky
     sky_aid = SKIES[args.sky]
@@ -560,7 +568,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
             ],
             "lane_lines": [x + s * k * LANE_W for s, x in ((1, 0.0), (-1, Layout.opp_inner)) for k in (1, 2)],
         }
-        seed = args.seed if args.road_wear_seed is None else args.road_wear_seed
+        seed = args.road_wear_seed if args.road_wear_seed is not None else 7 if args.seed is None else args.seed
         wear = RoadWear(args.road_wear, seed, out_dir, geom, args.road_wear_texel_m)
         tiles = [(f"tex_{args.road}", *road_tex)] if road_tex is not None else []
         b_tex = asset("tex_asphalt033") if road_tex is not None else None
@@ -601,10 +609,15 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         L.append('MakeNamedMaterial "grass" "string type" "diffuse" "spectrum reflectance" "spd/grass.spd"')
     L += [
         'MakeNamedMaterial "grass_far" "string type" "diffuse" "spectrum reflectance" "spd/grass.spd"',
-        'MakeNamedMaterial "concrete" "string type" "diffuse" "spectrum reflectance" "spd/concrete.spd"',
-        # Weathered hot-dip galvanised steel: zinc-oxide patina, i.e. light grey with a rough sheen.
-        'MakeNamedMaterial "galvanized" "string type" "coateddiffuse" "spectrum reflectance" "spd/galvanized.spd"'
-        ' "float roughness" [0.3]',
+        *(
+            variety.barrier_materials(var, asset, out_dir, wl, write_spd, luminance_texture)
+            or [
+                'MakeNamedMaterial "concrete" "string type" "diffuse" "spectrum reflectance" "spd/concrete.spd"',
+                # Weathered hot-dip galvanised steel: zinc-oxide patina, i.e. light grey with a rough sheen.
+                'MakeNamedMaterial "galvanized" "string type" "coateddiffuse"'
+                ' "spectrum reflectance" "spd/galvanized.spd" "float roughness" [0.3]',
+            ]
+        ),
         # Glass-bead road paint: diffuse binder under a rough clear interface (daytime look).
         'MakeNamedMaterial "paint_white" "string type" "coateddiffuse"'
         ' "spectrum reflectance" "spd/paint_road_white.spd" "float roughness" [0.3]',
@@ -640,7 +653,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         p, t = quads_mesh(rects, 0.004)
         L += [f'NamedMaterial "{mat}"', *mesh(p, t), ""]
     if wear is not None:
-        L += wear.marking_lines(white, yellow, DASH, GAP)
+        L += wear.marking_lines(white, yellow, DASH, GAP, mesh, variety.place)
 
     # ---- concrete median barrier (single-slope ~ Jersey profile, 0.81 m tall)
     jersey = [(-0.30, 0.0), (-0.28, 0.08), (-0.18, 0.33), (-0.08, 0.81), (0.08, 0.81), (0.18, 0.33), (0.28, 0.08)]
@@ -701,12 +714,17 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
     ]
     if backdrop.enabled(args):
         write_spd(spd / "forest_canopy.spd", wl, backdrop.forest_canopy_reflectance(wl))
-        L += [*backdrop.pbrt_lines(mesh, cam_x, 0.0, args.seed, "spd/forest_canopy.spd", "spd/grass.spd"), ""]
+        L += [
+            *backdrop.pbrt_lines(
+                mesh, cam_x, 0.0, 7 if args.seed is None else args.seed, "spd/forest_canopy.spd", "spd/grass.spd"
+            ),
+            "",
+        ]
 
     # ---- vegetation (instanced)
-    rng = np.random.default_rng(args.seed)
+    rng = np.random.default_rng(7 if args.seed is None else args.seed)
     veg_meta = []
-    for vid, kind in (("veg_island_tree_02", "tree"), ("veg_shrub_02", "shrub")):
+    for vid, kind in var.species:
         if args.vegetation == "none" or (args.vegetation == "shrubs" and kind == "tree"):
             continue
         va = asset(vid)
@@ -724,18 +742,18 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
                 if kind == "tree":
                     d = rng.uniform(10.0, 36.0) + (z / 900.0) * 30.0
                     s = rng.uniform(2.6, 3.8)
-                    z += rng.uniform(9.0, 26.0)
+                    z += rng.uniform(9.0, 26.0) * var.species_spacing("tree")
                 else:
                     d = rng.uniform(6.5, 12.0)
                     s = rng.uniform(0.8, 1.4)
-                    z += rng.uniform(6.0, 22.0)
+                    z += rng.uniform(6.0, 22.0) * var.species_spacing("shrub")
                 x = edge + side * d
                 y = float(terrain_height(np.array(x), np.array(z), edge, side)) - 0.15
                 L += [
                     "AttributeBegin",
-                    f"Translate {_f(x)} {_f(y)} {_f(z)}",
+                    *variety.place(x, y, z),
                     f"Rotate {_f(rng.uniform(0, 360))} 0 1 0",
-                    f"Scale {_f(s)} {_f(s)} {_f(s)}",
+                    f"Scale {_f(s * var.species_scale(vid))} {_f(s * var.species_scale(vid))} {_f(s * var.species_scale(vid))}",
                     f'ObjectInstance "{vid}"',
                     "AttributeEnd",
                 ]
@@ -748,26 +766,32 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
     if args.traffic != "none":
         car_dir = out_dir / "cars"
         car_dir.mkdir(exist_ok=True)
-        for k, (lane, z, model, paint, yaw) in enumerate(DEFAULT_TRAFFIC):
-            if paint not in CAR_PAINTS:
+        for k, (lane, z, model, paint, yaw) in enumerate(var.traffic or DEFAULT_TRAFFIC):
+            if paint not in CAR_PAINTS and paint not in var.paints:
                 raise ValueError(paint)
             inst = f"car{k:02d}"
             paint_spd = f"spd/carpaint_{paint}.spd"
             ca = None if args.proxy_cars else asset(model)
             heading = 0.0 if lane >= 0 else 180.0
-            if ca is not None:
+            if ca is not None and model in variety.HEAVY:
+                info, raw = ca
+                body, yaw_model = variety.glb_vehicle_include(
+                    model, info, aroot / "prepared" / model, raw, out_dir, inst, paint_spd, luminance_texture
+                )
+                yaw_model += heading
+            elif ca is not None:
                 info, raw = ca
                 body = car_include(info, raw, out_dir, inst, paint_spd, amanifest["assets"][model]["length_m"])
                 yaw_model = 90.0 + heading  # model front is -x
             else:
-                body = proxy_car(paint_spd, inst)
+                body = variety.proxy_vehicle(model, paint_spd, inst, mesh, box) or proxy_car(paint_spd, inst)
                 yaw_model = heading
             inc = car_dir / f"{inst}.pbrt"
             inc.write_text("\n".join(body) + "\n")
             x = Layout.lane_center(lane)
             L += [
                 "AttributeBegin",
-                f"Translate {_f(x)} 0 {_f(z)}",
+                *variety.place(x, 0.0, z),
                 f"Rotate {_f(yaw_model + yaw)} 0 1 0",
                 f'Include "{os.path.relpath(inc, out_dir)}"',
                 "AttributeEnd",
@@ -776,6 +800,8 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
                 {"id": inst, "model": model if ca else "proxy", "paint": paint, "lane": lane, "distance_m": z}
             )
 
+    median_x = Layout.median_l + MEDIAN_W / 2 + LEFT_SHOULDER / 2 - 0.6
+    L += variety.structures(var, out_dir, Layout, median_x, mesh, box, sign_legend, LANE_W)
     scene_path = out_dir / "highway.pbrt"
     scene_path.write_text("\n".join(L) + "\n")
 
@@ -853,6 +879,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         "vegetation": veg_meta,
         "atmosphere": atm["manifest"] if atm else None,
         "distant_terrain": "hills (tools/highway_backdrop.py)" if backdrop.enabled(args) else None,
+        "variety": var.manifest(),
         "assets": used_assets,
         "missing_assets_fallback": fallbacks,
         "approximations": [
