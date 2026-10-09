@@ -1,4 +1,33 @@
-pbrt-v4 in this repo lives at third_party/pbrt-v4 (vendored clone, not a git submodule).
+pbrt-v4 in this repo lives at third_party/pbrt-v4 (git submodule of upstream mmp/pbrt-v4).
+
+open-cam patches (recommended build)
+------------------------------------
+open-cam needs a few C++ additions that upstream pbrt-v4 does not have. They are kept
+as patches in third_party/patches/*.patch (never committed into the submodule) and
+applied by the build script, which is idempotent and leaves the submodule commit alone:
+
+  git submodule update --init --recursive
+  tools/build_pbrt.sh                 # apply patches + CPU build -> third_party/pbrt-v4/build/pbrt
+  tools/build_pbrt.sh --apply-only    # only apply the patches (e.g. before a GPU build)
+
+Patches:
+- 0001-retroreflective-material.patch: Material "retroreflective" (RetroreflectiveBxDF),
+  a Lambertian base plus a retroreflective lobe around the incident direction,
+  parameterised by the coefficient of retroreflection R_A (ASTM E808/E810, D4956;
+  EN 12899) or road-marking R_L (EN 1436). Parameters: "spectrum reflectance" (diffuse
+  base), "spectrum ra" (R_A in cd lx^-1 m^-2 at "float observationangle" [deg] and normal
+  entrance), "float lobewidth" [deg] (exponential fall-off with observation angle) and
+  "float entranceexponent" (q: R_A ~ (cos b_i cos b_o)^(q/2)). Used by the night/dusk
+  highway scenes (tools/highway_night.py, docs/HIGHWAY_SCENES.md).
+
+To work on a patch: edit the sources in third_party/pbrt-v4, rebuild, then refresh the
+patch with `git -C third_party/pbrt-v4 diff > third_party/patches/<name>.patch` and
+restore the submodule (`git -C third_party/pbrt-v4 checkout .`). CI caches the binary
+under a key containing the submodule SHA and the hash of the patches + build script.
+
+Without the patches pbrt still builds, but scenes using the retroreflective material
+fail to parse (the highway builder only emits it for --time-of-day dusk/night, or
+--retroreflective on).
 
 CPU-only build (no NVIDIA OptiX SDK)
 ------------------------------------
