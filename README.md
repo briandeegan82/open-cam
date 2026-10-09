@@ -291,6 +291,9 @@ venv/bin/python tools/munsell_mat_to_sqlite.py --summary
 - `cfa.demosaic` implements bilinear and Malvar-He-Cutler reconstruction.
 - Post-PSF is a simple Gaussian/stray-light approximation, not a full chromatic lens aberration model.
 - PBRT spectral sampling remains Monte Carlo based; use validation and repeated runs for sensitive comparisons.
+- Per-wavelength-bucket images share pbrt's 4 hero wavelengths (stride (λmax−λmin)/4), so per-bucket metrics carry periodic Monte Carlo noise, and in our tests changing only `pbrt --seed` left the output unchanged, for reasons not yet understood (set the in-scene `"integer seed"` to vary it); see [`docs/SFR_SPECTRAL_RIPPLE.md`](docs/SFR_SPECTRAL_RIPPLE.md).
+- `tools/sfr_analysis.py` uses an ISO 12233-style signed-derivative edge fit with robust outlier rejection; the old `|derivative|` centroid (kept as `row_edge_positions_legacy`) was biased toward 0 deg on noisy renders.
+- Real-camera validation (`tools/validate_against_capture.py`, [`docs/REAL_CAMERA_VALIDATION.md`](docs/REAL_CAMERA_VALIDATION.md)) is only round-trip tested on simulator data so far; no recipe has been validated against physical captures yet.
 - HDR pixel models (`noise.hdr`: DCG, split pixel, LOFIC, multi-exposure; opt-in) use deterministic-threshold SNR theory and omit row/column FPN, 1/f noise, blooming and ADC INL/DNL per capture; split-pixel SPD offset/crosstalk and LOFIC soft-knee effects are not modelled. Example HDR sensor models are illustrative, not datasheets. See [docs/HDR_PIXELS.md](docs/HDR_PIXELS.md).
 - Pixel angular response (CRA / microlens shift, lens + colour shading, optional optical crosstalk) is opt-in (`sensor_forward.model.pixel_angular_response`) and uses a geometric-optics microlens with a Gaussian diffraction term; wave-optical effects at sub-2 µm pitch and real stack data are not modelled — see [`docs/PIXEL_ANGULAR_RESPONSE.md`](docs/PIXEL_ANGULAR_RESPONSE.md). Off by default.
 

@@ -4,7 +4,9 @@ Reads the spectral pbrt-v4 renders produced by render_scenes.sh
 (build/edge_*.exr), integrates the buckets with the default green QE x IRCF,
 and runs tools/sfr_analysis.slanted_edge_sfr. Because the film is spectral,
 the same render also gives a per-wavelength MTF50 (longitudinal chromatic
-aberration of the traced prescription).
+aberration of the traced prescription -- but see docs/SFR_SPECTRAL_RIPPLE.md:
+dgauss.50mm.dat has one refractive index per element, so the traced lens has
+no dispersion and the per-bucket spread is pbrt Monte Carlo noise).
 
 Run from the repository root:
     venv/bin/python paper/ei2027/scripts/fig_mtf.py
@@ -28,14 +30,7 @@ sys.path.insert(0, str(REPO / "tools"))
 from exr_multispectral import spectral_buckets_from_exr, trapezoid_weights_nm  # noqa: E402
 from qe_curves import read_csv_curve  # noqa: E402
 from sensor_radiometry import integrate_spectral_planes, spectral_electron_weights  # noqa: E402
-from sfr_analysis import (  # noqa: E402
-    DEFAULT_OVERSAMPLING,
-    frequency_at_mtf,
-    line_spread_function,
-    mtf50,
-    mtf_at,
-    mtf_from_lsf,
-)
+from sfr_analysis import DEFAULT_OVERSAMPLING, slanted_edge_sfr  # noqa: E402
 
 BUILD = REPO / "paper" / "ei2027" / "build"
 OUT = REPO / "paper" / "ei2027" / "figures"
@@ -58,55 +53,19 @@ def edge_roi(img: np.ndarray) -> np.ndarray:
 
 
 def edge_sfr(roi: np.ndarray, oversampling: int = DEFAULT_OVERSAMPLING) -> dict:
-    """ISO 12233-style SFR with a noise-robust edge fit.
+    """ISO 12233-style SFR via tools/sfr_analysis (signed-derivative, robust fit).
 
-    tools/sfr_analysis.row_edge_positions uses an |derivative| centroid, which
-    render noise on the 80-px ROI biases toward the window centre (it reports
-    ~-2.3 deg for this ~-4.7 deg edge). Here each row is flat-fielded with a
-    linear fit to its bright plateau, the edge is located at the 50 % crossing
-    (linear interpolation), and a line is fitted to those positions. The ESF
-    binning mirrors sfr_analysis.edge_spread_function; LSF, MTF and summary
-    metrics reuse the repository functions unchanged.
+    ``flatfield=True`` divides each row by a line fitted to its bright plateau:
+    the 80-px ROI sits well off-axis and carries a ~3 % vignetting ramp.
     """
-    a = np.asarray(roi, dtype=np.float64)
-    n_rows, n_cols = a.shape
-    cols = np.arange(n_cols, dtype=np.float64)
-    bright_left = a[:, :5].mean() > a[:, -5:].mean()
-    plate = slice(0, n_cols // 4) if bright_left else slice(3 * n_cols // 4, n_cols)
-    norm = np.empty_like(a)
-    pos = np.full(n_rows, np.nan)
-    for i in range(n_rows):
-        k = np.polyfit(cols[plate], a[i, plate], 1)
-        r = a[i] / np.polyval(k, cols)
-        norm[i] = r
-        lo = r[-5:].mean() if bright_left else r[:5].mean()
-        half = 0.5 * (1.0 + lo)
-        below = np.flatnonzero(r < half) if bright_left else np.flatnonzero(r > half)
-        if below.size and 0 < below[0] < n_cols:
-            j = below[0]
-            pos[i] = j - 1 + (r[j - 1] - half) / (r[j - 1] - r[j])
-    rows = np.arange(n_rows, dtype=np.float64)
-    ok = np.isfinite(pos)
-    slope, intercept = np.polyfit(rows[ok], pos[ok], 1)
-    angle = float(np.degrees(np.arctan(slope)))
-    d = ((cols[None, :] - (slope * rows[:, None] + intercept)) * np.cos(np.radians(angle))).ravel()
-    bw = 1.0 / oversampling
-    lo_d = d.min()
-    n_bins = max(int(np.ceil((d.max() - lo_d) / bw)), 2)
-    idx = np.clip(((d - lo_d) / bw).astype(int), 0, n_bins - 1)
-    cnt = np.bincount(idx, minlength=n_bins)
-    tot = np.bincount(idx, weights=norm.ravel(), minlength=n_bins)
-    centres = lo_d + (np.arange(n_bins) + 0.5) * bw
-    occ = cnt > 0
-    esf = np.interp(centres, centres[occ], tot[occ] / cnt[occ])
-    freq, mtf = mtf_from_lsf(line_spread_function(esf), bw)
+    r = slanted_edge_sfr(roi, oversampling, flatfield=True)
     return {
-        "angle_deg": angle,
-        "frequency": freq,
-        "mtf": mtf,
-        "mtf50": float(mtf50(freq, mtf)),
-        "mtf10": float(frequency_at_mtf(freq, mtf, 0.1)),
-        "nyquist": float(mtf_at(freq, mtf, 0.5)),
+        "angle_deg": r.angle_deg,
+        "frequency": r.frequency_cy_per_px,
+        "mtf": r.mtf,
+        "mtf50": r.mtf50_cy_per_px,
+        "mtf10": r.mtf10_cy_per_px,
+        "nyquist": r.mtf_at_nyquist,
     }
 
 
