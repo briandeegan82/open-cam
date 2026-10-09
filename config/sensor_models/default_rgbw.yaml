@@ -1,0 +1,11 @@
+# Delta from config/sensor_models/default.yaml — only overrides are listed.
+schema_version: 1
+source:
+  qe_variant: default_rgbw
+  qe_variant_note: 'True periodic CFA via cfa.layout (see docs/CFA_NIR.md)'
+model:
+  name: default_rgbw
+  display_name: Default RGBW 2x2 (true CFA)
+cfa:
+  layout: RGBW
+  demosaic: gradient

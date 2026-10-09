@@ -16,6 +16,16 @@ from camera_model import (
     load_camera_model,
     noise_config_from_camera_model,
 )
+from cfa_mosaic import (
+    apply_site_crosstalk,
+    bin_mosaic,
+    channel_parameter,
+    qe_stack_for_layout,
+    render_cfa_rgb,
+    resolve_layout,
+    site_parameter_map,
+)
+from cfa_mosaic import mosaic as cfa_sample
 from exr_multispectral import (
     linear_rgb_from_exr,
     spectral_buckets_from_exr,
@@ -914,8 +924,9 @@ def integrate_exr_spectral_qe(
     lens_cfg: dict | None = None,
     model_cfg: dict | None = None,
     scene: dict | None = None,
+    channel_qe=None,
 ) -> np.ndarray:
-    """HxWx3 electrons via full photon-counting physics on a PBRT spectral EXR.
+    """HxWx3 (or HxWxC with ``channel_qe``) electrons via photon counting on a PBRT spectral EXR.
 
     Delegates to ``pbrt_spectral_exr_to_electrons.spectral_radiance_to_electrons`` so
     both paths share one radiometric chain (thin-lens + close-focus magnification,
@@ -954,6 +965,7 @@ def integrate_exr_spectral_qe(
         strict_qe_validation=strict_qe_validation,
         tag="integrate_qe",
         scene=scene,
+        channel_qe=channel_qe,
     )
     return electrons
 
@@ -1102,6 +1114,8 @@ def main() -> None:
     out_cfg = cfg.get("output", {})
     proc_cfg = cfg.get("processing", {})
     bayer_cfg = cfg.get("bayer") or {}
+    # Generic periodic CFA (true per-site spectral QE) only when cfa.layout is set; see cfa_mosaic.
+    cfa_layout = resolve_layout(bayer_cfg) if bayer_cfg.get("enabled", True) else None
 
     exr_in = (repo / out_cfg.get("linear_rgb_in", "out/colorchecker.exr")).resolve()
     if args.linear_exr is not None:
@@ -1271,6 +1285,17 @@ def main() -> None:
             row_sum = np.where(np.abs(row_sum) < 1e-12, 1.0, row_sum)
             crosstalk_matrix = (crosstalk_matrix / row_sum).astype(np.float32)
 
+    _cfa_qe = None
+    if cfa_layout is not None:
+        if electrons_npz is not None or exr_mode != "integrate_qe":
+            raise ValueError("cfa.layout needs processing.linear_exr_mode: integrate_qe on a spectral EXR")
+        if crosstalk_enabled:
+            raise ValueError("sensor.crosstalk.matrix_3x3 is RGB-only; use cfa.spatial_crosstalk with cfa.layout")
+        _cfa_ircf = qe_cfg.get("ircf_csv") if bool(bayer_cfg.get("ircf", True)) else None
+
+        def _cfa_qe(lam: np.ndarray) -> np.ndarray:
+            return qe_stack_for_layout(repo, cfa_layout, lam, ircf_csv=_cfa_ircf)
+
     signal_source = "linear_exr"
     if electrons_npz is not None:
         signal_e = load_electrons_npz(electrons_npz)
@@ -1311,17 +1336,19 @@ def main() -> None:
                     exr_in,
                     repo,
                     qe_cfg,
-                    sensor,
+                    # Generic CFA honours --integration-time-s for the signal (legacy path unchanged).
+                    sensor if cfa_layout is None else {**sensor, "integration_time_s": t_int_s},
                     _cal_cfg,
                     strict_qe_validation=strict_qe_validation,
                     lens_cfg=camera_model.get("lens", {}) if camera_model else None,
                     model_cfg=_sf_model if camera_model else None,
                     scene=_scene_radiometry(args.scene_manifest_json, repo),
+                    channel_qe=_cfa_qe,
                 )
             except ValueError as exc:
                 # Some renders are RGB EXRs even when integrate_qe is configured.
                 # Fall back to per-channel QE scaling so mixed pipelines do not fail.
-                if "no S0.*nm spectral channels" not in str(exc):
+                if cfa_layout is not None or "no S0.*nm spectral channels" not in str(exc):
                     raise
                 print(
                     f"Warning: integrate_qe requested but EXR has no spectral planes: {exr_in}. "
@@ -1355,7 +1382,7 @@ def main() -> None:
         regenerate_persistent_map=bool(args.regenerate_defect_map),
     )
 
-    bayer_on = bool(bayer_cfg.get("enabled", False))
+    bayer_on = bool(bayer_cfg.get("enabled", False)) and cfa_layout is None
     bayer_pat = str(bayer_cfg.get("pattern", "RGGB"))
     demosaic_on = bayer_on and demosaic_requested(bayer_cfg)
     demosaic_alg = str(bayer_cfg.get("demosaic", "bilinear")).lower().strip()
@@ -1371,6 +1398,9 @@ def main() -> None:
         # so that the blur acts on the RAW mosaic (R leaking to G/B wells, etc.).
         # Applied before the noise chain so shot noise is drawn on the correct mean.
         signal_e = apply_cfa_spatial_crosstalk(signal_e, spatial_xtalk_cfg, bayer_pat)
+    elif cfa_layout is not None:
+        signal_e = cfa_sample(signal_e, cfa_layout)
+        signal_e = apply_site_crosstalk(signal_e, cfa_layout, spatial_xtalk_cfg)
 
     # Dark current mean: computed here (not in the temporal section) so that the DSNU
     # log-normal distribution can be correctly centred on it — ensuring that
@@ -1409,6 +1439,14 @@ def main() -> None:
             _sub = 1.0 + spatial_rng.normal(0.0, _ch_std, size=signal_e[_row_off::2, _col_off::2].shape)
             prnu_map[_row_off::2, _col_off::2] = _sub
         prnu_map = np.maximum(prnu_map, 0.0, out=prnu_map)
+    elif cfa_layout is not None:
+        _site_std = site_parameter_map(
+            [channel_parameter(emva, "prnu_std_fraction", ch, prnu_std) for ch in cfa_layout.channels],
+            cfa_layout,
+            signal_e.shape,
+        )
+        prnu_map = np.maximum(1.0 + spatial_rng.normal(0.0, 1.0, size=signal_e.shape) * _site_std, 0.0)
+        prnu_map = prnu_map.astype(np.float32)
     else:
         prnu_map = np.maximum(
             (1.0 + spatial_rng.normal(0.0, prnu_std, size=signal_e.shape)).astype(np.float32),
@@ -1535,6 +1573,21 @@ def main() -> None:
             vref_V=float(ktc_cfg.get("vref_V", 1.8)),
         )
 
+    cfa_binning = str(bayer_cfg.get("binning", "none")).lower() if cfa_layout is not None else "none"
+    cfa_out_layout = cfa_layout
+    if cfa_binning == "charge":
+        # Shared floating-diffusion binning: each photodiode saturates at full_well_e, the summed
+        # charge is read once (one read/kTC/row-noise draw per binned pixel).
+        _pd_fw = full_well_e
+        full_well_e = float(bayer_cfg.get("binned_full_well_e", 4.0 * _pd_fw))
+        _full_shape = shot_e.shape
+        shot_e, cfa_out_layout = bin_mosaic(np.minimum(shot_e, _pd_fw) if adc_clipping else shot_e, cfa_layout)
+        signal_e = bin_mosaic(np.minimum(signal_e, _pd_fw) if adc_clipping else signal_e, cfa_layout)[0]
+        rc_fpn = np.broadcast_to(rc_fpn, _full_shape)[::2, ::2][: shot_e.shape[0], : shot_e.shape[1]]
+        shot_e, signal_e = shot_e.astype(np.float32), signal_e.astype(np.float32)
+    elif cfa_binning not in ("none", "digital"):
+        raise ValueError('cfa.binning must be "none", "charge" or "digital"')
+
     # ---- Additive Gaussian readout noise (post-Poisson, includes kTC when enabled) ----
     read_e = rng.normal(0.0, sigma_d_e, size=signal_e.shape).astype(np.float32)
     if sigma_ktc_e > 0.0:
@@ -1557,8 +1610,14 @@ def main() -> None:
         # property of the converter, identical on every frame it ever produces.
         dn_noisy = apply_adc_dnl(dn_noisy, adc_dnl_table(max_dn, adc_dnl_std_lsb, spatial_rng), max_dn)
 
+    if cfa_binning == "digital":
+        dn_clean = bin_mosaic(dn_clean - black_dn, cfa_layout, mode="mean")[0] + black_dn
+        dn_noisy, cfa_out_layout = bin_mosaic(dn_noisy - black_dn, cfa_layout, mode="mean")
+        dn_noisy = dn_noisy + black_dn
     hdr_run = None
     if hdr_pixel.hdr_enabled(cfg):
+        if cfa_layout is not None:
+            raise ValueError("hdr pixel modes are not yet supported with a generic cfa.layout")
 
         def _hdr_capture(p: Path) -> np.ndarray:
             e = load_electrons_npz(p.resolve())
@@ -1588,7 +1647,7 @@ def main() -> None:
         dn_clean, dn_noisy, total_e = hdr_run.dn_clean, hdr_run.dn_noisy, hdr_run.hdr_e
         bit_depth, black_dn = hdr_run.preview_bit_depth, 0.0
 
-    if bayer_on:
+    if bayer_on or cfa_layout is not None:
         raw_u16 = np.rint(dn_noisy).astype(np.uint16)
     else:
         raw_u16 = np.rint(np.mean(dn_noisy, axis=2)).astype(np.uint16)
@@ -1607,12 +1666,18 @@ def main() -> None:
             ref_linear = None
             ccm_source = "reference_unavailable"
             print(f"warning: preview CCM reference unavailable from {exr_in}: {exc}", file=sys.stderr)
-    if wb_enabled and not bayer_on:
+    if wb_enabled and not bayer_on and cfa_layout is None:
         _wb_src = np.clip(dn_clean - black_dn, 0.0, None)
         wb_gains = white_patch_gains(_wb_src) if wb_method == "white_patch" else gray_world_gains(_wb_src)
         dn_clean = apply_preview_wb_dn(dn_clean, black_dn, wb_gains)
         dn_noisy = apply_preview_wb_dn(dn_noisy, black_dn, wb_gains)
-    if ccm_enabled and not bayer_on and ref_linear is not None and ref_linear.shape == dn_clean.shape:
+    if (
+        ccm_enabled
+        and not bayer_on
+        and cfa_layout is None
+        and ref_linear is not None
+        and ref_linear.shape == dn_clean.shape
+    ):
         ccm = fit_preview_ccm(dn_clean, ref_linear, black_dn, ccm_method)
         dn_clean = apply_preview_ccm_dn(dn_clean, black_dn, ccm)
         dn_noisy = apply_preview_ccm_dn(dn_noisy, black_dn, ccm)
@@ -1621,7 +1686,7 @@ def main() -> None:
     preview_no_normalize = bool(args.preview_no_normalize)
     preview_white_clean = None if preview_no_normalize else float(np.percentile(dn_clean, args.preview_percentile))
     preview_white_noisy = None if preview_no_normalize else float(np.percentile(dn_noisy, args.preview_percentile))
-    if bayer_on:
+    if bayer_on or cfa_layout is not None:
         clean_png8 = to_png8_preview_gray(dn_clean, bit_depth, black_dn=black_dn, white_dn=preview_white_clean)
         noisy_png8 = to_png8_preview_gray(dn_noisy, bit_depth, black_dn=black_dn, white_dn=preview_white_noisy)
     else:
@@ -1630,7 +1695,7 @@ def main() -> None:
     write_png(png_dir / "clean_rgb8.png", clean_png8)
     write_png(png_dir / "noisy_rgb8.png", noisy_png8)
 
-    if bayer_on:
+    if bayer_on or cfa_layout is not None:
         write_png(png_dir / "noisy_mono_16.png", mono_dn_to_u16(dn_noisy, bit_depth))
     else:
         for i, name in enumerate(["R", "G", "B"]):
@@ -1673,6 +1738,36 @@ def main() -> None:
                 srgb=demosaic_srgb,
             ),
         )
+
+    cfa_stats = None
+    if cfa_layout is not None:
+        cfa_stats = {
+            "layout": cfa_layout.name,
+            "tile": [list(r) for r in cfa_layout.tile],
+            "channels": list(cfa_layout.channels),
+            "qe_csv": dict(cfa_layout.qe_csv),
+            "ircf": bool(bayer_cfg.get("ircf", True)) and bool(qe_cfg.get("ircf_csv")),
+            "binning": cfa_binning,
+            "output_tile": [list(r) for r in cfa_out_layout.tile],
+        }
+        if str(bayer_cfg.get("demosaic", "gradient")).lower() not in ("false", "none", "0"):
+            _cfa_rgb, _cfa_info = render_cfa_rgb(
+                [dn_clean, dn_noisy],
+                black_dn,
+                cfa_out_layout,
+                repo=repo,
+                cfa_cfg=bayer_cfg,
+                ircf_csv=_cfa_ircf,
+                wb_method=wb_method if wb_enabled else None,
+                reference_rgb=ref_linear if cfa_binning == "none" else None,
+            )
+            cfa_stats.update(_cfa_info)
+            for _name, _img in zip(("clean", "noisy"), _cfa_rgb, strict=True):
+                _pw = None if preview_no_normalize else float(np.percentile(_img, args.preview_percentile))
+                write_png(
+                    png_dir / f"{_name}_demosaic_rgb8.png",
+                    to_png8_preview(_img, bit_depth, black_dn=black_dn, white_dn=_pw, srgb=demosaic_srgb),
+                )
 
     stats = {
         "config": str(cfg_path),
@@ -1734,7 +1829,9 @@ def main() -> None:
         "demosaic": (demosaic_alg if demosaic_on else None),
         "demosaic_srgb_preview": bool(demosaic_srgb) if demosaic_on else None,
     }
-    if bayer_on:
+    if cfa_stats is not None:
+        stats["cfa"] = cfa_stats
+    if bayer_on or cfa_layout is not None:
         stats["signal_e_mean_mono"] = float(np.mean(signal_e))
         stats["total_e_mean_mono"] = float(np.mean(total_e))
         stats["dn_noisy_min_mono"] = float(np.min(dn_noisy))
