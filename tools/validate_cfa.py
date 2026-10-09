@@ -254,7 +254,7 @@ def plot(results: dict, path: Path) -> None:
     ax[2].set_ylabel("CIEDE2000 after CCM (24 patches, 100 lux)")
     for a in ax:
         a.set_xticks(x, names, rotation=30, ha="right", fontsize=8)
-        a.legend(fontsize=8)
+        a.legend(fontsize=7, loc="lower right")
         a.grid(axis="y", alpha=0.3)
     fig.suptitle("open-cam generic CFA: full pipeline on pbrt ColorChecker (D65, default recipe, t=0.12 s)")
     fig.tight_layout()
