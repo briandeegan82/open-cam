@@ -1,0 +1,23 @@
+# Example: research_realistic_wide22 with physically traced lens ghosts (tools/lens_ghosts.py).
+# Ghosts are added to the pbrt SpectralFilm EXR before radiance -> electrons, see docs/LENS_GHOSTS.md.
+schema_version: 1
+lens:
+  camera: realistic
+  realistic_lensfile: config/lenses/wide_22mm.dat
+  realistic_aperture_diameter_mm: 8.0
+  realistic_focus_distance: 4.0
+  focal_length_mm: 22.0
+  post_psf:
+    enabled: false
+  traced_ghosts:
+    enabled: true
+    # lens_file / aperture / focus default to the realistic_* keys above.
+    coating: mgf2              # uncoated | mgf2 | qhq | {layers: [{n: .., qwot: ..}, ...]}
+    coating_design_wavelength_nm: 550.0
+    film_diagonal_mm: 35.0     # pbrt RealisticCamera film "diagonal" used for the render
+    iris_blades: 0             # 0 = circular stop; >= 3 = regular polygon iris
+    sensor_reflectance: 0.0    # > 0 adds sensor <-> lens-surface ghosts (flat sensor, gray R)
+    pupil_samples: 64          # rays per side of the collimated beam grid
+    source_threshold_relative: 0.01
+    cluster_px: 8
+    max_sources: 256
