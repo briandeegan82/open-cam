@@ -472,6 +472,7 @@ def main() -> None:
                 "from": [0.12, 0.55, 2.9],
                 "to": [0.0, 0.0, 0.0],
                 "scale": float(args.light_scale),
+                **({"photometric": False} if args.radiometric_light else {}),
             }
         },
     }

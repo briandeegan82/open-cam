@@ -53,7 +53,8 @@ def scene_radiometry_from_manifest(manifest: dict) -> dict:
         out["focus_distance_m"] = float(focus)
     lighting = manifest.get("lighting") or {}
     light = lighting.get("distant") or {}
-    if light.get("scale") is not None:
+    # "photometric": false (NIR, --radiometric-light) has no lux scale; use calibration instead.
+    if light.get("scale") is not None and light.get("photometric", True):
         out["chart_illuminance_exr_lux"] = 683.0 * PBRT_CIE_Y_INTEGRAL * float(light["scale"])
     # Physically calibrated outdoor scenes (build_highway_scene.py): horizontal illuminance at
     # ground level, both in lux and in EXR units; it plays the role of the chart illuminance.
