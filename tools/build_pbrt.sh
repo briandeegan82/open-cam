@@ -1,20 +1,24 @@
 #!/usr/bin/env bash
-# Apply open-cam's pbrt-v4 patches (third_party/patches/*.patch) to the submodule
-# checkout and build the CPU pbrt executable. Idempotent: already-applied patches
-# are skipped. Patches are never committed into the submodule.
+# Build the CPU pbrt-v4 binary from the third_party/pbrt-v4 submodule with the open-cam
+# patches in third_party/patches/*.patch applied (idempotent; the submodule commit is
+# never changed). Usage: tools/build_pbrt.sh [--apply-only|--patch-only] [extra cmake --build args]
 set -euo pipefail
-root="$(cd "$(dirname "$0")/.." && pwd)"
-pbrt="$root/third_party/pbrt-v4"
-for p in "$root"/third_party/patches/*.patch; do
+repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+src="$repo/third_party/pbrt-v4"
+build="${PBRT_BUILD_DIR:-$src/build}"
+
+for p in "$repo"/third_party/patches/*.patch; do
   [ -e "$p" ] || continue
-  if git -C "$pbrt" apply --reverse --check "$p" 2>/dev/null; then
+  if git -C "$src" apply --reverse --check "$p" 2>/dev/null; then
     echo "already applied: $(basename "$p")"
   else
-    git -C "$pbrt" apply "$p"
+    git -C "$src" apply "$p"
     echo "applied: $(basename "$p")"
   fi
 done
-if [ "${1:-}" = "--patch-only" ]; then exit 0; fi
-env -u PBRT_OPTIX_PATH cmake -S "$pbrt" -B "$pbrt/build" -DCMAKE_BUILD_TYPE=Release \
+case "${1:-}" in --apply-only | --patch-only) exit 0 ;; esac
+
+env -u PBRT_OPTIX_PATH cmake -S "$src" -B "$build" -DCMAKE_BUILD_TYPE=Release \
   -DPBRT_BUILD_NATIVE_EXECUTABLE="${PBRT_NATIVE:-ON}"
-cmake --build "$pbrt/build" -j"$(nproc)" --target pbrt_exe
+env -u PBRT_OPTIX_PATH cmake --build "$build" -j"$(nproc)" --target pbrt_exe "$@"
+echo "pbrt: $build/pbrt"

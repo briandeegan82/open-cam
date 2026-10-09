@@ -181,6 +181,10 @@ class TestBuilderSpectralSky(unittest.TestCase):
             self.assertIn('Integrator "volpath"', scene)
             self.assertLess(m["lighting"]["reference_illuminance_lux"], hw_clear_sky_reference(45.0))
 
+    def test_spectral_sky_refused_at_night(self) -> None:
+        with tempfile.TemporaryDirectory() as td, self.assertRaises(SystemExit):
+            build_offline(Path(td), "--sky", "hosek", "--time-of-day", "night")
+
     def test_weights_to_rgb_keeps_luminance(self) -> None:
         w = ss.hosek_weight_map(32, 30.0)
         np.testing.assert_allclose(ss.weights_to_rgb(w) @ ss.SRGB_TO_XYZ[1], w.sum(-1), rtol=1e-9, atol=1e-12)

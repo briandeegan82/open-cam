@@ -36,6 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import highway_atmosphere as atmosphere  # noqa: E402
 import highway_backdrop as backdrop  # noqa: E402
+import highway_night as night  # noqa: E402
 import highway_variety as variety  # noqa: E402
 from fetch_highway_assets import cache_root, load_asset_manifest  # noqa: E402
 from highway_sky import (  # noqa: E402
@@ -390,6 +391,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     ap.add_argument("--spectral-lambda-min", type=float, default=360.0)
     ap.add_argument("--spectral-lambda-max", type=float, default=830.0)
     ap.add_argument("--step-nm", type=float, default=5.0)
+    night.add_night_args(ap)
     atmosphere.add_cli_args(ap)
     backdrop.add_cli_args(ap)
     variety.add_arguments(ap)
@@ -453,6 +455,8 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
             write_rgb_exr(sky_file, analytic_clear_sky(512, elev))
         sky_ratio = None
         sky_desc = "analytic CIE standard clear sky (type 12)"
+    if (args.sky == "hosek" or args.sky_spectrum != "rgb") and args.time_of_day != "day":
+        raise SystemExit("--sky hosek / --sky-spectrum daylight are daytime skies; not supported with --time-of-day")
     sky_light = spectral_sky_light(args, sky_file, elev, out_dir, spd)
     if sky_light is not None:
         sky_file, sky_desc = sky_light["file"], sky_light["description"]
@@ -470,6 +474,10 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         e_dn, e_sky_h, e_ref = e_dn * k, e_sky_h * k, float(args.global_illuminance_lux)
     write_spd(spd / "sun.spd", wl, solar_direct_spectrum(wl, elev))
     haze = atmosphere.params_from_args(args)
+    if haze is not None and args.time_of_day != "day":
+        raise SystemExit(
+            "--haze is not supported with --time-of-day dusk/night yet (night reference illuminance has no medium model)"
+        )
     atm = None
     if haze is not None:
         atm = atmosphere.setup_scene(
@@ -538,10 +546,8 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
     if atm:
         L += atm["medium_lines"]
 
-    L += [
-        "",
-        "WorldBegin",
-        "",
+    L += ["", "WorldBegin", ""]
+    day_lights = [
         f"# Sun: elevation {elev:.2f} deg, azimuth {args.sun_azimuth:.1f} deg, {e_dn:.0f} lux direct-normal",
         'LightSource "distant" "spectrum L" "spd/sun.spd"',
         f'    "float illuminance" [{_f(e_dn)}]',
@@ -556,6 +562,13 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         "AttributeEnd",
         "",
     ]
+    nopts = night.resolve(args)
+    night_lighting = None
+    if args.time_of_day == "day":
+        L += day_lights
+    else:
+        natural, night_lighting = night.natural_light(args, out_dir, spd)
+        L += natural
 
     # ---- road surface
     road_tex = None if args.road == "plain" else asset(f"tex_{args.road}")
@@ -614,6 +627,10 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         'MakeNamedMaterial "sheet_black" "string type" "diffuse" "spectrum reflectance" "spd/sheeting_black.spd"',
         "",
     ]
+    if nopts["retroreflective"]:
+        L = night.replace_named_materials(L, night.retro_material_lines(spd, out_dir, wl))
+    if nopts["dark"]:
+        L = night.strip_normal_map(L)
     paved = [
         (Layout.median_l, Layout.right_paved, ROAD_Z0, ROAD_Z1),
         (Layout.opp_paved, Layout.median_l, ROAD_Z0, ROAD_Z1),
@@ -781,11 +798,40 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
                 "AttributeEnd",
             ]
             cars_meta.append(
-                {"id": inst, "model": model if ca else "proxy", "paint": paint, "lane": lane, "distance_m": z}
+                {
+                    "id": inst,
+                    "model": model if ca else "proxy",
+                    "paint": paint,
+                    "lane": lane,
+                    "distance_m": z,
+                    **night.car_geometry(
+                        info if ca else None,
+                        amanifest["assets"][model].get("length_m", 4.6),
+                        x,
+                        heading + yaw,
+                        (hv["length_m"], *variety._PROXY_WH[hv["cls"]]) if (hv := variety.HEAVY.get(model)) else None,
+                    ),
+                }
             )
 
     median_x = Layout.median_l + MEDIAN_W / 2 + LEFT_SHOULDER / 2 - 0.6
     L += variety.structures(var, out_dir, Layout, median_x, mesh, box, sign_legend, LANE_W)
+    night_lines, night_meta = night.scene_lights(
+        args,
+        nopts,
+        out_dir,
+        spd,
+        cars_meta,
+        eye,
+        median_x,
+        (0.0, Layout.right_edge),
+        (ROAD_Z0 + 8.0, 900.0),
+        lamp_heads=var.lamp_heads if var.lamp_posts else None,
+        lamp_spacing_m=var.lamp_spacing_m,
+        place=variety.place,
+    )
+    L += night_lines
+
     scene_path = out_dir / "highway.pbrt"
     scene_path.write_text("\n".join(L) + "\n")
 
@@ -879,8 +925,12 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
             "lights are at the top of the layer, road illuminance from a plane-parallel MC model.",
         ],
     }
+    night.update_manifest(manifest, nopts, night_lighting, night_meta)
     (out_dir / "highway_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
-    print(f"wrote {_rel(repo, scene_path)} (+ highway_manifest.json); horizontal illuminance {e_ref:.0f} lux")
+    print(
+        f"wrote {_rel(repo, scene_path)} (+ highway_manifest.json); horizontal illuminance "
+        f"{manifest['lighting']['reference_illuminance_lux']:.4g} lux"
+    )
     if fallbacks:
         print(f"warning: missing assets replaced by fallbacks: {fallbacks}", file=sys.stderr)
 
