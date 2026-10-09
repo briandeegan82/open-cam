@@ -1,0 +1,33 @@
+# Delta from config/sensor_models/default.yaml — 3-exposure sequential HDR (line-interleaved
+# / DOL-style), exposure ratios 1 : 1/16 : 1/256 of sensor.integration_time_s.
+# Illustrative parameters (not a datasheet).  Feed separately rendered exposure windows
+# with --hdr-capture-electrons exp1=short.npz ... (see docs/HDR_PIXELS.md) to obtain
+# motion / LED-flicker artefacts between captures.
+schema_version: 1
+sensor:
+  pixel_pitch_um: 3.0
+noise:
+  emva:
+    overall_system_gain_K_e_per_DN: 2.5
+    sigma_d_e: 2.0
+    black_level_DN: 64
+  adc:
+    bit_depth: 12
+    full_well_e: 10000
+  hdr:
+    enabled: true
+    architecture: multi_exposure
+    multi_exposure:
+      exposure_ratios: [1.0, 0.0625, 0.00390625]
+      inter_exposure_gap_s: 0.0
+      photodiode_full_well_e: 10000
+      readout: {K_e_per_DN: 2.5, sigma_e: 2.0}
+      capture_electrons_npz: {}   # e.g. {exp1: out/short.npz, exp2: out/vshort.npz}
+    merge: {method: snr_weighted, threshold_fraction: 0.9}
+    compand: {enabled: true, bit_depth: 12, knees: auto, segments: 12}
+model:
+  name: default_hdr_3exp
+  display_name: Default 3-exposure HDR (illustrative)
+validation:
+  datasheet:
+    enabled: false          # illustrative model, no datasheet

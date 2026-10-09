@@ -1,0 +1,35 @@
+# Example sensor-model delta for the generic CFA path (tools/cfa_mosaic.py, docs/CFA_NIR.md).
+# Copy into config/sensor_models/<name>.yaml and reference it from a camera recipe.
+# Everything here is opt-in: without cfa.layout the legacy 2x2 Bayer path runs unchanged.
+schema_version: 1
+model:
+  name: example_custom_cfa
+  display_name: Example custom 4x2 R/G/B/W CFA without IR-cut filter
+cfa:
+  # Any periodic NxM tile (rows of channel names) or a preset:
+  # RGGB, BGGR, GRBG, GBRG, RGBW, RGBW_4X4, RCCB, RCCC, RCCG, RYYCY, RGGCY, CMY, QUAD_BAYER.
+  layout:
+    - [R, G, B, G]
+    - [W, W, W, W]
+  # Per-channel spectral QE (wavelength_nm,qe CSV). Unlisted channels use cfa_mosaic.DEFAULT_CHANNEL_QE.
+  channels:
+    R: {qe_csv: spectra/QE/nir/QE_red_noircf.csv}
+    G: {qe_csv: spectra/QE/nir/QE_green_noircf.csv}
+    B: {qe_csv: spectra/QE/nir/QE_blue_noircf.csv}
+    W: {qe_csv: spectra/QE/nir/QE_mono_noircf.csv}
+  ircf: false            # no IR-cut filter: sensor.quantum_efficiency.ircf_csv is not applied
+  demosaic: gradient     # gradient | bilinear | false
+  binning: none          # none | charge | digital (2x2 same-colour sums, for Quad Bayer)
+  ccm: colorchecker_spectral   # or exr_reference, or an explicit C x 3 matrix
+  spatial_crosstalk:
+    enabled: true
+    sigma_pixels: 0.3
+    sigma_pixels_R: 0.45   # per source channel (longer wavelengths diffuse further)
+# Usage (spectral EXR, integrate_qe):
+#   venv/bin/python tools/apply_emva_noise.py --camera-model-config config/camera_recipes/default_rgbw.yaml \
+#     --linear-exr out/colorchecker_spectral.exr --scene-manifest-json scenes/generated/colorchecker_manifest.json
+# NIR (850 nm LED, no IRCF):
+#   PBRT_LAMBDA_MAX_NM=1100 PBRT_BUILD_DIR=third_party/pbrt-v4/build-nir tools/build_pbrt.sh
+#   venv/bin/python tools/build_colorchecker_scene.py --film spectral --illuminant spectra/illuminant/nir/LED_850nm.csv \
+#     --radiometric-light --lambda-max 1100 --spectral-lambda-max 1100 --pbrt-lambda-max 1100
+#   third_party/pbrt-v4/build-nir/pbrt scenes/generated/colorchecker.pbrt

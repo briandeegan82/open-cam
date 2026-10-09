@@ -182,10 +182,11 @@ def build_spatial_transmission_map(
     wavelength_nm: np.ndarray,
     qe_rgb: np.ndarray,
 ) -> tuple[np.ndarray, dict]:
-    """Build per-channel center-to-edge radial transmission maps in [0,1]."""
+    """Build per-channel center-to-edge radial transmission maps in [0,1] (one per QE row)."""
     enabled = bool(cfg.get("enabled", False))
+    nc = int(np.shape(qe_rgb)[0])
     if not enabled:
-        return np.ones((yres, xres, 3), dtype=np.float32), {
+        return np.ones((yres, xres, nc), dtype=np.float32), {
             "enabled": False,
             "mode": "off",
             "edge_factor": 1.0,
@@ -196,15 +197,13 @@ def build_spatial_transmission_map(
         raise ValueError('optics_transmittance_spatial.mode must be "radial_power"')
     edge_factor = float(cfg.get("edge_factor", 0.9))
     exponent = float(cfg.get("exponent", 2.0))
-    edge_rgb = np.full(3, float(np.clip(edge_factor, 0.0, 1.0)), dtype=np.float64)
+    edge_rgb = np.full(nc, float(np.clip(edge_factor, 0.0, 1.0)), dtype=np.float64)
     spectral_csv = cfg.get("spectral_edge_factors_csv")
     if spectral_csv:
         s_wl, s_v = read_csv_curve((repo / str(spectral_csv)).resolve())
         edge_lambda = np.clip(np.interp(wavelength_nm, s_wl, s_v, left=0.0, right=0.0), 0.0, 1.0)
         qe = np.asarray(qe_rgb, dtype=np.float64)
-        if qe.shape[0] != 3:
-            raise ValueError(f"expected QE stack [3,K], got {qe.shape}")
-        for c in range(3):
+        for c in range(nc):
             w = np.clip(qe[c], 0.0, None)
             sw = float(np.sum(w))
             if sw > 0.0:
@@ -212,7 +211,7 @@ def build_spatial_transmission_map(
         edge_source = "spectral_edge_factors_csv"
     else:
         edge_source = "scalar_edge_factor"
-    maps = np.stack([_radial_map(yres, xres, float(edge_rgb[c]), exponent) for c in range(3)], axis=2)
+    maps = np.stack([_radial_map(yres, xres, float(edge_rgb[c]), exponent) for c in range(nc)], axis=2)
     return maps, {
         "enabled": True,
         "mode": mode,
