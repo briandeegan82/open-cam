@@ -1,0 +1,5 @@
+schema_version: 1
+model:
+  name: default_hdr_dcg
+lens_model: default
+sensor_model: default_hdr_dcg

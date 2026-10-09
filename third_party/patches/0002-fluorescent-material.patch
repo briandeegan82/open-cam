@@ -1,0 +1,256 @@
+diff --git a/src/pbrt/base/material.h b/src/pbrt/base/material.h
+--- a/src/pbrt/base/material.h
++++ b/src/pbrt/base/material.h
+@@ -31,6 +31,7 @@ class SubsurfaceMaterial;
+ class ThinDielectricMaterial;
+ class MixMaterial;
+ class RetroreflectiveMaterial;
++class FluorescentMaterial;
+ 
+ // Material Definition
+ class Material
+@@ -38,7 +39,7 @@ class Material
+           CoatedDiffuseMaterial, CoatedConductorMaterial, ConductorMaterial,
+           DielectricMaterial, DiffuseMaterial, DiffuseTransmissionMaterial, HairMaterial,
+           MeasuredMaterial, SubsurfaceMaterial, ThinDielectricMaterial, MixMaterial,
+-          RetroreflectiveMaterial
++          RetroreflectiveMaterial, FluorescentMaterial
+ 
+           > {
+   public:
+diff --git a/src/pbrt/materials.h b/src/pbrt/materials.h
+--- a/src/pbrt/materials.h
++++ b/src/pbrt/materials.h
+@@ -535,6 +535,82 @@ class RetroreflectiveMaterial {
+     Float alpha0, width, q;
+ };
+ 
++// FluorescentMaterial Definition
++// Lambertian reflector plus a separable Donaldson (excitation/emission) reradiation
++// matrix M(lem, lex) = x(lex) e(lem) lex / lem for lex < lem (energy units), where
++// x = quantum yield * absorptance and e is the photon emission spectrum normalized to
++// unit area over [Lambda_min, Lambda_max]. GetBxDF() returns only the ordinary
++// (non-fluorescent) reflection; the wavelength-shifting part is applied by the
++// integrators (see ApplyFluorescence() in cpu/integrators.cpp). open-cam patch.
++class FluorescentMaterial {
++  public:
++    using BxDF = DiffuseBxDF;
++    using BSSRDF = void;
++
++    static const char *Name() { return "FluorescentMaterial"; }
++
++    PBRT_CPU_GPU
++    FloatTexture GetDisplacement() const { return displacement; }
++    PBRT_CPU_GPU
++    const Image *GetNormalMap() const { return normalMap; }
++
++    static FluorescentMaterial *Create(const TextureParameterDictionary &parameters,
++                                       Image *normalMap, const FileLoc *loc,
++                                       Allocator alloc);
++
++    template <typename TextureEvaluator>
++    PBRT_CPU_GPU void GetBSSRDF(TextureEvaluator texEval, MaterialEvalContext ctx,
++                                SampledWavelengths &lambda, void *) const {}
++
++    PBRT_CPU_GPU static constexpr bool HasSubsurfaceScattering() { return false; }
++
++    std::string ToString() const;
++
++    FluorescentMaterial(SpectrumTexture reflectance, Spectrum excitation,
++                        Spectrum emission, Float emissionScale, Float probability,
++                        FloatTexture displacement, Image *normalMap)
++        : normalMap(normalMap),
++          displacement(displacement),
++          reflectance(reflectance),
++          excitation(excitation),
++          emission(emission),
++          emissionScale(emissionScale),
++          probability(probability) {}
++
++    template <typename TextureEvaluator>
++    PBRT_CPU_GPU bool CanEvaluateTextures(TextureEvaluator texEval) const {
++        return texEval.CanEvaluate({}, {reflectance});
++    }
++
++    template <typename TextureEvaluator>
++    PBRT_CPU_GPU DiffuseBxDF GetBxDF(TextureEvaluator texEval, MaterialEvalContext ctx,
++                                     SampledWavelengths &lambda) const {
++        SampledSpectrum r = Clamp(texEval(reflectance, ctx, lambda), 0, 1);
++        return DiffuseBxDF(r);
++    }
++
++    PBRT_CPU_GPU Float FluorescenceProbability() const { return probability; }
++
++    // Per-lane Donaldson matrix value M(em[i], ex[i]) [nm^-1].
++    PBRT_CPU_GPU SampledSpectrum Donaldson(const SampledWavelengths &em,
++                                           const SampledWavelengths &ex) const {
++        SampledSpectrum m(0.f);
++        for (int i = 0; i < NSpectrumSamples; ++i)
++            if (ex[i] < em[i])
++                m[i] = Clamp(excitation(ex[i]), 0, 1) *
++                       std::max<Float>(0, emission(em[i])) * emissionScale * ex[i] /
++                       em[i];
++        return m;
++    }
++
++  private:
++    Image *normalMap;
++    FloatTexture displacement;
++    SpectrumTexture reflectance;
++    Spectrum excitation, emission;
++    Float emissionScale, probability;
++};
++
+ // ConductorMaterial Definition
+ class ConductorMaterial {
+   public:
+diff --git a/src/pbrt/materials.cpp b/src/pbrt/materials.cpp
+--- a/src/pbrt/materials.cpp
++++ b/src/pbrt/materials.cpp
+@@ -216,6 +216,48 @@ RetroreflectiveMaterial *RetroreflectiveMaterial::Create(
+                                                      displacement, normalMap);
+ }
+ 
++// FluorescentMaterial Method Definitions
++std::string FluorescentMaterial::ToString() const {
++    return StringPrintf("[ FluorescentMaterial displacement: %s normalMap: %s "
++                        "reflectance: %s excitation: %s emission: %s "
++                        "emissionScale: %f probability: %f ]",
++                        displacement,
++                        normalMap ? normalMap->ToString() : std::string("(nullptr)"),
++                        reflectance, excitation, emission, emissionScale, probability);
++}
++
++FluorescentMaterial *FluorescentMaterial::Create(
++    const TextureParameterDictionary &parameters, Image *normalMap, const FileLoc *loc,
++    Allocator alloc) {
++    SpectrumTexture reflectance = parameters.GetSpectrumTexture(
++        "reflectance", nullptr, SpectrumType::Albedo, alloc);
++    if (!reflectance)
++        reflectance = alloc.new_object<SpectrumConstantTexture>(
++            alloc.new_object<ConstantSpectrum>(0.5f));
++    // Quantum yield x absorptance of the fluorophore, as a function of excitation lambda.
++    Spectrum excitation =
++        parameters.GetOneSpectrum("excitation", nullptr, SpectrumType::Unbounded, alloc);
++    // Photon emission spectrum (shape only; normalized to unit area here).
++    Spectrum emission =
++        parameters.GetOneSpectrum("emission", nullptr, SpectrumType::Unbounded, alloc);
++    if (!excitation || !emission)
++        ErrorExit(loc, "\"fluorescent\" material requires \"excitation\" and "
++                       "\"emission\" spectra.");
++    Float area = 0;
++    for (Float l = Lambda_min; l <= Lambda_max; l += 1)
++        area += std::max<Float>(0, emission(l));
++    if (area <= 0)
++        ErrorExit(loc, "\"emission\" spectrum must be positive in [%f, %f] nm.",
++                  Lambda_min, Lambda_max);
++    Float probability = parameters.GetOneFloat("fluorescenceprobability", 0.5f);
++    if (!(probability > 0 && probability < 1))
++        ErrorExit(loc, "\"fluorescenceprobability\" must be in (0, 1).");
++    FloatTexture displacement = parameters.GetFloatTextureOrNull("displacement", alloc);
++    return alloc.new_object<FluorescentMaterial>(reflectance, excitation, emission,
++                                                 1 / area, probability, displacement,
++                                                 normalMap);
++}
++
+ // DiffuseMaterial Method Definitions
+ std::string DiffuseMaterial::ToString() const {
+     return StringPrintf(
+@@ -692,6 +734,8 @@ Material Material::Create(const std::string &name,
+         material = ConductorMaterial::Create(parameters, normalMap, loc, alloc);
+     else if (name == "measured")
+         material = MeasuredMaterial::Create(parameters, normalMap, loc, alloc);
++    else if (name == "fluorescent")
++        material = FluorescentMaterial::Create(parameters, normalMap, loc, alloc);
+     else if (name == "retroreflective")
+         material = RetroreflectiveMaterial::Create(parameters, normalMap, loc, alloc);
+     else if (name == "subsurface")
+diff --git a/src/pbrt/cpu/integrators.cpp b/src/pbrt/cpu/integrators.cpp
+--- a/src/pbrt/cpu/integrators.cpp
++++ b/src/pbrt/cpu/integrators.cpp
+@@ -616,6 +616,49 @@ STAT_PERCENT("Integrator/Zero-radiance paths", zeroRadiancePaths, totalPaths);
+ STAT_PERCENT("Integrator/Regularized BSDFs", regularizedBSDFs, totalBSDFs);
+ STAT_INT_DISTRIBUTION("Integrator/Path length", pathLength);
+ 
++// Fluorescent reradiation (open-cam patch). At a FluorescentMaterial hit, with
++// probability p_f the path continues through the reradiation channel: every lane i
++// keeps its film (emission) wavelength lem_i for accumulation, but the rest of the path
++// is traced at a new, uniformly sampled excitation wavelength lex_i, with throughput
++// weight M(lem_i, lex_i) / (pdf(lex_i) p_f) and a unit-albedo Lambertian lobe.
++// Otherwise the ordinary diffuse reflection is used with weight 1 / (1 - p_f).
++// The caller's film wavelengths are restored by FluorescenceLambdaGuard.
++struct FluorescenceLambdaGuard {
++    SampledWavelengths &lambda;
++    SampledWavelengths saved;
++    bool active = false;
++    ~FluorescenceLambdaGuard() {
++        if (!active)
++            return;
++        bool terminated = lambda.SecondaryTerminated();
++        lambda = saved;
++        if (terminated)
++            lambda.TerminateSecondary();
++    }
++};
++
++static void ApplyFluorescence(SurfaceInteraction &isect, BSDF &bsdf,
++                              SampledWavelengths &lambda, SampledSpectrum &beta,
++                              Sampler sampler, ScratchBuffer &scratchBuffer,
++                              FluorescenceLambdaGuard &guard) {
++    if (!isect.material || !isect.material.Is<FluorescentMaterial>())
++        return;
++    const FluorescentMaterial *fm = isect.material.Cast<FluorescentMaterial>();
++    Float pf = fm->FluorescenceProbability();
++    if (sampler.Get1D() >= pf) {
++        beta /= 1 - pf;
++        return;
++    }
++    SampledWavelengths ex = SampledWavelengths::SampleUniform(sampler.Get1D());
++    beta *= fm->Donaldson(lambda, ex) * ((Lambda_max - Lambda_min) / pf);
++    if (lambda.SecondaryTerminated())
++        ex.TerminateSecondary();
++    guard.active = true;
++    lambda = ex;
++    bsdf = BSDF(isect.shading.n, isect.shading.dpdu,
++                scratchBuffer.Alloc<DiffuseBxDF>(SampledSpectrum(1.f)));
++}
++
+ // PathIntegrator Method Definitions
+ PathIntegrator::PathIntegrator(int maxDepth, Camera camera, Sampler sampler,
+                                Primitive aggregate, std::vector<Light> lights,
+@@ -635,6 +678,7 @@ SampledSpectrum PathIntegrator::Li(RayDifferential ray, SampledWavelengths &lamb
+     Float p_b, etaScale = 1;
+     bool specularBounce = false, anyNonSpecularBounces = false;
+     LightSampleContext prevIntrCtx;
++    FluorescenceLambdaGuard fluorescenceGuard{lambda, lambda};
+ 
+     // Sample path from camera and accumulate radiance estimate
+     while (true) {
+@@ -708,6 +752,9 @@ SampledSpectrum PathIntegrator::Li(RayDifferential ray, SampledWavelengths &lamb
+             *visibleSurf = VisibleSurface(isect, albedo, lambda);
+         }
+ 
++        ApplyFluorescence(isect, bsdf, lambda, beta, sampler, scratchBuffer,
++                          fluorescenceGuard);
++
+         // Possibly regularize the BSDF
+         if (regularize && anyNonSpecularBounces) {
+             ++regularizedBSDFs;
+@@ -958,6 +1005,7 @@ SampledSpectrum VolPathIntegrator::Li(RayDifferential ray, SampledWavelengths &l
+     bool specularBounce = false, anyNonSpecularBounces = false;
+     int depth = 0;
+     Float etaScale = 1;
++    FluorescenceLambdaGuard fluorescenceGuard{lambda, lambda};
+ 
+     LightSampleContext prevIntrContext;
+ 
+@@ -1142,6 +1190,9 @@ SampledSpectrum VolPathIntegrator::Li(RayDifferential ray, SampledWavelengths &l
+             *visibleSurf = VisibleSurface(isect, albedo, lambda);
+         }
+ 
++        ApplyFluorescence(isect, bsdf, lambda, beta, sampler, scratchBuffer,
++                          fluorescenceGuard);
++
+         // Terminate path if maximum depth reached
+         if (depth++ >= maxDepth)
+             return L;

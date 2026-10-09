@@ -9,6 +9,7 @@ import json
 import sys
 from pathlib import Path
 
+import hdr_pixel
 import numpy as np
 import yaml
 from camera_model import (
@@ -984,6 +985,12 @@ def main() -> None:
     )
     ap.add_argument("--electrons-npz", type=Path, default=None, help="Optional precomputed electrons image (HxWx3).")
     ap.add_argument(
+        "--hdr-capture-electrons",
+        action="append",
+        metavar="NAME=PATH",
+        help="Per-capture electrons NPZ for noise.hdr (e.g. exp1=short.npz); repeatable.",
+    )
+    ap.add_argument(
         "--linear-exr",
         type=Path,
         default=None,
@@ -1550,10 +1557,43 @@ def main() -> None:
         # property of the converter, identical on every frame it ever produces.
         dn_noisy = apply_adc_dnl(dn_noisy, adc_dnl_table(max_dn, adc_dnl_std_lsb, spatial_rng), max_dn)
 
+    hdr_run = None
+    if hdr_pixel.hdr_enabled(cfg):
+
+        def _hdr_capture(p: Path) -> np.ndarray:
+            e = load_electrons_npz(p.resolve())
+            e = (apply_channel_crosstalk(e, crosstalk_matrix) if crosstalk_enabled else e) * exposure_scale
+            return (
+                apply_cfa_spatial_crosstalk(bayer_sample_rgb(e, bayer_pat), spatial_xtalk_cfg, bayer_pat)
+                if bayer_on
+                else e
+            )
+
+        hdr_base = {"K_e_per_DN": K_e_per_DN, "sigma_d_e": sigma_d_e, "full_well_e": full_well_e, "black_DN": black_dn}
+        hdr_base |= {"bit_depth": bit_depth, "t_int_s": t_int_s, "dark_current_e_per_s": dark_current_e_per_s}
+        hdr_base |= {"dark_temp_scale": dark_temp_scale, "prnu_std": prnu_std, "dsnu_std_e": dsnu_std_e}
+        hdr_run = hdr_pixel.run_hdr(
+            cfg,
+            hdr_base | {"temperature_c": dark_temp_c},
+            signal_e,
+            seed=args.seed,
+            spatial_seed=_spatial_seed,
+            raw_out=raw_out,
+            bayer_pattern=bayer_pat if bayer_on else None,
+            use_poisson=use_poisson,
+            capture_paths=hdr_pixel.parse_capture_args(args.hdr_capture_electrons),
+            capture_loader=_hdr_capture,
+            repo=repo,
+        )
+        dn_clean, dn_noisy, total_e = hdr_run.dn_clean, hdr_run.dn_noisy, hdr_run.hdr_e
+        bit_depth, black_dn = hdr_run.preview_bit_depth, 0.0
+
     if bayer_on:
         raw_u16 = np.rint(dn_noisy).astype(np.uint16)
     else:
         raw_u16 = np.rint(np.mean(dn_noisy, axis=2)).astype(np.uint16)
+    if hdr_run is not None:
+        raw_u16 = hdr_run.raw_u16
     write_raw16(raw_out, raw_u16)
 
     wb_gains = np.array([1.0, 1.0, 1.0], dtype=np.float32)
@@ -1704,6 +1744,8 @@ def main() -> None:
         stats["total_e_mean_rgb"] = np.mean(total_e, axis=(0, 1)).tolist()
         stats["dn_noisy_min_rgb"] = np.min(dn_noisy, axis=(0, 1)).tolist()
         stats["dn_noisy_max_rgb"] = np.max(dn_noisy, axis=(0, 1)).tolist()
+    if hdr_run is not None:
+        stats["hdr"] = hdr_run.stats
     (png_dir / "run_stats.json").write_text(json.dumps(stats, indent=2) + "\n")
 
     print(f"Wrote RAW16: {raw_out}")

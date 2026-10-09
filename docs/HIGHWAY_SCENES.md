@@ -405,6 +405,61 @@ the glTF accessor bounds (some exports contain corrupt ones), and the builder sc
 to its real length (robust bounding box) and maps materials by name: paint -> spectral
 basecoat, glass -> thin dielectric, tyres -> rubber, others -> the authors' textures/colours.
 
+## Measured / spectral materials (opt-in)
+
+Three independent flags in `tools/highway_materials.py`; all default off, and with them off the
+generated scene is byte-identical to before (`tests/test_highway_materials.py::DefaultOffTest`).
+
+```bash
+venv/bin/python tools/highway_materials.py fetch   # optional prefetch into the gitignored scenes/assets/measured/
+venv/bin/python tools/build_highway_scene.py --car-paint measured --spectral-library usgs --fluorescent-sign yellow-green
+venv/bin/python tools/validate_measured_materials.py   # furnace + fluorescence + swatch checks -> out/measured_materials/
+```
+
+| flag | what changes | data source (licence) |
+|---|---|---|
+| `--car-paint measured` | basecoat of the prepared cars and proxy cars -> pbrt-v4 `measured` material: blue -> `ilm_solo_m_68`, silver -> `ilm_l3_37_metallic`, darkgreen -> `ilm_l3_37_dark_green`, white -> `cm_white`, red -> `vch_dragon_eye_red`; black / gray keep the analytic coat | RGL material database, Dupuy & Jakob 2018, ACM TOG 37(6) 274, doi:10.1145/3272127.3275059 (every entry CC0 1.0); `*_spec.bsdf`, sha256-pinned, fetched at build time and copied into `<out>/measured/` |
+| `--spectral-library usgs` | `asphalt_aged.spd` (also used by road wear), `concrete.spd`, `galvanized.spd` -> measured spectra; car-asset `rgb eta/k` conductors -> Cr optical constants; near-neutral dark RGB trim (max <= 0.12) -> black ABS spectral shape scaled to the asset's luminance | USGS Spectral Library v7, Kokaly et al. 2017, USGS DS 1035, doi:10.5066/F7RR1WDJ (public domain): Asphalt GDS376 (black road, old), Concrete GDS375, Galvanized sheet metal GDS334, Plastic ABS GDS341; Cr: Rakic et al. 1998, Appl. Opt. 37, 5271 (refractiveindex.info, CC0) |
+| `--fluorescent-sign yellow-green\|orange` | adds a 0.9 m plain diamond on the right verge (z = 95 m) with the patched `fluorescent` material | dye spectra are **fitted, not measured** (see below) |
+
+**Fluorescence.** `third_party/patches/0002-fluorescent-material.patch` adds a `fluorescent`
+material: Lambertian reflectance R plus a separable Donaldson (excitation/emission) matrix
+\(M(\lambda_{em},\lambda_{ex}) = x(\lambda_{ex})\,e(\lambda_{em})\,\lambda_{ex}/\lambda_{em}\) for
+\(\lambda_{ex}<\lambda_{em}\) (x = quantum yield x absorptance, e = unit-area photon emission
+spectrum; the \(\lambda_{ex}/\lambda_{em}\) factor converts photon to energy yield). The path/volpath
+integrators pick the reradiation branch with probability `fluorescenceprobability` (default 0.5),
+sample the excitation wavelength uniformly and continue the path at the excitation wavelengths
+(Lambertian reradiation) - real wavelength-shifting transport, not a colour boost. The ASTM D4956
+Type XI dye spectra are a logistic absorption edge + Gaussian emission band fitted so the
+bispectral D65 colour sits at the centroid of the 23 CFR 655 Subpart F Appendix Table 3 colour box
+with the Table 3a typical fluorescence luminance factor (yellow-green: xy (0.411, 0.548), Y 92.5,
+Y_F 20.0; orange: xy (0.590, 0.381), Y 53.0, Y_F 15.0). ASTM E991 bispectral measurements of real
+sheeting were not available. Not modelled: retroreflection of the fluorescent sheeting at night,
+legends on the fluorescent sign, polarisation, fluorescence in the bidirectional (BDPT/MLT) and GPU
+integrators, UV below 360 nm (pbrt film range) although daylight UV excites real sheeting.
+
+**Validation** (`tools/validate_measured_materials.py`, 64 spp):
+
+- White furnace (unit uniform environment, one bounce, theta_o < 76 deg): max directional albedo
+  Spectralon 0.989 (mean 0.950 vs ~0.99 nominal for SRS-99), `ilm_l3_37_metallic` 0.665,
+  `irid_flake_paint1` 0.227, `ilm_solo_m_68` 0.101; `cm_white` reaches **1.078** - the RGL data
+  are not exactly energy conserving and pbrt does not enforce it.
+- Fluorescent sheet vs Lambertian white, D65 at 0/0: per-bucket total radiance factor matches the
+  analytic bispectral value to 0.008 (yellow-green, peak 1.17) and 0.023 (orange, peak 3.10), path
+  and volpath identical; both rendered colours lie in their Type XI boxes.
+- Swatches (sphere mean, D65 sun + sky, CIEDE2000 analytic vs measured): white 11.6, silver 15.3,
+  blue 15.1, darkgreen 11.1, red 2.4; fluorescent vs reflected part only: yellow-green 6.9,
+  orange 15.7. The measured paints are different physical paints from the analytic curves, so
+  these are differences, not errors.
+
+Approximations: the RGL paints are a stand-in palette (ILM film-prop paints and TeckWrap vinyl
+films for white/red), not measured OEM automotive paints; RGL BRDFs are isotropic and tabulated
+to ~80 deg incidence; heavy GLB vehicles (trucks/buses) keep their textured analytic paint. No
+measured asphalt BRDF exists in RGL, so the asphalt keeps the analytic coated-diffuse lobe
+(roughness 0.35, and the road-wear roughness model) with only the spectral albedo measured; the
+lobe is not fitted to CIE 144 road reflection tables. USGS spectra are lab bidirectional
+(ASD, 350-2500 nm) reflectances of single samples.
+
 ## Known approximations
 
 - Daytime markings use a glass-bead-like rough clear coat over a spectral binder and sign
@@ -416,7 +471,7 @@ basecoat, glass -> thin dielectric, tyres -> rubber, others -> the authors' text
 - Haze: one HG phase function per medium (Rayleigh folded into g), horizontally uniform
   medium, flat Earth for the medium (the backdrop has curvature); without `--haze` the horizon
   is sharp and aerial perspective comes only from the sky map.
-- Asset car materials other than paint/glass/tyres are the authors' RGB values.
+- Asset car materials other than paint/glass/tyres are the authors' RGB values unless `--spectral-library usgs` (chrome and near-black trim only, see below); sign sheeting is diffuse by day unless `--fluorescent-sign`.
 
 ## In-car camera effects
 
