@@ -286,6 +286,7 @@ venv/bin/python tools/munsell_mat_to_sqlite.py --summary
 
 ## Known Limitations
 
+- Highway measured materials (`--car-paint measured`, `--spectral-library usgs`, `--fluorescent-sign`) are opt-in; RGL paints are a stand-in palette, asphalt BRDF is analytic (measured albedo only), and the Type XI fluorescent dye spectra are fitted to 23 CFR 655 colour limits, not measured (see docs/HIGHWAY_SCENES.md).
 - `pbrt_exr` sensor-forward mode expects multispectral EXR and currently supports `photon_counting` calibration mode.
 - `cfa.demosaic` implements bilinear and Malvar-He-Cutler reconstruction.
 - Post-PSF is a simple Gaussian/stray-light approximation, not a full chromatic lens aberration model.
