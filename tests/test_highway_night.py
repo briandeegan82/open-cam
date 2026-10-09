@@ -151,6 +151,10 @@ class TestBuilderNight(unittest.TestCase):
             self.assertGreater(lit["artificial"]["streetlights"]["poles"], 0)
             self.assertIn("retroreflection", m)
 
+    def test_haze_rejected_at_night(self) -> None:
+        with tempfile.TemporaryDirectory() as td, self.assertRaises(SystemExit):
+            build_without_assets(Path(td), "--time-of-day", "night", "--haze", "fog")
+
     def test_dusk_moon_and_options(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             m = build_without_assets(Path(td), "--time-of-day", "dusk")
