@@ -1,11 +1,12 @@
 schema_version: 1
 # Compact-class wide-angle lens: f/2.8, 22 mm focal length (Nakamura wide-angle design).
 # Suitable for: compact/bridge cameras (~2.4 µm pixel pitch).
-# Aperture diameter = 22 mm / 2.8 ≈ 7.9 mm.
+# Stop diameter 8.708 mm traces to f/2.80 (tools/lens_prescription.py); 22/2.8 = 7.9 mm
+# would give f/3.06 because the entrance pupil is smaller than the stop.
 lens:
   camera: realistic
   realistic_lensfile: config/lenses/wide_22mm.dat
-  realistic_aperture_diameter_mm: 7.9
+  realistic_aperture_diameter_mm: 8.708
   realistic_focus_distance: 1.0
   focal_length_mm: 22.0  # wide_22mm.dat image-space focal length
   post_psf:

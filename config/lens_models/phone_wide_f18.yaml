@@ -1,7 +1,7 @@
 schema_version: 1
-# Phone-class wide-angle lens: f/2.51, 22 mm focal length (Nakamura wide-angle design).
+# Phone-class wide-angle lens: f/2.79 traced (nominal 22/8.756 = f/2.51), 22 mm focal length (Nakamura wide-angle design).
 # Suitable for: smartphone cameras (~1.0–1.4 µm pixel pitch).
-# NOTE: wide_22mm.dat aperture stop is 8.756 mm diameter (f/2.51 at 22 mm).
+# NOTE: wide_22mm.dat aperture stop is 8.756 mm diameter; traced on-axis it gathers light like f/2.79.
 # Requesting 12.2 mm (f/1.8) causes PBRT to silently clamp the aperture, producing
 # incorrect vignetting and DOF.  Use 8.756 mm to match the physical prescription.
 # A true f/1.8 simulation requires a different lens prescription.
@@ -10,7 +10,7 @@ lens:
   realistic_lensfile: config/lenses/wide_22mm.dat
   realistic_aperture_diameter_mm: 8.756   # physical maximum of wide_22mm.dat aperture stop
   realistic_focus_distance: 1.0
-  focal_length_mm: 22.0  # wide_22mm.dat image-space focal length → effective f/2.51
+  focal_length_mm: 22.0  # wide_22mm.dat image-space focal length
   post_psf:
     enabled: false
     mode: chromatic_gaussian
