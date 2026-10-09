@@ -290,6 +290,7 @@ venv/bin/python tools/munsell_mat_to_sqlite.py --summary
 - `cfa.demosaic` implements bilinear and Malvar-He-Cutler reconstruction.
 - Post-PSF is a simple Gaussian/stray-light approximation, not a full chromatic lens aberration model.
 - PBRT spectral sampling remains Monte Carlo based; use validation and repeated runs for sensitive comparisons.
+- HDR pixel models (`noise.hdr`: DCG, split pixel, LOFIC, multi-exposure; opt-in) use deterministic-threshold SNR theory and omit row/column FPN, 1/f noise, blooming and ADC INL/DNL per capture; split-pixel SPD offset/crosstalk and LOFIC soft-knee effects are not modelled. Example HDR sensor models are illustrative, not datasheets. See [docs/HDR_PIXELS.md](docs/HDR_PIXELS.md).
 
 ## Troubleshooting
 

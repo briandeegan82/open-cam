@@ -111,13 +111,15 @@ def render(
     jobs: int = 1,
     flicker: bool = True,
     keep: bool = False,
+    exposure_override: dict | None = None,
 ) -> dict:
     manifest = json.loads((scene_dir / "highway_manifest.json").read_text())
     if "exposure" not in manifest:
         raise ValueError(f"{scene_dir}: manifest has no exposure (build with --exposure-s)")
     xres, yres = int(manifest["film"]["xresolution"]), int(manifest["film"]["yresolution"])
     emitters = manifest.get("emitters", [])
-    slices = plan_slices(manifest["exposure"], emitters, yres, bands, spp, flicker)
+    exposure = {**manifest["exposure"], **(exposure_override or {})}
+    slices = plan_slices(exposure, emitters, yres, bands, spp, flicker)
     scene = (scene_dir / "highway.pbrt").read_text()
     work = scene_dir / "slices"
     work.mkdir(exist_ok=True)
@@ -179,6 +181,8 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--no-flicker", action="store_true", help="Use the frame-averaged emitter levels instead.")
     ap.add_argument("--keep", action="store_true", help="Keep the per-slice EXRs in <scene_dir>/slices.")
     ap.add_argument("--out", type=Path, default=None, help="default: the scene's film filename")
+    ap.add_argument("--shutter-open-s", type=float, default=None, help="Override the manifest exposure start (s).")
+    ap.add_argument("--integration-time-s", type=float, default=None, help="Override the manifest integration time.")
     args = ap.parse_args(argv)
     sd = args.scene_dir.resolve()
     out = args.out
@@ -194,6 +198,11 @@ def main(argv: list[str] | None = None) -> None:
         jobs=args.jobs,
         flicker=not args.no_flicker,
         keep=args.keep,
+        exposure_override={
+            k: v
+            for k, v in (("shutter_open_s", args.shutter_open_s), ("integration_time_s", args.integration_time_s))
+            if v is not None
+        },
     )
     print(f"wrote {info['output']}: {info['slices']} slices in {info['bands']} bands, {info['wall_time_s']:.1f} s")
 

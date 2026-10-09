@@ -1,0 +1,41 @@
+# Delta from config/sensor_models/default.yaml — split-pixel (large + small photodiode) HDR.
+# Illustrative parameters (not a datasheet).  The small photodiode (SPD) has 1/40 of the
+# large photodiode (LPD) sensitivity, its own full well, read noise, PRNU, DSNU and dark
+# current.  sensitivity_ratio_rgb: [r, g, b] may override the ratio per CFA channel when
+# measured data justify it (default: achromatic ratio, same CFA filter on both PDs).
+schema_version: 1
+sensor:
+  pixel_pitch_um: 3.0
+noise:
+  emva:                       # single-exposure base = the LPD path
+    overall_system_gain_K_e_per_DN: 1.5
+    sigma_d_e: 1.5
+    black_level_DN: 64
+  adc:
+    bit_depth: 12
+    full_well_e: 6000
+  hdr:
+    enabled: true
+    architecture: split_pixel
+    split_pixel:
+      large:
+        full_well_e: 6000
+        prnu_std_fraction: 0.01
+        dsnu_std_e: 0.3
+        dark_current_e_per_s: 0.15
+        readouts: {lpd: {K_e_per_DN: 1.5, sigma_e: 1.5}}
+      small:
+        sensitivity_ratio: 0.025
+        full_well_e: 10000
+        prnu_std_fraction: 0.02
+        dsnu_std_e: 0.5
+        dark_current_e_per_s: 0.5
+        readouts: {spd: {K_e_per_DN: 2.5, sigma_e: 3.0}}
+    merge: {method: snr_weighted, threshold_fraction: 0.9}
+    compand: {enabled: true, bit_depth: 12, knees: auto, segments: 12}
+model:
+  name: default_hdr_split_pixel
+  display_name: Default split-pixel HDR (illustrative)
+validation:
+  datasheet:
+    enabled: false          # illustrative model, no datasheet
