@@ -56,7 +56,7 @@ class TestAssetManifest(unittest.TestCase):
             for f in a.get("files", []):
                 self.assertTrue(f["url"].startswith("https://"), aid)
         kinds = {a["kind"] for a in m["assets"].values()}
-        self.assertEqual(kinds, {"hdri", "texture", "car_pbrt", "gltf"})
+        self.assertEqual(kinds, {"hdri", "texture", "car_pbrt", "gltf", "glb"})
         for model in hw.CAR_MODELS:
             self.assertGreater(m["assets"][model]["length_m"], 3.5)
 
