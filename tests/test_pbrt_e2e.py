@@ -7,6 +7,7 @@ Skipped when the pbrt binary is missing (set ``OPENCAM_PBRT`` to override the pa
 from __future__ import annotations
 
 import json
+import math
 import os
 import subprocess
 import sys
@@ -183,7 +184,8 @@ class TestPbrtHighwayHaze(unittest.TestCase):
         cmd += ["--asset-manifest", str(tmp / "assets.yaml"), "--allow-missing-assets", *haze]
         subprocess.run(cmd, check=True, capture_output=True)
         txt = (scene / "highway.pbrt").read_text()
-        head = txt[: txt.index("AttributeEnd", txt.index('LightSource "infinite"')) + len("AttributeEnd")]
+        # natural lights only (sun/sky, or twilight sky + moon + moonlit sky); lamps come later
+        head = txt[: txt.index("AttributeEnd", txt.rindex('LightSource "infinite"')) + len("AttributeEnd")]
         exr = tmp / f"{name}.exr"
         head = re.sub(r"^LookAt .*$", "LookAt 0 0.2 0  0 0 0.12  0 1 0", head, flags=re.M)
         head = re.sub(r"^Camera .*$", 'Camera "perspective" "float fov" [20]', head, flags=re.M)
@@ -209,6 +211,22 @@ class TestPbrtHighwayHaze(unittest.TestCase):
             l_clear, plain = self._probe(tmp, "plain")
             for preset in ("clear", "hazy", "mist", "fog"):
                 l_haze, haze = self._probe(tmp, preset, "--haze", preset)
+                rendered = l_haze / l_clear
+                expected = (
+                    haze["lighting"]["reference_illuminance_lux"] / plain["lighting"]["reference_illuminance_lux"]
+                )
+                with self.subTest(preset=preset):
+                    self.assertLess(expected, 0.97)
+                    self.assertAlmostEqual(rendered, expected, delta=0.05 * expected)
+
+    def test_dusk_road_illuminance_matches_manifest(self) -> None:
+        """Dusk + moon under haze: multi-source MC reference (tools/highway_atmosphere.py) vs pbrt."""
+        dusk = ("--time-of-day", "dusk", "--moon-phase-deg", "30", "--headlamps", "off", "--streetlights", "none")
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            l_clear, plain = self._probe(tmp, "plain", *dusk)
+            for preset in ("mist", "fog"):
+                l_haze, haze = self._probe(tmp, preset, *dusk, "--haze", preset)
                 rendered = l_haze / l_clear
                 expected = (
                     haze["lighting"]["reference_illuminance_lux"] / plain["lighting"]["reference_illuminance_lux"]
@@ -326,3 +344,49 @@ class TestPbrtHighwaySmoke(unittest.TestCase):
                 outs.append(np.load(out)["electrons_rgb"])
             np.testing.assert_allclose(outs[0], outs[1])  # manifest exposure is the default integration time
             self.assertGreater(float(outs[0].mean()), 0.0)
+
+
+@unittest.skipUnless(PBRT.is_file(), f"pbrt binary not built ({PBRT}); see docs/BUILD_PBRT.txt")
+class TestPbrtWetCoating(unittest.TestCase):
+    """pbrt coateddiffuse (eta 1.333) reproduces the layered wet-road BRDF of highway_wet (q0 calibration)."""
+
+    def _render(self, tmp: Path, name: str, material: str) -> float:
+        from highway_sky import LUMA, read_rgb_exr
+
+        exr = tmp / f"{name}.exr"
+        w = 20.0
+        (tmp / f"{name}.pbrt").write_text(
+            "LookAt 0 1 -1  0 0 0  0 1 0\n"  # viewed at 45 deg, lit at normal incidence (off-specular)
+            'Camera "perspective" "float fov" [2]\n'
+            'Sampler "independent" "integer pixelsamples" [1024]\n'
+            f'Film "rgb" "integer xresolution" [8] "integer yresolution" [8] "string filename" ["{exr}"]\n'
+            'Integrator "path" "integer maxdepth" [5]\n'
+            "WorldBegin\n"
+            'LightSource "distant" "point3 from" [0 1 0] "point3 to" [0 0 0] "float illuminance" [1]\n'
+            f"{material}\n"
+            f'Shape "trianglemesh" "point3 P" [{-w} 0 {-w} {w} 0 {-w} {-w} 0 {w} {w} 0 {w}]'
+            ' "integer indices" [0 2 1 2 3 1]\n'
+        )
+        subprocess.run([str(PBRT), "--quiet", "--seed", "1", str(tmp / f"{name}.pbrt")], check=True)
+        return float((read_rgb_exr(exr) @ LUMA).mean())
+
+    def test_wet_body_brdf_vs_lekner_dorf(self) -> None:
+        import highway_wet as wet
+
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            for a in (0.1, 0.3):
+                lamb = self._render(tmp, f"lamb{a}", f'Material "diffuse" "spectrum reflectance" [300 {a} 900 {a}]')
+                for rough, tol in ((0.0, 0.01), (0.05, 0.05)):
+                    coat = self._render(
+                        tmp,
+                        f"wet{a}_{rough}",
+                        f'Material "coateddiffuse" "spectrum reflectance" [300 {a} 900 {a}] '
+                        f'"float roughness" [{rough}] "float eta" [{wet.N_WATER}] "float thickness" [{wet.THICKNESS}]',
+                    )
+                    # smooth: Lekner-Dorf body only; rough: + GGX water specular (alpha = sqrt(roughness))
+                    q = wet.luminance_coefficient(a, wet.N_WATER, max(rough, 1e-12), 1.0, math.sqrt(0.5), 1.0)
+                    expected = math.pi * float(q) / a
+                    print(f"wet coating a={a} roughness={rough}: pbrt {coat / lamb:.4f} analytic {expected:.4f}")
+                    with self.subTest(albedo=a, roughness=rough):
+                        self.assertAlmostEqual(coat / lamb, expected, delta=tol * expected)

@@ -270,10 +270,95 @@ light-pollution dome); lamp lenses are Lambertian and carry a fixed flux fractio
 apparent luminance is lower than real optics (no glare/flare); the asphalt normal map is
 dropped when dark (normal mapping has no masking/shadowing and speckles under grazing
 headlamp light; re-checked after the PNG normal-map fix: keeping it still raises the road's
-pixel-to-pixel deviation by ~50 % at 512 spp and darkens the headlamp-lit road by ~8 %); sign/marking retroreflection is isotropic in azimuth and has no wet-road
-or dew behaviour.
-`--haze` cannot be combined with dusk/night yet: the night reference illuminance has no
-medium model, so the builder refuses the combination rather than write a wrong manifest.
+pixel-to-pixel deviation by ~50 % at 512 spp and darkens the headlamp-lit road by ~8 %); sign/marking retroreflection is isotropic in azimuth and has no dew behaviour (wet markings:
+see [Wet road](#wet-road-puddles-and-vehicle-spray-tools-highway_wetpy)).
+`--haze` works at dusk/night too: the natural sources (twilight/night sky, moon, moonlit sky)
+are put at the top of the medium and the manifest's reference illuminance is the MC road
+illuminance under the medium (see "Haze" below); vehicle lamps and luminaires sit inside the
+medium and pbrt's `volpath` attenuates and scatters them (glow/veiling around lamps).
+
+## Wet road, puddles and vehicle spray (`tools/highway_wet.py`)
+
+Opt-in; the defaults (`--road-wetness dry`, no `--puddles`, no `--spray`) write a byte-identical
+scene (`TestBuilderWet.test_dry_default_unchanged`).
+
+```bash
+venv/bin/python tools/build_highway_scene.py --road-wetness wet --puddles --spray               # day
+venv/bin/python tools/build_highway_scene.py --time-of-day night --road-wetness wet --puddles \
+    --spray --haze mist                                                                       # night
+venv/bin/python tools/build_highway_scene.py --time-of-day night --road-wetness flooded --wet-marking-rl 50
+```
+
+**Wet asphalt** (`damp|wet|flooded`). Every road material (asphalt / wear tiles / sealant /
+markings) becomes a pbrt `coateddiffuse` with a water interface (`eta` 1.333) over the dry
+spectral body:
+
+- *Darkening* — Lekner & Dorf, "Why some things are darker when wet", Appl. Opt. 27, 1278
+  (1988), doi:10.1364/AO.27.001278: light refracted into the water film is diffusely reflected by
+  the porous body (albedo a) and partly trapped by total internal reflection; the wet body
+  albedo is a_w = (1−r_e)(1−r_i) a / (1−r_i a) with the hemispherical Fresnel reflectances of
+  water r_e = 0.066 (outside) and r_i = 1 − (1−r_e)/n² = 0.475 (inside). Dark asphalt (a ≈ 0.1)
+  falls to ≈ 0.52 a (the paper's "about half"). The coating in pbrt already applies the
+  (1−r_e)/(1−r_i a) part with water's n, so the builder writes `spd/wet_<name>.spd` with the dry
+  spectrum transformed per wavelength (dry clear coat, `eta` 1.5, removed by inversion) —
+  spectral, not RGB. The road texture maps modulate this spectral scale linearly; that is
+  exact at the texel mean and within ±8 % for texels at ×0.4/×1.6 of it.
+- *Specular water surface* — microfacet roughness by level (damp 0.15, wet 0.05, flooded 0.02)
+  chosen so the luminance coefficient q integrated to the CIE average Q0 (CIE 47-1979 "Road
+  lighting for wet conditions"; R/W tables as in CIE 144:2001) lands in the CIE wet classes;
+  the asphalt normal map is dropped for wet/flooded (water fills the texture).
+
+| level | roughness | model Q0 | CIE reference Q0 |
+|---|---|---|---|
+| dry (existing material) | – | 0.058 | R2/R3 0.07, R1 0.10 |
+| damp | 0.15 | 0.074 | (< W1 0.11, partly dry) |
+| wet | 0.05 | 0.142 | W2 0.15 (W1 0.11–W4 0.25) |
+| flooded | 0.02 | 0.245 | W4 0.25 |
+
+Q0 here is the CIE average over the road-lighting solid angle (β 0–180°, tan γ ≤ 12) at an
+observation angle of 1°, computed analytically (`highway_wet.q0`, Lekner–Dorf body + GGX
+water specular); `TestPbrtWetCoating` renders a flat plate (normal incidence, 45° view)
+with pbrt's stochastic `coateddiffuse` against a Lambertian plate of the same albedo: with a
+smooth water interface pbrt reproduces the Lekner–Dorf body BRDF to 0.1 % (a = 0.1: 0.5624 vs
+0.5626; a = 0.3: 0.6244 vs 0.6249); with the wet roughness 0.05 it is 0.9 % / 3.7 % below the
+analytic body + GGX model used for Q0 (0.6576 vs 0.6636; 0.6345 vs 0.6586 — pbrt's rough
+interface also changes the light trapped in the film). The wet coatings use `"float thickness"
+1e-4`: pbrt's `LayeredBxDF` attenuates by exp(−thickness/|cos θ|) even with zero medium albedo,
+and the default 0.01 darkened the body by up to 6 %.
+
+**Puddles** (`--puddles`, wet/flooded, needs `--road-wear` ≠ none). Water collects where the
+rut-depth proxy — the wheel-path map of `tools/highway_road_wear.py`, normalised and modulated
+by a 6 m longitudinal unevenness — exceeds a level (wet 0.8, flooded 0.6): ≈1 % (wet) and a few
+% (flooded) of the road area, concentrated in the wheel paths. Puddles are a smooth water
+surface (roughness 0) over the wet body (pbrt `mix` with the puddle mask); the road geometry
+stays flat (no depressed water surface, no waves/rain ripples).
+
+**Wet markings** (night / `--retroreflective on`). The retroreflective paint's R_L is replaced
+by EN 1436:2018 wet classes: wet → RW2 35 mcd·m⁻²·lx⁻¹ (white) / RW1 25 (yellow), the wet-recovery
+condition measured by ASTM E2177; flooded → RR1 25 (continuous wetting, ASTM E2176);
+`--wet-marking-rl` overrides. Dry 300/200 → wet 35/25 is ≈ 12 % of dry, consistent with FHWA
+(FHWA-HRT-15-062 and the wet-retroreflectivity studies cited there) reporting wet R_L of
+standard paint/beads at a small fraction of dry. Sign sheeting keeps its dry R_A.
+
+**Spray** (`--spray`, wet/flooded). A spray medium behind every vehicle (width + 0.6 m,
+height ≤ 2.5 m, length 10 m + speed/6 trimmed before the following car), purely scattering,
+Henyey–Greenstein g = 0.85 (drops 0.1–0.4 mm ≫ λ: forward-peaked, near-unit albedo; cf. Hansen
+& Travis 1974). Peak extinction 0.2 m⁻¹ for a heavy vehicle at 90 km/h on a wet road — the
+maximum measured by Otxoterena Drake et al., J. Wind Eng. Ind. Aerodyn. 217, 104734 (2021),
+doi:10.1016/j.jweia.2021.104734 — scaled linearly with speed above 30 km/h, ×0.5 for cars and ×2
+for flooded (assumptions, stated in the manifest). Density decays exponentially downstream and
+with height; it is rendered as one homogeneous box per vehicle with the plume-mean extinction,
+so the downstream, wheel-track and vertical structure is averaged out. With `--spray` the road is
+split into 2 m (25 m beyond 100 m) strips: on the default two 1.5 km road triangles pbrt-v4 loses
+track of the spray medium for rays that leave a box and hit the road (black road patches). Static scenes (`--traffic-speed-kmh 0`) use the nominal lane speeds
+(125/110/95, oncoming 105 km/h) for spray. Spray forces `volpath`; with `--haze` the spray
+boxes are nested inside the haze medium. The (invisible) medium box extends 0.5 m below the road
+so the road plane lies inside it (a box face a few cm above the 2-triangle road plane is crossed
+inconsistently by pbrt's ray offsets and blacks out the road), and plumes are clipped 0.5 m ahead
+of the camera, which is never placed inside a spray medium.
+
+The manifest records everything under `road.wet` (level, Q0 model vs CIE, darkening ratio,
+puddle area fraction, marking classes, per-vehicle spray extinction).
 
 ## Haze, fog and distant terrain
 
@@ -329,6 +414,17 @@ without medium). Everything about the calculation is in the manifest's `atmosphe
 and `no_medium_horizontal_illuminance_lux`). `TestPbrtHighwayHaze` checks it against pbrt: a Lambertian ground probe (±5 km quad, camera 0.2 m) rendered with `volpath` under each preset and under no medium gives the same illuminance ratio as the manifest within 5 % (measured: clear 0.955 vs 0.959, hazy 0.841 vs 0.854, mist 0.883 vs 0.888, fog 0.680 vs 0.688). Keep such probes ≲10 km across: on a 300 km float32 quad the hit-point error biases the shadow rays by tens of percent. With `--haze-light-reference road` the lights
 are instead rescaled so the road receives the no-medium illuminance (useful to isolate the
 contrast loss of fog from the change in exposure); the manifest then records the scale applied.
+
+**Dusk and night.** With `--time-of-day dusk|night` the same MC model runs over the natural
+sources of `highway_night.natural_sources` (`atmosphere.road_illuminance_sources`): twilight sky
+(its RGB map's angular distribution), uniform night sky (cosine-weighted), moon (direct beam at
+its elevation, moon SPD) and moonlit sky, each V(λ)×SPD weighted. Their sum under the medium is
+the manifest's reference/natural illuminance; `atmosphere.road_illuminance.sources` lists
+top-of-layer illuminance and transmittances per source, and `--haze-light-reference road`
+scales all natural sources (lamps are never rescaled). Headlamps, tail lamps and luminaires are
+inside the medium — pbrt attenuates and scatters them, which gives the glow around lamps; they
+are reported separately under `lighting.artificial` as before. `TestPbrtHighwayHaze` checks the
+dusk case against pbrt with the same ground probe.
 
 **Distant terrain.** The backdrop is a polar heightfield centred on the ego position: ridges
 specified by the elevation angle they subtend (peaks ~0.8 deg at 3 km to ~2.2 deg at 30 km, a
@@ -467,7 +563,10 @@ lobe is not fitted to CIE 144 road reflection tables. USGS spectra are lab bidir
   to the patched pbrt `retroreflective` material (see "Night and dusk" below).
 - By default the sky radiance is RGB, upsampled by pbrt; only the sun is spectral (see
   [Spectral sky](#spectral-sky) for the opt-in spectral sky).
-- No wet road; texture colour maps only modulate luminance.
+- Texture colour maps only modulate luminance. Wet road: flat puddles (no depression, no
+  ripples/raindrop impacts on the water), no rain streaks, no tyre-track drying, spray density
+  scaling (car factor, flooded ×2, linear speed) assumed; wet markings use EN 1436 class
+  minima, not a measured wet retroreflection function.
 - Haze: one HG phase function per medium (Rayleigh folded into g), horizontally uniform
   medium, flat Earth for the medium (the backdrop has curvature); without `--haze` the horizon
   is sharp and aerial perspective comes only from the sky map.

@@ -40,6 +40,7 @@ import highway_incar  # noqa: E402
 import highway_materials as hmat  # noqa: E402
 import highway_night as night  # noqa: E402
 import highway_variety as variety  # noqa: E402
+import highway_wet as wet  # noqa: E402
 from fetch_highway_assets import cache_root, load_asset_manifest  # noqa: E402
 from highway_road_wear import WEAR_LEVELS, RoadWear, linear_normal_map  # noqa: E402
 from highway_sky import (  # noqa: E402
@@ -402,6 +403,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     backdrop.add_cli_args(ap)
     highway_incar.add_args(ap)
     variety.add_arguments(ap)
+    wet.add_args(ap)
     hmat.add_arguments(ap)
     return ap.parse_args(argv)
 
@@ -484,12 +486,11 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         e_dn, e_sky_h, e_ref = e_dn * k, e_sky_h * k, float(args.global_illuminance_lux)
     write_spd(spd / "sun.spd", wl, solar_direct_spectrum(wl, elev))
     haze = atmosphere.params_from_args(args)
-    if haze is not None and args.time_of_day != "day":
-        raise SystemExit(
-            "--haze is not supported with --time-of-day dusk/night yet (night reference illuminance has no medium model)"
-        )
+    wet.check_args(args, args.road_wear != "none")
     atm = None
-    if haze is not None:
+    if haze is not None and args.time_of_day != "day":
+        atm = atmosphere.setup_scene_night(haze, args, wl=wl, spd_dir=spd, sources=night.natural_sources(args))
+    elif haze is not None:
         atm = atmosphere.setup_scene(
             haze,
             args,
@@ -526,6 +527,8 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
     eye = np.array([cam_x, args.cam_height, 0.0])
     target = eye + 100.0 * np.array([0.0, math.tan(math.radians(args.cam_pitch)), 1.0])
     integrator, maxdepth = ("volpath", atm["maxdepth"]) if atm else ("path", args.maxdepth)
+    if args.spray and integrator == "path":
+        integrator = "volpath"
     if atm and not args.windscreen_outside_medium:
         args.windscreen_outside_medium = "haze"
     fx = highway_incar.InCarEffects(args, repo)
@@ -582,7 +585,9 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
     if args.time_of_day == "day":
         L += day_lights
     else:
-        natural, night_lighting = night.natural_light(args, out_dir, spd)
+        natural, night_lighting = night.natural_light(args, out_dir, spd, atm["light_scale"] if atm else 1.0)
+        if atm:
+            night_lighting["natural_illuminance_lux"] = atm["e_ref"]  # under the medium (MC road model)
         L += natural
 
     # ---- road surface
@@ -671,12 +676,13 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         L = night.strip_normal_map(L)
         for name in ("rw:asphaltA", "rw:asphaltB") if wear is not None else ():
             L = night.strip_normal_map(L, name)
+    spray_meta = None
     L += fx.vms_lines(out_dir, wl, Layout.right_paved)
     paved = [
         (Layout.median_l, Layout.right_paved, ROAD_Z0, ROAD_Z1),
         (Layout.opp_paved, Layout.median_l, ROAD_Z0, ROAD_Z1),
     ]
-    p, t = quads_mesh(paved, 0.0)
+    p, t = quads_mesh(wet.road_rects(paved, args), 0.0)
     L += ['NamedMaterial "asphalt"', *mesh(p, t, p[:, [0, 2]] / tile), ""]
 
     # ---- markings (US: yellow left edge, broken white lane lines, solid white right edge)
@@ -866,6 +872,13 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
             )
             if fx.animated:
                 cars_meta[-1].update(motion_meta)
+        if args.spray:
+            heavy = [m in variety.HEAVY for _, _, m, _, _ in traffic]
+            v_spray = [v or wet.nominal_speed_kmh(c[0]) for v, c in zip(speeds, traffic)]  # static scene: lane speed
+            spray, spray_meta = wet.spray_lines(
+                cars_meta, v_spray, heavy, args, "haze" if atm else "", variety.place, float(eye[2])
+            )
+            L += spray
 
     median_x = Layout.median_l + MEDIAN_W / 2 + LEFT_SHOULDER / 2 - 0.6
     L += variety.structures(var, out_dir, Layout, median_x, mesh, box, sign_legend, LANE_W)
@@ -886,6 +899,11 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
     L += night_lines
 
     L += fx.windscreen_lines(out_dir, wl, eye)
+    wet_meta = None
+    if wet.enabled(args):  # last: also wets the road-wear marking materials emitted with the geometry
+        L, wet_meta = wet.apply_materials(L, args, wl, spd, out_dir, wear)
+        if spray_meta is not None:
+            wet_meta["spray"] = wet.manifest_spray(spray_meta)
     scene_path = out_dir / "highway.pbrt"
     scene_path.write_text("\n".join(L) + "\n")
 
@@ -959,6 +977,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
             "surface": args.road,
             "length_m": ROAD_Z1 - ROAD_Z0,
             "wear": wear.summary if wear is not None else None,
+            **({"wet": wet_meta} if wet_meta else {}),
         },
         "cars": cars_meta,
         "vegetation": veg_meta,

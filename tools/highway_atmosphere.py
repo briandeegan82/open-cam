@@ -441,3 +441,102 @@ def setup_scene(
         "medium_lines": pbrt_medium_lines(p, "spd/haze_sigma_a.spd", "spd/haze_sigma_s.spd"),
         "manifest": entry,
     }
+
+
+def road_illuminance_sources(
+    p: HazeParams,
+    sources: list[dict],
+    *,
+    ground_albedo: float,
+    spd_wl: np.ndarray,
+    photons: int = 20_000,
+    seed: int = 1,
+) -> dict:
+    """Road illuminance under the medium for a list of sources (dusk/night natural light).
+
+    Source dicts (tools/highway_night.natural_sources): ``e_h`` horizontal illuminance at the top
+    of the layer, ``spd`` on ``spd_wl`` (None: equal energy, for RGB maps) and one of ``mu`` (direct
+    beam), ``sky_rgb`` (equal-area radiance map) or ``uniform`` (isotropic sky, cosine-weighted).
+    Same plane-parallel MC transport as ``road_illuminance``; transmittances are V(lambda) x SPD
+    weighted per source.
+    """
+    from colour_science import CMF_WAVELENGTH_NM, CMF_Y
+
+    rng = np.random.default_rng(seed)
+    wl_mc = np.arange(400.0, 701.0, 20.0)
+    v = np.interp(wl_mc, CMF_WAVELENGTH_NM, CMF_Y)
+    out: dict = {"sources": {}, "mc_photons_per_wavelength": photons, "ground_albedo": ground_albedo}
+    e_road = e_top = 0.0
+    for src in sources:
+        sw = v * (np.interp(wl_mc, spd_wl, src["spd"]) if src.get("spd") is not None else 1.0)
+        sw = sw / sw.sum()
+        dist = sky_flux_distribution(src["sky_rgb"]) if "sky_rgb" in src else None
+        t_tot = t_dir = 0.0
+        for wl, wgt in zip(wl_mc, sw):
+            if wgt <= 0:
+                continue
+            tot, dr = slab_flux_mc(p, float(wl), _source_mu(src, dist, photons, rng), ground_albedo, rng)
+            t_tot += wgt * tot
+            t_dir += wgt * dr
+        e = float(src["e_h"])
+        out["sources"][src["name"]] = {
+            "horizontal_top_lux": e,
+            "total_transmittance": t_tot,
+            "direct_transmittance": t_dir,
+            "road_lux": e * t_tot,
+        }
+        e_road += e * t_tot
+        e_top += e
+    out.update(road_lux=e_road, no_medium_horizontal_illuminance_lux=e_top)
+    return out
+
+
+def _source_mu(src: dict, dist, n: int, rng: np.random.Generator) -> np.ndarray:
+    if "mu" in src:
+        return np.full(n, max(float(src["mu"]), 1e-3))
+    if dist is None:  # isotropic sky: cosine-weighted zenith cosines
+        return np.sqrt(rng.uniform(1e-6, 1.0, n))
+    return _sample_cos(dist[1], dist[0], n, rng)
+
+
+def setup_scene_night(p: HazeParams, args: argparse.Namespace, *, wl: np.ndarray, spd_dir, sources: list[dict]) -> dict:
+    """Dusk/night counterpart of ``setup_scene``: the natural sources are above the medium.
+
+    Returns ``light_scale`` (multiply every natural source; != 1 only for
+    ``--haze-light-reference road``), the medium-adjusted road illuminance ``e_ref`` (the manifest's
+    reference illuminance), the pbrt lines and the manifest entry. Vehicle lamps and luminaires are
+    inside the medium and are attenuated/scattered by pbrt itself.
+    """
+    from highway_night import LIGHT_WL
+
+    sa, ss, _ = coefficients(p, wl)
+    for name, val in (("haze_sigma_a", sa), ("haze_sigma_s", ss)):
+        (spd_dir / f"{name}.spd").write_text("\n".join(f"{w:.1f} {v:.6g}" for w, v in zip(wl, val)) + "\n")
+    road = road_illuminance_sources(p, sources, ground_albedo=args.haze_ground_albedo, spd_wl=LIGHT_WL)
+    e0 = road["no_medium_horizontal_illuminance_lux"]
+    k = e0 / road["road_lux"] if args.haze_light_reference == "road" else 1.0
+    if k != 1.0:
+        road["road_lux"] *= k
+        for v in road["sources"].values():
+            v["horizontal_top_lux"] *= k
+            v["road_lux"] *= k
+    maxdepth = integrator_maxdepth(p, args.maxdepth, args.haze_maxdepth)
+    entry = manifest_entry(p, wl)
+    entry.update(
+        {
+            "light_reference": args.haze_light_reference,
+            "light_scale_applied": k,
+            "no_medium_horizontal_illuminance_lux": e0,
+            "road_illuminance": road,
+            "volpath_maxdepth": maxdepth,
+            "spectra": {"sigma_a": "spd/haze_sigma_a.spd", "sigma_s": "spd/haze_sigma_s.spd"},
+        }
+    )
+    return {
+        "light_scale": k,
+        "e_ref": float(road["road_lux"]),
+        "maxdepth": maxdepth,
+        "camera_lines": pbrt_camera_lines(),
+        "medium_lines": pbrt_medium_lines(p, "spd/haze_sigma_a.spd", "spd/haze_sigma_s.spd"),
+        "manifest": entry,
+    }

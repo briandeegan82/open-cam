@@ -525,11 +525,45 @@ def resolve(args: argparse.Namespace) -> dict:
     }
 
 
-def natural_light(args: argparse.Namespace, out_dir: Path, spd_dir: Path) -> tuple[list[str], dict]:
-    """Sky (+ moon) light lines and the manifest ``lighting`` block for dusk/night."""
+def natural_sources(args: argparse.Namespace) -> list[dict]:
+    """Natural dusk/night sources for the haze road-illuminance model (tools/highway_atmosphere.py).
+
+    Each: ``e_h`` horizontal illuminance [lux] above the medium, ``spd`` (on LIGHT_WL) and either
+    ``mu`` (direct beam), ``sky_rgb`` (equal-area map) or ``uniform`` (isotropic sky).
+    """
     tod = args.time_of_day
     sun_el = args.twilight_sun_elevation if tod == "dusk" else args.night_sun_elevation
     e_sky = twilight_illuminance_lux(sun_el)
+    if tod == "dusk" and sun_el > -18.0:
+        out = [{"name": "twilight_sky", "e_h": e_sky, "sky_rgb": twilight_sky_map(512, sun_el), "spd": None}]
+    else:
+        out = [{"name": "night_sky", "e_h": e_sky, "uniform": True, "spd": night_sky_spectrum(LIGHT_WL)}]
+    if args.moon_phase_deg is not None and args.moon_elevation > 0:
+        el = float(args.moon_elevation)
+        s = math.sin(math.radians(el))
+        e_n = moon_illuminance_lux(args.moon_phase_deg, el)
+        e_dn_day, e_d_day = clear_sky_illuminance_lux(el)
+        spd = moon_spectrum(LIGHT_WL, el)
+        out += [
+            {"name": "moon", "e_h": e_n * s, "mu": s, "spd": spd},
+            {
+                "name": "moonlit_sky",
+                "e_h": e_n * e_d_day / e_dn_day,
+                "sky_rgb": analytic_clear_sky(256, el),
+                "spd": spd,
+            },
+        ]
+    return out
+
+
+def natural_light(args: argparse.Namespace, out_dir: Path, spd_dir: Path, scale: float = 1.0) -> tuple[list[str], dict]:
+    """Sky (+ moon) light lines and the manifest ``lighting`` block for dusk/night.
+
+    ``scale`` multiplies every natural source (haze ``--haze-light-reference road``).
+    """
+    tod = args.time_of_day
+    sun_el = args.twilight_sun_elevation if tod == "dusk" else args.night_sun_elevation
+    e_sky = twilight_illuminance_lux(sun_el) * scale
     lines = []
     meta: dict = {"time_of_day": tod, "sun_elevation_deg": sun_el}
     if tod == "dusk" and sun_el > -18.0:
@@ -558,7 +592,7 @@ def natural_light(args: argparse.Namespace, out_dir: Path, spd_dir: Path) -> tup
     e_ref = e_sky
     if args.moon_phase_deg is not None and args.moon_elevation > 0:
         el, az = float(args.moon_elevation), float(args.moon_azimuth)
-        e_n = moon_illuminance_lux(args.moon_phase_deg, el)
+        e_n = moon_illuminance_lux(args.moon_phase_deg, el) * scale
         s = math.sin(math.radians(el))
         e_dn_day, e_d_day = clear_sky_illuminance_lux(el)
         e_moon_sky = e_n * s * e_d_day / (e_dn_day * s)
