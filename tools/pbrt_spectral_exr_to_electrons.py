@@ -24,6 +24,7 @@ from camera_model import (
     sensor_forward_config_from_camera_model,
 )
 from exr_multispectral import spectral_buckets_from_exr, trapezoid_weights_nm
+from pixel_angular_response import apply_pixel_angular_response, pixel_angular_response_cfg
 from qe_curves import load_qe_curves_rgb, read_csv_curve
 from sensor_radiometry import integrate_spectral_planes, spectral_electron_weights
 from spectral_sensor_forward import (
@@ -51,6 +52,9 @@ def scene_radiometry_from_manifest(manifest: dict) -> dict:
     focus = cam.get("focus_distance", cam.get("focal_distance", cam.get("cam_dist")))
     if focus is not None:
         out["focus_distance_m"] = float(focus)
+    geometry = {k: cam[k] for k in ("lensfile", "aperture_diameter_mm", "film_diagonal_mm", "fov_deg") if cam.get(k)}
+    if geometry:
+        out["camera_geometry"] = geometry
     lighting = manifest.get("lighting") or {}
     light = lighting.get("distant") or {}
     if light.get("scale") is not None:
@@ -267,7 +271,17 @@ def spectral_radiance_to_electrons(
     )
     geom = t_int * fill_factor * (pixel_pitch_um * 1e-6) ** 2
     weights = spectral_electron_weights(lam, qe.T, w, irr_per_lambda, geom)
-    electrons = np.clip(integrate_spectral_planes(L, weights), 0.0, None)
+    par_cfg = pixel_angular_response_cfg(model)
+    par_meta: dict = {"enabled": False}
+    if par_cfg.get("enabled", False):
+        electrons, par_meta = apply_pixel_angular_response(
+            L, lam, weights, par_cfg, pitch_um=pixel_pitch_um, f_number=f_number,
+            lens_cfg=lens_cfg, geometry=scene.get("camera_geometry"), repo=repo,
+        )  # fmt: skip
+        electrons = np.clip(electrons, 0.0, None)
+        par_meta["enabled"] = True
+    else:
+        electrons = np.clip(integrate_spectral_planes(L, weights), 0.0, None)
     spatial_map, spatial_meta = build_spatial_transmission_map(
         L.shape[0],
         L.shape[1],
@@ -292,6 +306,7 @@ def spectral_radiance_to_electrons(
         "optics_transmittance_scalar": optics_t,
         "optics_transmittance_mean": float(np.mean(tau_lambda)),
         "optics_transmittance_spatial": spatial_meta,
+        "pixel_angular_response": par_meta,
     }
     return electrons, meta
 

@@ -56,6 +56,7 @@
 - panasonic_tz96
 - research_pinhole_baseline
 - research_realistic_wide22
+- research_realistic_wide22_cra
 - research_thinlens_macro
 - research_thinlens_normal
 - research_thinlens_tele
