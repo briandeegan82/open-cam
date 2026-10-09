@@ -290,6 +290,9 @@ venv/bin/python tools/munsell_mat_to_sqlite.py --summary
 - `cfa.demosaic` implements bilinear and Malvar-He-Cutler reconstruction.
 - Post-PSF is a simple Gaussian/stray-light approximation, not a full chromatic lens aberration model.
 - PBRT spectral sampling remains Monte Carlo based; use validation and repeated runs for sensitive comparisons.
+- Per-wavelength-bucket images share pbrt's 4 hero wavelengths (stride (λmax−λmin)/4), so per-bucket metrics carry periodic Monte Carlo noise, and `pbrt --seed` does not change the output (use the in-scene `"integer seed"`); see [`docs/SFR_SPECTRAL_RIPPLE.md`](docs/SFR_SPECTRAL_RIPPLE.md).
+- `tools/sfr_analysis.py` uses an ISO 12233-style signed-derivative edge fit with robust outlier rejection; the old `|derivative|` centroid (kept as `row_edge_positions_legacy`) was biased toward 0 deg on noisy renders.
+- Real-camera validation (`tools/validate_against_capture.py`, [`docs/REAL_CAMERA_VALIDATION.md`](docs/REAL_CAMERA_VALIDATION.md)) is only round-trip tested on simulator data so far; no recipe has been validated against physical captures yet.
 
 ## Troubleshooting
 
