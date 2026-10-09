@@ -15,5 +15,6 @@ for p in "$root"/third_party/patches/*.patch; do
   fi
 done
 if [ "${1:-}" = "--patch-only" ]; then exit 0; fi
-env -u PBRT_OPTIX_PATH cmake -S "$pbrt" -B "$pbrt/build" -DCMAKE_BUILD_TYPE=Release
+env -u PBRT_OPTIX_PATH cmake -S "$pbrt" -B "$pbrt/build" -DCMAKE_BUILD_TYPE=Release \
+  -DPBRT_BUILD_NATIVE_EXECUTABLE="${PBRT_NATIVE:-ON}"
 cmake --build "$pbrt/build" -j"$(nproc)" --target pbrt_exe

@@ -21,6 +21,7 @@ above, so prefer it over the raw cmake commands:
 
   tools/build_pbrt.sh               # patch + build
   tools/build_pbrt.sh --patch-only  # just apply the patches
+  PBRT_NATIVE=OFF tools/build_pbrt.sh  # portable binary (no -march=native), as CI caches
 
 CI caches the binary keyed on the submodule SHA plus the hash of the patches.
 
