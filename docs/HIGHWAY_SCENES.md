@@ -349,7 +349,10 @@ doi:10.1016/j.jweia.2021.104734 — scaled linearly with speed above 30 km/h, ×
 for flooded (assumptions, stated in the manifest). Density decays exponentially downstream and
 with height. Static scenes (`--traffic-speed-kmh 0`) use the nominal lane speeds
 (125/110/95, oncoming 105 km/h) for spray. Spray forces `volpath`; with `--haze` the spray
-boxes are nested inside the haze medium.
+boxes are nested inside the haze medium. The (invisible) medium box extends 0.5 m below the road
+so the road plane lies inside it (a box face a few cm above the 2-triangle road plane is crossed
+inconsistently by pbrt's ray offsets and blacks out the road), and plumes are clipped 0.5 m ahead
+of the camera, which is never placed inside a spray medium.
 
 The manifest records everything under `road.wet` (level, Q0 model vs CIE, darkening ratio,
 puddle area fraction, marking classes, per-vehicle spray extinction).
