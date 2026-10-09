@@ -280,7 +280,9 @@ class TestNoisyEdges(unittest.TestCase):
     def test_mtf50_matches_analytic_gaussian_under_noise(self):
         for sigma in (1.0, 2.0):
             theory = _theory_mtf50(sigma)
-            ratios = [sfr.slanted_edge_sfr(_noisy_edge(-5.0, sigma, 0.02, s)).mtf50_cy_per_px / theory for s in range(5)]
+            ratios = [
+                sfr.slanted_edge_sfr(_noisy_edge(-5.0, sigma, 0.02, s)).mtf50_cy_per_px / theory for s in range(5)
+            ]
             self.assertAlmostEqual(float(np.mean(ratios)), 1.0, delta=0.03, msg=f"{sigma=} {ratios=}")
             self.assertLess(max(abs(r - 1.0) for r in ratios), 0.06, msg=f"{sigma=} {ratios=}")
 
