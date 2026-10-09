@@ -325,7 +325,9 @@ def plot(results: dict, od: Path) -> None:
             ax.plot(f, d["sim_wave"], "k--", lw=1.4, label="lens-design wave-optics MTF")
             ax.plot(f, d["sim_geom_x_diff"], color="C3", ls=":", lw=1.6, label="geometric x diffraction (predicted)")
             ax.plot(f, d["sim_geom"], color="0.3", ls=":", lw=1, label="geometric spot (predicted)")
-            ax.plot(f, d["pred_diff_only"], color="C2", ls="-.", lw=1, label="diffraction only (traced pupil)")
+            ax.plot(
+                f, d["pred_diff_only"], color="C2", ls="-.", lw=1, label="diffraction only, analytic (traced pupil)"
+            )
             ax.set_ylim(0, 1.02)
             ax.set_xlim(0, f.max())
             ax.grid(alpha=0.3)
@@ -357,7 +359,7 @@ def plot(results: dict, od: Path) -> None:
             ax.plot(h, [results[name][p[0]]["mtf50_sim_wave"] for p in pts], "k^", ms=5, mfc="none")
         ax.set_xlabel("image height [mm]")
         ax.set_ylabel("MTF50 [cy/mm]")
-        ax.set_title(f"Field dependence, {lab} MTF50 (triangles: wave-optics)")
+        ax.set_title(f"{lab} MTF50 vs field (\u25b3 wave-optics)")
         ax.grid(alpha=0.3)
         if j == 0:
             ax.legend(fontsize=7)
