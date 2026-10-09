@@ -1,0 +1,43 @@
+# Example capture manifest for tools/validate_against_capture.py.
+# Paths are relative to this file's directory; globs are sorted.
+# See docs/REAL_CAMERA_VALIDATION.md for the capture protocol.
+schema_version: 1
+camera_recipe: config/camera_recipes/iphone_8.yaml
+raw:
+  format: raw16          # raw16 (headerless little-endian uint16), npy, or dng (needs rawpy)
+  width: 4032
+  height: 3024
+  cfa_pattern: GBRG      # 2x2 Bayer tile from the top-left pixel; null for mono
+  bit_depth: 10
+  temperature_c: 25.0    # sensor/housing temperature during capture
+emva:
+  plane: G               # colour plane analysed (first G of the tile)
+  roi: [1916, 1412, 2116, 1612]   # [x0, y0, x1, y1] centre crop, keeps vignetting out
+  darks:                 # lens capped, >= 2 exposure times for dark current
+    - {exposure_s: 0.001, frames: "ptc/dark_t0.001_*.raw16"}
+    - {exposure_s: 0.5, frames: "ptc/dark_t0.5_*.raw16"}
+    - {exposure_s: 2.0, frames: "ptc/dark_t2_*.raw16"}
+  flats:                 # uniform illumination, from ~1 % up to past saturation
+    - {exposure_s: 0.001, relative_exposure: 0.02, frames: "ptc/flat_l01_*.raw16"}
+    - {exposure_s: 0.001, relative_exposure: 0.10, frames: "ptc/flat_l02_*.raw16"}
+    - {exposure_s: 0.001, relative_exposure: 0.30, frames: "ptc/flat_l03_*.raw16"}
+    - {exposure_s: 0.001, relative_exposure: 0.50, frames: "ptc/flat_l04_*.raw16"}
+    - {exposure_s: 0.001, relative_exposure: 0.70, frames: "ptc/flat_l05_*.raw16"}
+    - {exposure_s: 0.001, relative_exposure: 0.90, frames: "ptc/flat_l06_*.raw16"}
+    - {exposure_s: 0.001, relative_exposure: 1.00, frames: "ptc/flat_l07_*.raw16"}
+    - {exposure_s: 0.001, relative_exposure: 1.10, frames: "ptc/flat_l08_*.raw16"}
+colorchecker:
+  file: colorchecker.raw16
+  exposure_s: 0.01
+  illuminant: D65        # spectra/illuminants id of the light actually used
+  grid:                  # centres of patch 1 (dark skin) and patch 24 (black), full-res px
+    first_patch_centre_px: [1500, 1150]
+    last_patch_centre_px: [2530, 1840]
+    patch_half_size_px: 40
+slanted_edge:
+  file: slanted_edge.raw16
+  exposure_s: 0.01
+  roi: [2000, 1400, 2128, 1592]   # near-vertical edge tilted ~5 deg, both plateaus inside
+  plane: G
+  flatfield: false
+  # simulated_file: sim/slanted_edge_sim.raw16   # optional full pbrt + apply_emva_noise render

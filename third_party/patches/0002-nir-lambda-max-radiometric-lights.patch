@@ -1,0 +1,69 @@
+diff --git a/src/pbrt/lights.cpp b/src/pbrt/lights.cpp
+index a182ccd..532e500 100644
+--- a/src/pbrt/lights.cpp
++++ b/src/pbrt/lights.cpp
+@@ -197,7 +197,10 @@ PointLight *PointLight::Create(const Transform &renderFromLight, Medium medium,
+                                            SpectrumType::Illuminant, alloc);
+     Float sc = parameters.GetOneFloat("scale", 1);
+ 
+-    sc /= SpectrumToPhotometric(I);
++    // open-cam: "bool photometric" false keeps I in absolute radiometric units (NIR-only
++    // emitters have a ~0 photometric integral).
++    if (parameters.GetOneBool("photometric", true))
++        sc /= SpectrumToPhotometric(I);
+ 
+     Float phi_v = parameters.GetOneFloat("power", -1);
+     if (phi_v > 0) {
+@@ -263,7 +266,9 @@ DistantLight *DistantLight::Create(const Transform &renderFromLight,
+     Transform finalRenderFromLight = renderFromLight * t;
+ 
+     // Scale the light spectrum to be equivalent to 1 nit
+-    sc /= SpectrumToPhotometric(L);
++    // open-cam: "bool photometric" false keeps L in absolute radiometric units.
++    if (parameters.GetOneBool("photometric", true))
++        sc /= SpectrumToPhotometric(L);
+ 
+     // Adjust scale to meet target illuminance value
+     // Like for IBLs we measure illuminance as incident on an upward-facing
+@@ -660,7 +665,10 @@ GoniometricLight *GoniometricLight::Create(const Transform &renderFromLight,
+                       texname);
+     }
+ 
+-    sc /= SpectrumToPhotometric(I);
++    // open-cam: "bool photometric" false keeps I in absolute radiometric units (NIR-only
++    // emitters have a ~0 photometric integral).
++    if (parameters.GetOneBool("photometric", true))
++        sc /= SpectrumToPhotometric(I);
+ 
+     Float phi_v = parameters.GetOneFloat("power", -1);
+     if (phi_v > 0) {
+@@ -1448,7 +1456,10 @@ SpotLight *SpotLight::Create(const Transform &renderFromLight, Medium medium,
+     Transform t = Translate(Vector3f(from.x, from.y, from.z)) * Inverse(dirToZ);
+     Transform finalRenderFromLight = renderFromLight * t;
+ 
+-    sc /= SpectrumToPhotometric(I);
++    // open-cam: "bool photometric" false keeps I in absolute radiometric units (NIR-only
++    // emitters have a ~0 photometric integral).
++    if (parameters.GetOneBool("photometric", true))
++        sc /= SpectrumToPhotometric(I);
+ 
+     Float phi_v = parameters.GetOneFloat("power", -1);
+     if (phi_v > 0) {
+diff --git a/src/pbrt/util/spectrum.h b/src/pbrt/util/spectrum.h
+index 660523b..7e17720 100644
+--- a/src/pbrt/util/spectrum.h
++++ b/src/pbrt/util/spectrum.h
+@@ -31,7 +31,12 @@
+ namespace pbrt {
+ 
+ // Spectrum Constants
+-constexpr Float Lambda_min = 360, Lambda_max = 830;
++// open-cam: build with -DPBRT_LAMBDA_MAX_NM=1100 (tools/build_pbrt.sh, PBRT_LAMBDA_MAX_NM env)
++// for NIR spectral rendering; the default build keeps pbrt's 360-830 nm range.
++#ifndef PBRT_LAMBDA_MAX_NM
++#define PBRT_LAMBDA_MAX_NM 830
++#endif
++constexpr Float Lambda_min = 360, Lambda_max = PBRT_LAMBDA_MAX_NM;
+ 
+ static constexpr int NSpectrumSamples = 4;
+ 

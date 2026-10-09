@@ -1,0 +1,34 @@
+# Delta from config/sensor_models/default.yaml — LOFIC (lateral overflow integration
+# capacitor) HDR pixel.  Total capacity 120 ke- is the full-well capacity reported by
+# Takayanagi et al., Sensors 19:5572 (2019), doi:10.3390/s19245572; the split between
+# photodiode and capacitor, K, read noise and capacitance are illustrative.  The LCG
+# (PD + capacitor) signal is read without true CDS, so the reset (kTC) noise of the
+# combined capacitance is included: C = 120 ke- x q / 1 V swing ~= 19.2 fF (assumed swing).
+schema_version: 1
+sensor:
+  pixel_pitch_um: 2.8
+noise:
+  emva:                       # single-exposure base = the HCG (photodiode) path
+    overall_system_gain_K_e_per_DN: 2.0
+    sigma_d_e: 1.8
+    black_level_DN: 64
+  adc:
+    bit_depth: 12
+    full_well_e: 8000
+  hdr:
+    enabled: true
+    architecture: lofic
+    lofic:
+      photodiode_full_well_e: 8000
+      capacitor_full_well_e: 112000
+      capacitor_dark_current_e_per_s: 200.0
+      hcg: {K_e_per_DN: 2.0, sigma_e: 1.8}
+      lcg: {K_e_per_DN: 30.0, sigma_e: 15.0, ktc_capacitance_fF: 19.2}
+    merge: {method: snr_weighted, threshold_fraction: 0.9}
+    compand: {enabled: true, bit_depth: 12, knees: auto, segments: 12}
+model:
+  name: default_hdr_lofic
+  display_name: Default LOFIC HDR (illustrative)
+validation:
+  datasheet:
+    enabled: false          # illustrative model, no datasheet

@@ -24,6 +24,7 @@ from camera_model import (
     sensor_forward_config_from_camera_model,
 )
 from exr_multispectral import spectral_buckets_from_exr, trapezoid_weights_nm
+from pixel_angular_response import apply_pixel_angular_response, pixel_angular_response_cfg
 from qe_curves import load_qe_curves_rgb, read_csv_curve
 from sensor_radiometry import integrate_spectral_planes, spectral_electron_weights
 from spectral_sensor_forward import (
@@ -51,9 +52,13 @@ def scene_radiometry_from_manifest(manifest: dict) -> dict:
     focus = cam.get("focus_distance", cam.get("focal_distance", cam.get("cam_dist")))
     if focus is not None:
         out["focus_distance_m"] = float(focus)
+    geometry = {k: cam[k] for k in ("lensfile", "aperture_diameter_mm", "film_diagonal_mm", "fov_deg") if cam.get(k)}
+    if geometry:
+        out["camera_geometry"] = geometry
     lighting = manifest.get("lighting") or {}
     light = lighting.get("distant") or {}
-    if light.get("scale") is not None:
+    # "photometric": false (NIR, --radiometric-light) has no lux scale; use calibration instead.
+    if light.get("scale") is not None and light.get("photometric", True):
         out["chart_illuminance_exr_lux"] = 683.0 * PBRT_CIE_Y_INTEGRAL * float(light["scale"])
     # Physically calibrated outdoor scenes (build_highway_scene.py): horizontal illuminance at
     # ground level, both in lux and in EXR units; it plays the role of the chart illuminance.
@@ -160,8 +165,12 @@ def spectral_radiance_to_electrons(
     strict_qe_validation: bool = False,
     tag: str = "pbrt_exr",
     scene: dict | None = None,
+    channel_qe=None,
 ) -> tuple[np.ndarray, dict]:
     """HxWxK spectral radiance [W/(m²·sr·nm) per EXR unit] → HxWx3 electrons.
+
+    ``channel_qe`` (callable ``lambdas_nm -> [C, K]``) replaces the R/G/B QE stack, giving
+    HxWxC electrons, one plane per CFA channel (see :mod:`cfa_mosaic`).
 
     Single radiometric chain shared by this tool and ``apply_emva_noise`` (integrate_qe)::
 
@@ -259,15 +268,28 @@ def spectral_radiance_to_electrons(
         )
     irr_per_lambda = irr_per_lambda * (photometry_scale * exr_autocal_scale)
 
-    qe = qe_stack_on_lambdas(
-        repo,
-        qe_cfg,
-        lam,
-        strict_qe_validation=bool(strict_qe_validation or qe_cfg.get("strict_validation", False)),
-    )
+    if channel_qe is not None:
+        qe = np.asarray(channel_qe(lam), dtype=np.float32)
+    else:
+        qe = qe_stack_on_lambdas(
+            repo,
+            qe_cfg,
+            lam,
+            strict_qe_validation=bool(strict_qe_validation or qe_cfg.get("strict_validation", False)),
+        )
     geom = t_int * fill_factor * (pixel_pitch_um * 1e-6) ** 2
     weights = spectral_electron_weights(lam, qe.T, w, irr_per_lambda, geom)
-    electrons = np.clip(integrate_spectral_planes(L, weights), 0.0, None)
+    par_cfg = pixel_angular_response_cfg(model)
+    par_meta: dict = {"enabled": False}
+    if par_cfg.get("enabled", False):
+        electrons, par_meta = apply_pixel_angular_response(
+            L, lam, weights, par_cfg, pitch_um=pixel_pitch_um, f_number=f_number,
+            lens_cfg=lens_cfg, geometry=scene.get("camera_geometry"), repo=repo,
+        )  # fmt: skip
+        electrons = np.clip(electrons, 0.0, None)
+        par_meta["enabled"] = True
+    else:
+        electrons = np.clip(integrate_spectral_planes(L, weights), 0.0, None)
     spatial_map, spatial_meta = build_spatial_transmission_map(
         L.shape[0],
         L.shape[1],
@@ -292,6 +314,7 @@ def spectral_radiance_to_electrons(
         "optics_transmittance_scalar": optics_t,
         "optics_transmittance_mean": float(np.mean(tau_lambda)),
         "optics_transmittance_spatial": spatial_meta,
+        "pixel_angular_response": par_meta,
     }
     return electrons, meta
 

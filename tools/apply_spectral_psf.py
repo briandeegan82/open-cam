@@ -405,9 +405,10 @@ def main() -> None:
     if mode == "none":
         print('post_psf.mode is "none"; nothing to do.', file=sys.stderr)
         sys.exit(0)
-    if mode not in ("gaussian", "chromatic_gaussian", "airy_disk"):
+    if mode not in ("gaussian", "chromatic_gaussian", "airy_disk", "lens_diffraction"):
         raise ValueError(
-            f'post_psf.mode must be "gaussian", "chromatic_gaussian", "airy_disk", or "none", got {mode!r}'
+            'post_psf.mode must be "gaussian", "chromatic_gaussian", "airy_disk", "lens_diffraction", '
+            f'or "none", got {mode!r}'
         )
 
     stray = psf.get("stray_light", {}) or {}
@@ -422,7 +423,14 @@ def main() -> None:
     chans = read_separate_exr_channels(exr_in)
     out: dict[str, np.ndarray] = {}
 
-    if mode == "gaussian":
+    if mode == "lens_diffraction":
+        # Traced-lens diffraction PSFs (field/wavelength dependent): see lens_diffraction_psf.py.
+        from lens_diffraction_psf import apply_post_psf_config
+
+        diffracted = apply_post_psf_config(chans, psf, camera_model, repo=repo, exr_path=exr_in)
+        out = {name: apply_stray_light(arr, stray) for name, arr in diffracted.items()}
+        print(f"wrote {exr_out} (lens_diffraction)")
+    elif mode == "gaussian":
         sigma = float(psf.get("sigma_pixels", 0.0))
         if sigma < 0:
             raise ValueError("sigma_pixels must be >= 0")

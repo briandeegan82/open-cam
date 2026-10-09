@@ -248,5 +248,92 @@ class TestTheoreticalMtfs(unittest.TestCase):
         self.assertAlmostEqual(sfr.cycles_per_mm(0.5, 5.0), 100.0, places=9)
 
 
+def _noisy_edge(angle_deg: float, sigma_px: float, noise: float, seed: int, shape=(240, 80)) -> np.ndarray:
+    """The paper's ROI geometry (240 x 80 px) with Gaussian blur and additive noise."""
+    edge = sfr.synthetic_slanted_edge(shape[0], shape[1], angle_deg, dark=0.1, bright=0.9)
+    rng = np.random.default_rng(seed)
+    return gaussian_filter(edge, sigma_px, mode="nearest") + rng.normal(0.0, noise, edge.shape)
+
+
+def _theory_mtf50(sigma_px: float) -> float:
+    return sfr.mtf50(
+        THEORY_FREQ, sfr.system_mtf(sfr.gaussian_mtf(THEORY_FREQ, sigma_px), sfr.pixel_aperture_mtf(THEORY_FREQ))
+    )
+
+
+def _legacy_angle(roi: np.ndarray) -> float:
+    pos = sfr.row_edge_positions_legacy(roi)
+    return math.degrees(math.atan(np.polyfit(np.arange(roi.shape[0]), pos, 1)[0]))
+
+
+class TestNoisyEdges(unittest.TestCase):
+    """ISO 12233-style edge location must survive render / sensor noise."""
+
+    ANGLES = (-8.0, -5.0, 2.0, 5.0)
+
+    def test_angle_is_recovered_under_noise(self):
+        for angle in self.ANGLES:
+            for seed in range(3):
+                roi = _noisy_edge(angle, 1.5, 0.03, seed)
+                self.assertAlmostEqual(sfr.find_edge_angle(roi), angle, delta=0.08, msg=f"{angle=} {seed=}")
+
+    def test_mtf50_matches_analytic_gaussian_under_noise(self):
+        for sigma in (1.0, 2.0):
+            theory = _theory_mtf50(sigma)
+            ratios = [
+                sfr.slanted_edge_sfr(_noisy_edge(-5.0, sigma, 0.02, s)).mtf50_cy_per_px / theory for s in range(5)
+            ]
+            self.assertAlmostEqual(float(np.mean(ratios)), 1.0, delta=0.03, msg=f"{sigma=} {ratios=}")
+            self.assertLess(max(abs(r - 1.0) for r in ratios), 0.06, msg=f"{sigma=} {ratios=}")
+
+    def test_legacy_abs_centroid_is_biased_and_the_fix_is_not(self):
+        """Regression for the pbrt-render bug: |derivative| centroid -> ~half the slant."""
+        roi = _noisy_edge(-5.0, 1.5, 0.03, 0)
+        self.assertGreater(_legacy_angle(roi), -3.5)
+        self.assertAlmostEqual(sfr.find_edge_angle(roi), -5.0, delta=0.08)
+
+    def test_outlier_rows_are_rejected(self):
+        roi = _noisy_edge(5.0, 1.5, 0.01, 0)
+        roi[::17, 5] += 50.0  # hot pixels far from the edge
+        fit = sfr.fit_edge(roi)
+        self.assertAlmostEqual(fit.angle_deg, 5.0, delta=0.08)
+
+    def test_shading_ramp_does_not_bias_the_edge(self):
+        roi = _noisy_edge(-5.0, 1.5, 0.01, 0)
+        ramp = np.linspace(1.15, 0.85, roi.shape[1])[None, :]
+        self.assertAlmostEqual(sfr.find_edge_angle(roi * ramp), -5.0, delta=0.08)
+
+    def test_flatfield_undoes_a_multiplicative_ramp(self):
+        sigma = 1.5
+        roi = _noisy_edge(-5.0, sigma, 0.0, 0) * np.linspace(1.1, 0.9, 80)[None, :]
+        plain = sfr.slanted_edge_sfr(roi).mtf50_cy_per_px
+        flat = sfr.slanted_edge_sfr(roi, flatfield=True).mtf50_cy_per_px
+        theory = _theory_mtf50(sigma)
+        self.assertLess(abs(flat / theory - 1.0), abs(plain / theory - 1.0))
+        self.assertAlmostEqual(flat / theory, 1.0, delta=0.03)
+
+    def test_flatfield_is_a_no_op_without_shading(self):
+        roi = _blurred_edge(1.5)
+        a = sfr.slanted_edge_sfr(roi).mtf50_cy_per_px
+        b = sfr.slanted_edge_sfr(roi, flatfield=True).mtf50_cy_per_px
+        self.assertAlmostEqual(a, b, delta=0.002)
+
+    def test_polarity_does_not_matter(self):
+        roi = _noisy_edge(5.0, 1.5, 0.02, 1)
+        self.assertAlmostEqual(sfr.find_edge_angle(roi), sfr.find_edge_angle(1.0 - roi), delta=1e-9)
+
+    def test_quadratic_fit_follows_a_curved_edge(self):
+        rows, cols = np.mgrid[0:240, 0:80].astype(float)
+        centre = 40.0 + 0.08 * (rows - 120.0) + 2e-4 * (rows - 120.0) ** 2
+        roi = gaussian_filter((cols > centre).astype(float), 1.0)
+        fit = sfr.fit_edge(roi, fit_order=2)
+        self.assertAlmostEqual(float(fit.coefficients[0]), 2e-4, delta=2e-5)
+
+    def test_whole_phase_row_count(self):
+        self.assertEqual(sfr._whole_phase_rows(240, 0.0), 240)
+        n = sfr._whole_phase_rows(240, math.tan(math.radians(5.0)))
+        self.assertAlmostEqual(n * math.tan(math.radians(5.0)), round(n * math.tan(math.radians(5.0))), delta=0.05)
+
+
 if __name__ == "__main__":
     unittest.main()
