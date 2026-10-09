@@ -836,17 +836,16 @@ def apply_post_psf_config(
 ) -> dict[str, np.ndarray]:
     """Hook for ``apply_spectral_psf`` (``post_psf.mode: lens_diffraction``).
 
-    Pixel pitch: ``lens_diffraction.pixel_pitch_um`` > ``lens_diffraction.film_diagonal_mm``;
-    otherwise, for ``realistic`` renders, the pbrt film pitch (``lens.realistic_film_diagonal_mm``,
-    else pbrt's 35 mm default diagonal), and for pinhole/perspective renders
-    ``sensor.pixel_pitch_um``.
+    Pixel pitch: ``lens_diffraction.pixel_pitch_um`` > ``lens_diffraction.film_diagonal_mm`` (must
+    equal the pbrt Film "diagonal"); otherwise pbrt's 35 mm default film diagonal for ``realistic``
+    renders and ``sensor.pixel_pitch_um`` for pinhole/perspective renders.
     """
     lens_cfg = camera_model.get("lens", {}) or {}
     sensor_cfg = camera_model.get("sensor", {}) or {}
     cfg = dict(psf_cfg.get("lens_diffraction", {}) or {})
     if "pixel_pitch_um" not in cfg and "film_diagonal_mm" not in cfg:
         if str(lens_cfg.get("camera", "")).lower() == "realistic":
-            cfg["film_diagonal_mm"] = float(lens_cfg.get("realistic_film_diagonal_mm", PBRT_DEFAULT_FILM_DIAGONAL_MM))
+            cfg["film_diagonal_mm"] = PBRT_DEFAULT_FILM_DIAGONAL_MM
         elif sensor_cfg.get("pixel_pitch_um") is not None:
             cfg["pixel_pitch_um"] = float(sensor_cfg["pixel_pitch_um"])
     film_res, crop = exr_windows(exr_path)

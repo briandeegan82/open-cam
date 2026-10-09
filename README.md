@@ -288,7 +288,7 @@ venv/bin/python tools/munsell_mat_to_sqlite.py --summary
 
 - `pbrt_exr` sensor-forward mode expects multispectral EXR and currently supports `photon_counting` calibration mode.
 - `cfa.demosaic` implements bilinear and Malvar-He-Cutler reconstruction.
-- Post-PSF is a simple Gaussian/stray-light approximation, not a full chromatic lens aberration model.
+- Post-PSF modes `gaussian`/`chromatic_gaussian`/`airy_disk` are simple approximations, not derived from a lens. The opt-in `lens_diffraction` mode (`tools/lens_diffraction_psf.py`) computes field- and wavelength-dependent diffraction PSFs from a traced prescription (FFT of the traced, vignetted pupil; Goodman, *Introduction to Fourier Optics*), but pbrt lens files have one refractive index per glass (no dispersion, so no chromatic aberration), diffraction is added to pbrt's geometric blur as a product of MTFs (exact only in the diffraction- and geometric-limited regimes), and polarisation, coatings, scatter and ghosts are not modelled. See `docs/LENS_MODELS.txt` (Diffraction).
 - PBRT spectral sampling remains Monte Carlo based; use validation and repeated runs for sensitive comparisons.
 
 ## Troubleshooting

@@ -144,3 +144,61 @@ Caveats and future work
 - The Canon EOS 20D sensor model is still referenced as the default lens model by
   the legacy canon_eos_20d camera recipe; it has been reassigned to
   normal_dgauss_50mm_f20 since the 20D uses a 6.4 µm pixel (full-frame-class pitch).
+
+
+Diffraction (opt-in: lens.post_psf.mode: lens_diffraction)
+----------------------------------------------------------
+pbrt-v4's realistic camera traces the prescription with geometric rays only.
+tools/lens_diffraction_psf.py adds wave optics from the same .dat file:
+
+- Rays from each field point are aimed at a grid on the aperture stop and traced
+  through every surface (stop and element clipping as in pbrt, so off-axis pupils
+  are vignetted).  The wavefront aberration W is OPL(ray) - OPL(chief ray) on the
+  reference sphere centred on the chief-ray image point (Welford 1986; Born & Wolf
+  1999, sec. 9.1).
+- PSF = |FFT of the pupil a(s) exp(i k W(s))|^2 over image-space direction cosines s
+  (Debye integral; Goodman, Introduction to Fourier Optics, 3rd ed., ch. 4-6).
+  a(s) follows from the ray density (pupil-aberration apodisation; "pupil_amplitude:
+  uniform" disables it); an optional Gaussian apodiser ("apodisation_w") and an
+  N-blade polygonal stop ("aperture_blades") are supported.
+- The kernel at the pixel pitch keeps the OTF inside the pixel Nyquist band (pbrt's
+  pixel filter already integrates over the pixel, so no second pixel aperture).
+- The film is split into tile_grid tiles; each pixel is spread by the bilinear
+  blend of the PSFs at the four nearest tile centres (energy conserving).  Each
+  S0.<lambda>nm bucket uses its centre wavelength.  The step runs on the EXR before
+  pbrt_spectral_exr_to_electrons, so QE weighting stays per wavelength.  pbrt crop
+  windows are handled through the EXR data/display windows.
+
+Combining with pbrt (no double counting):
+- combine: diffraction_only (default; for camera: realistic).  The kernel is the
+  diffraction PSF of the traced, vignetted pupil with W = 0, so system MTF =
+  MTF_pbrt_geometric x MTF_diffraction.  Exact when W << lambda or W >> lambda, an
+  approximation in between (the true wave PSF of an aberrated pupil is not a
+  convolution of the two; Hopkins 1955).  Chosen because it keeps pbrt's
+  depth-dependent defocus, occlusion and per-pixel vignetting.  run_pipeline.py
+  applies it to realistic renders; other post_psf modes stay skipped there.
+- combine: wave_optics (for pinhole/perspective renders).  Full PSF including W for
+  one object distance (object_distance_m, default the focus distance): exact wave
+  optics at that distance, but no depth-dependent blur and no distortion.
+
+Pixel pitch: realistic renders have pitch = Film "diagonal" / hypot(xres, yres)
+(pbrt default diagonal 35 mm, i.e. ~30 um at 960 x 640, where diffraction is
+negligible); set lens_diffraction.film_diagonal_mm (or pixel_pitch_um) to match the
+pbrt film.  Example: config/lens_models/normal_dgauss_50mm_f20_diffraction.yaml.
+Standalone CLI:
+
+  venv/bin/python tools/lens_diffraction_psf.py --exr-in out/render.exr \
+      --exr-out out/render_diff.exr --lensfile config/lenses/dgauss.50mm.dat \
+      --aperture-diameter-mm 3.155 --focus-distance-m 3.2 --film-diagonal-mm 33.94
+
+Validation: tests/test_lens_diffraction_psf.py (Airy pattern and circular-pupil
+MTF, defocus OPD, geometric limit, pbrt focusing, energy conservation) and
+scripts/validate_lens_diffraction.py (slanted-edge MTF of pbrt renders through
+dgauss.50mm.dat at f/2, f/5.6, f/11 and five field points vs the wave-optics MTF).
+Stop diameters for a traced N: f/2 25.0 mm (clamped to 17.1), f/5.6 6.194 mm,
+f/11 3.155 mm (traced_f_number; 8.93 mm is f/3.88, not f/5.6).
+
+Not modelled: dispersion / chromatic aberration (one index per glass in the pbrt
+format), bucket-width averaging (centre wavelength per bucket), polarisation and
+high-NA vector effects, Fresnel losses, coatings, scatter, ghosts, microlens /
+crosstalk, and lens tilt/decentre (rotational symmetry is assumed).
