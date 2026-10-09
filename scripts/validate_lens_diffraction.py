@@ -322,8 +322,9 @@ def plot(results: dict, od: Path) -> None:
             f = np.array(d["freq_cy_mm"])
             ax.plot(f, d["mtf_pbrt"], color="0.6", lw=1.5, label="pbrt (geometric)")
             ax.plot(f, d["mtf_pbrt_diffraction"], color="C0", lw=2, label="pbrt + diffraction_only")
-            ax.plot(f, d["pred_wave"], "k--", lw=1.3, label="lens-design wave-optics MTF")
-            ax.plot(f, d["pred_geom_x_diff"], color="C3", ls=":", lw=1.5, label="geometric OTF x diffraction")
+            ax.plot(f, d["sim_wave"], "k--", lw=1.4, label="lens-design wave-optics MTF")
+            ax.plot(f, d["sim_geom_x_diff"], color="C3", ls=":", lw=1.6, label="geometric x diffraction (predicted)")
+            ax.plot(f, d["sim_geom"], color="0.3", ls=":", lw=1, label="geometric spot (predicted)")
             ax.plot(f, d["pred_diff_only"], color="C2", ls="-.", lw=1, label="diffraction only (traced pupil)")
             ax.set_ylim(0, 1.02)
             ax.set_xlim(0, f.max())
@@ -353,7 +354,7 @@ def plot(results: dict, od: Path) -> None:
                 alpha=0.5,
                 label=f"{name} pbrt",
             )
-            ax.plot(h, [results[name][p[0]]["mtf50_pred_wave"] for p in pts], "k^", ms=5, mfc="none")
+            ax.plot(h, [results[name][p[0]]["mtf50_sim_wave"] for p in pts], "k^", ms=5, mfc="none")
         ax.set_xlabel("image height [mm]")
         ax.set_ylabel("MTF50 [cy/mm]")
         ax.set_title(f"Field dependence, {lab} MTF50 (triangles: wave-optics)")
@@ -363,7 +364,10 @@ def plot(results: dict, od: Path) -> None:
     axs[-1, 2].axis("off")
     for ax in axs[-2]:
         ax.set_xlabel("spatial frequency [cy/mm]")
-    fig.suptitle("dgauss.50mm.dat at 3.2 m, 2 um pixels: slanted-edge MTF with / without traced-lens diffraction")
+    fig.suptitle(
+        "dgauss.50mm.dat at 3.2 m, 2 um pixels, 550 nm: pbrt slanted-edge MTF with / without traced-lens diffraction\n"
+        "(predictions passed through the same edge ROI / SFR as the renders; incl. box-pixel MTF)"
+    )
     fig.tight_layout()
     fig.savefig(od / "lens_diffraction_validation.png", dpi=110)
     print(f"wrote {od / 'lens_diffraction_validation.png'}")
