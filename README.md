@@ -286,11 +286,13 @@ venv/bin/python tools/munsell_mat_to_sqlite.py --summary
 
 ## Known Limitations
 
+- Highway measured materials (`--car-paint measured`, `--spectral-library usgs`, `--fluorescent-sign`) are opt-in; RGL paints are a stand-in palette, asphalt BRDF is analytic (measured albedo only), and the Type XI fluorescent dye spectra are fitted to 23 CFR 655 colour limits, not measured (see docs/HIGHWAY_SCENES.md).
 - `pbrt_exr` sensor-forward mode expects multispectral EXR and currently supports `photon_counting` calibration mode.
 - `cfa.demosaic` implements bilinear and Malvar-He-Cutler reconstruction for the legacy 2x2 Bayer path (`cfa.pattern`). The opt-in generic CFA path (`cfa.layout`: RGBW, RCCB, RYYCy, RCCG, Quad Bayer, custom NxM, per-channel spectral QE) uses per-channel normalised-convolution bilinear or guide-channel gradient demosaicing, not a learned/edge-directed state-of-the-art demosaic; Quad Bayer remosaic is a nearest-site rearrangement. See [docs/CFA_NIR.md](docs/CFA_NIR.md).
 - NIR / no-IRCF: stock pbrt-v4 renders 360-830 nm; 850/940 nm needs the opt-in NIR pbrt build (`PBRT_LAMBDA_MAX_NM=1100`, patch 0002). NIR QE curves beyond the measured ~700 nm are a Si absorption model (Green 2008) with an assumed IR-transparent colour filter; ColorChecker and most material reflectances are measured only to 730 nm and held constant beyond (pbrt extrapolation). See [docs/CFA_NIR.md](docs/CFA_NIR.md).
 - Post-PSF is a simple Gaussian/stray-light approximation, not a full chromatic lens aberration model.
 - PBRT spectral sampling remains Monte Carlo based; use validation and repeated runs for sensitive comparisons.
+- HDR pixel models (`noise.hdr`: DCG, split pixel, LOFIC, multi-exposure; opt-in) use deterministic-threshold SNR theory and omit row/column FPN, 1/f noise, blooming and ADC INL/DNL per capture; split-pixel SPD offset/crosstalk and LOFIC soft-knee effects are not modelled. Example HDR sensor models are illustrative, not datasheets. See [docs/HDR_PIXELS.md](docs/HDR_PIXELS.md).
 - Pixel angular response (CRA / microlens shift, lens + colour shading, optional optical crosstalk) is opt-in (`sensor_forward.model.pixel_angular_response`) and uses a geometric-optics microlens with a Gaussian diffraction term; wave-optical effects at sub-2 µm pitch and real stack data are not modelled — see [`docs/PIXEL_ANGULAR_RESPONSE.md`](docs/PIXEL_ANGULAR_RESPONSE.md). Off by default.
 
 ## Troubleshooting

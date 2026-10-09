@@ -69,6 +69,7 @@ model. Example: [`config/examples/cfa_custom_layout.yaml`](../config/examples/cf
 
 ### Not modelled / approximations
 
+* HDR pixel modes (DCG / split pixel / LOFIC / multi-exposure) run only on the legacy Bayer/RGB path; combining them with a generic `cfa.layout` raises an error.
 * ColorChecker and most material reflectances in `spectra/` are measured to 730-780 nm; pbrt holds
   the last value constant beyond, so NIR reflectances of the chart, asphalt, vegetation etc. are
   extrapolations, not data.
