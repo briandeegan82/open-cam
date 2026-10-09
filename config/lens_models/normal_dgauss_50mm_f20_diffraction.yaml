@@ -1,0 +1,26 @@
+schema_version: 1
+# Example: normal_dgauss_50mm_f20 plus traced-lens diffraction (opt-in, see
+# tools/lens_diffraction_psf.py and docs/LENS_MODELS.txt "Diffraction").
+# pbrt's realistic camera already renders the geometric aberrations of
+# dgauss.50mm.dat, so only the aberration-free diffraction PSF of the traced
+# (vignetted) pupil is added ("combine: diffraction_only"), per spectral bucket and
+# varying across the field, before the radiance -> electrons conversion.
+lens:
+  camera: realistic
+  realistic_lensfile: config/lenses/dgauss.50mm.dat
+  realistic_aperture_diameter_mm: 25.0
+  realistic_focus_distance: 1.0
+  focal_length_mm: 50.0
+  post_psf:
+    enabled: true
+    mode: lens_diffraction
+    lens_diffraction:
+      combine: diffraction_only   # wave_optics: full PSF incl. W, for pinhole/perspective renders only
+      # Pixel pitch of the pbrt film: give pixel_pitch_um, or film_diagonal_mm equal to the
+      # pbrt Film "diagonal" (pbrt default 35 mm, which is assumed when neither is set).
+      film_diagonal_mm: 35.0
+      tile_grid: [9, 7]           # traced PSFs at tile centres, bilinearly interpolated
+      pupil_samples: 97           # rays across the stop per field point
+      pupil_amplitude: radiometric  # or uniform
+      # apodisation_w: 0.8        # optional Gaussian apodiser T = exp(-2 rho^2 / w^2), rho = stop radius 1
+      # aperture_blades: 6        # optional N-blade polygonal stop (default circular)
