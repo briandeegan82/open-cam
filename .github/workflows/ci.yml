@@ -72,4 +72,4 @@ jobs:
       - name: End-to-end render test
         env:
           OPENCAM_REQUIRE_PBRT: "1"
-        run: python -m pytest tests/test_pbrt_e2e.py tests/test_pbrt_full_pipeline.py tests/test_highway_night.py -v
+        run: python -m pytest tests/test_pbrt_e2e.py tests/test_pbrt_full_pipeline.py tests/test_highway_night.py tests/test_highway_spectral_sky.py -v

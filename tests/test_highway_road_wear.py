@@ -144,6 +144,16 @@ class TestBuilderHook(unittest.TestCase):
             )
         self.assertEqual((m["road"]["wear"]["level"], m["road"]["wear"]["seed"]), ("heavy", 11))
 
+    def test_wear_none_splits_solid_lines(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            build_without_assets(Path(td), "--road-wear", "none")
+            lines = (Path(td) / "scene" / "highway.pbrt").read_text().splitlines()
+        for mat in ("paint_yellow", "paint_white"):
+            i = lines.index(f'NamedMaterial "{mat}"')
+            pts = np.array(lines[i + 2].split("[")[1].split("]")[0].split(), float).reshape(-1, 4, 3)
+            dz = np.ptp(pts[..., 2], axis=1)
+            self.assertLessEqual(float(dz.max()), hw.DASH + hw.GAP + 1e-6, mat)  # no 1.5 km slivers
+
     def test_wear_follows_curved_alignment(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             m = build_without_assets(Path(td), "--curve-radius", "800", "--road-wear-texel-m", "0.1")
