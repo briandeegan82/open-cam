@@ -154,6 +154,18 @@ class TestBuilderHook(unittest.TestCase):
         far = [ln for ln in rpm if float(ln.split()[4]) > 800.0]
         self.assertTrue(far and all(abs(float(ln.split()[2])) > 50.0 for ln in far))  # bent away from x ~ 0
 
+    def test_night_worn_markings_stay_retroreflective(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            build_without_assets(Path(td), "--time-of-day", "night", "--road-wear-texel-m", "0.1")
+            text = (Path(td) / "scene" / "highway.pbrt").read_text()
+        self.assertIn('MakeNamedMaterial "paint_white" "string type" "retroreflective"', text)
+        for kind, paint in (("dash", "paint_white"), ("edge_white", "paint_white"), ("edge_yellow", "paint_yellow")):
+            self.assertIn(
+                f'MakeNamedMaterial "rw:paint_{kind}" "string type" "mix" "string materials"'
+                f' ["{paint}" "rw:bare_{kind}"] "texture amount" "rw:mw:{kind}"',
+                text,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

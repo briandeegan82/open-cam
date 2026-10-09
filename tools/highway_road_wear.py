@@ -400,7 +400,7 @@ class RoadWear:
                 L.append(f'Texture "rw:{m}:rough0" "float" "constant" "float value" [{ROUGH_ASPHALT}]')
             else:
                 lum, rmap, npng = self.detiled(aid, info, raw)
-                k, rough, nmap = f"rw:{m}:k", f'"texture roughness" "rw:{m}:rough"', f' "string normalmap" "{npng}"'
+                k, rough, nmap = f"rw:{m}:k", f'"texture roughness" "rw:{m}:rough"', f'    "string normalmap" "{npng}"'
                 L += [
                     f'Texture "rw:{m}:lum" "float" "imagemap" "string filename" "{lum}"',
                     f'Texture "{k}" "float" "scale" "texture tex" "rw:{m}:lum" "texture scale" "rw:mul"',
@@ -416,7 +416,8 @@ class RoadWear:
                 f'Texture "rw:{m}:rough" "float" "mix" "texture tex1" "rw:{m}:rough0"'
                 f' "float tex2" [{ROUGH_POLISHED}] "texture amount" "rw:gloss"',
                 f'MakeNamedMaterial "rw:asphalt{m}" "string type" "coateddiffuse" "texture reflectance" "rw:{m}:refl"'
-                f' {rough} "float thickness" [0.001]{nmap}',
+                f' {rough} "float thickness" [0.001]',
+                *([nmap] if nmap else []),  # own line so highway_night.strip_normal_map can drop it
             ]
         if len(names) == 2:
             L.append(
@@ -462,10 +463,21 @@ class RoadWear:
 
     # ------------------------------------------------------------------ markings + RPMs
     def marking_lines(
-        self, white: list[tuple], yellow: list[tuple], dash: float, gap: float, mesh_fn=None, place_fn=None
+        self,
+        white: list[tuple],
+        yellow: list[tuple],
+        dash: float,
+        gap: float,
+        mesh_fn=None,
+        place_fn=None,
+        retro: bool = False,
     ) -> list[str]:
-        """``mesh_fn``/``place_fn``: builder hooks that bend road-frame meshes/instances onto the alignment."""
-        """Worn paint (replaces the clean paint_white/paint_yellow quads) and raised pavement markers."""
+        """Worn paint (replaces the clean paint_white/paint_yellow quads) and raised pavement markers.
+
+        ``mesh_fn``/``place_fn``: builder hooks that bend road-frame meshes/instances onto the alignment.
+        ``retro``: the builder's ``paint_white``/``paint_yellow`` are retroreflective (highway_night);
+        worn paint is then a stochastic material mix of that paint and bare asphalt (same coverage map).
+        """
         rng, p = self.rng, self.p
         pm = 16 * (dash + gap)
         L: list[str] = []
@@ -481,16 +493,26 @@ class RoadWear:
             f = self.tex_dir / f"marking_{self.level}_s{self.seed}_{kind}.exr"
             write_float_exr(f, wear)
             paint = "spd/paint_road_yellow.spd" if kind == "edge_yellow" else "spd/paint_road_white.spd"
-            L += [
-                f'Texture "rw:mw:{kind}" "float" "imagemap" "string filename" "{self._rel(f)}"',
-                f'Texture "rw:mp:{kind}" "spectrum" "mix" "spectrum tex1" "{paint}"'
-                f' "spectrum tex2" "spd/asphalt_aged.spd" "texture amount" "rw:mw:{kind}"',
-                f'Texture "rw:mr:{kind}" "float" "mix" "float tex1" [{ROUGH_BEADS}] "float tex2" [{ROUGH_ASPHALT}]'
-                f' "texture amount" "rw:mw:{kind}"',
-                f'MakeNamedMaterial "rw:paint_{kind}" "string type" "coateddiffuse" "texture reflectance"'
-                f' "rw:mp:{kind}" "texture roughness" "rw:mr:{kind}"',
-                f'NamedMaterial "rw:paint_{kind}"',
-            ]
+            L.append(f'Texture "rw:mw:{kind}" "float" "imagemap" "string filename" "{self._rel(f)}"')
+            if retro:
+                L += [
+                    f'MakeNamedMaterial "rw:bare_{kind}" "string type" "coateddiffuse"'
+                    f' "spectrum reflectance" "spd/asphalt_aged.spd" "float roughness" [{ROUGH_ASPHALT}]',
+                    f'MakeNamedMaterial "rw:paint_{kind}" "string type" "mix" "string materials"'
+                    f' ["{"paint_yellow" if kind == "edge_yellow" else "paint_white"}" "rw:bare_{kind}"]'
+                    f' "texture amount" "rw:mw:{kind}"',
+                    f'NamedMaterial "rw:paint_{kind}"',
+                ]
+            else:
+                L += [
+                    f'Texture "rw:mp:{kind}" "spectrum" "mix" "spectrum tex1" "{paint}"'
+                    f' "spectrum tex2" "spd/asphalt_aged.spd" "texture amount" "rw:mw:{kind}"',
+                    f'Texture "rw:mr:{kind}" "float" "mix" "float tex1" [{ROUGH_BEADS}] "float tex2" [{ROUGH_ASPHALT}]'
+                    f' "texture amount" "rw:mw:{kind}"',
+                    f'MakeNamedMaterial "rw:paint_{kind}" "string type" "coateddiffuse" "texture reflectance"'
+                    f' "rw:mp:{kind}" "texture roughness" "rw:mr:{kind}"',
+                    f'NamedMaterial "rw:paint_{kind}"',
+                ]
             pts, tri, uv = [], [], []
             seg = dash + gap  # split solid lines: 1.5 km sliver triangles render too dark in pbrt
             rects = [
