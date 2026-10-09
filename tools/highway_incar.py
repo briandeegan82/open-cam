@@ -599,7 +599,7 @@ class InCarEffects:
         return vals
 
     def car_lines(self, inst: str, lane: int, speed_kmh: float, include_text: str) -> tuple[list[str], dict]:
-        """Lines to put right after the car's AttributeBegin (before its placement transforms)."""
+        """Lines to put right after the car's placement transform (road frame, before its own yaw)."""
         vz = speed_kmh * KMH * (1.0 if lane >= 0 else -1.0)
         meta = {"speed_kmh": speed_kmh, "velocity_world_mps": [0.0, 0.0, vz]}
         if not self.animated or vz == 0.0:

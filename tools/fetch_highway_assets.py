@@ -8,6 +8,7 @@ tools/build_highway_scene.py under ``scenes/assets/highway/prepared/<asset>/``:
 * ``hdri``     -> sun removed and measured (``sun.json``) + equal-area ``sky_equiarea.exr``
 * ``car_pbrt`` -> ``car.json``: materials, PLY shape list and bounding box of the car
 * ``gltf``     -> PLY meshes (node transforms baked) + ``model.json`` with materials
+* ``glb``      -> binary glTF unpacked to .gltf/.bin/images, then prepared like ``gltf``
 * ``texture``  -> zip extracted; maps referenced from the asset manifest
 
     venv/bin/python tools/fetch_highway_assets.py            # everything
@@ -23,6 +24,7 @@ import hashlib
 import json
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import urllib.request
@@ -151,8 +153,7 @@ def read_ply_positions(path: Path) -> np.ndarray:
     """Vertex positions of a binary little-endian PLY (only what is needed for bounds)."""
     data = Path(path).read_bytes()
     end = data.index(b"end_header") + len(b"end_header")
-    while data[end : end + 1] in (b"\r", b"\n"):
-        end += 1
+    end += 2 if data[end : end + 2] == b"\r\n" else 1  # exactly one EOL; binary data may start with 0x0a/0x0d
     header = data[:end].decode("latin1").split("\n")
     if not any("binary_little_endian" in ln for ln in header):
         raise ValueError(f"{path}: only binary_little_endian PLY supported")
@@ -338,6 +339,9 @@ def prepare_gltf(asset: dict, raw: Path, out: Path) -> dict:
                 "base_color_texture": img,
                 "base_color_factor": pbr.get("baseColorFactor", [1, 1, 1, 1])[:3],
                 "roughness": float(pbr.get("roughnessFactor", 1.0)),
+                "metallic": float(pbr.get("metallicFactor", 1.0)),
+                "alpha": float(pbr.get("baseColorFactor", [1, 1, 1, 1])[3]),
+                "alpha_mode": m.get("alphaMode", "OPAQUE"),
                 "double_sided": bool(m.get("doubleSided", False)),
             }
         )
@@ -354,6 +358,11 @@ def prepare_gltf(asset: dict, raw: Path, out: Path) -> dict:
                     continue
                 at = prim["attributes"]
                 pos = _gltf_accessor(g, buffers, at["POSITION"])
+                acc = g["accessors"][at["POSITION"]]
+                bad = ~np.isfinite(pos).all(1)
+                if "min" in acc and "max" in acc:  # spec-mandatory bounds; reject corrupt vertices
+                    tol = 1e-3 * (np.ptp([acc["min"], acc["max"]], axis=0).max() + 1.0)
+                    bad |= ((pos < np.array(acc["min"]) - tol) | (pos > np.array(acc["max"]) + tol)).any(1)
                 pos = pos @ mtx[:3, :3].T + mtx[:3, 3]
                 nrm = None
                 if "NORMAL" in at:
@@ -368,9 +377,15 @@ def prepare_gltf(asset: dict, raw: Path, out: Path) -> dict:
                     tri = _gltf_accessor(g, buffers, prim["indices"]).reshape(-1, 3)
                 else:
                     tri = np.arange(len(pos)).reshape(-1, 3)
+                if bad.any():
+                    tri = tri[~bad[tri].any(1)]
+                    pos[bad] = 0.0
+                if not len(tri):
+                    continue
                 name = f"mesh_{len(shapes):03d}.ply"
                 write_ply(out / name, pos, nrm, uv, tri)
-                lo, hi = np.minimum(lo, pos.min(0)), np.maximum(hi, pos.max(0))
+                used = pos[np.unique(tri)]
+                lo, hi = np.minimum(lo, used.min(0)), np.maximum(hi, used.max(0))
                 shapes.append({"ply": name, "material": int(prim.get("material", 0)), "triangles": int(len(tri))})
         for c in node.get("children", []):
             visit(c, mtx)
@@ -378,6 +393,36 @@ def prepare_gltf(asset: dict, raw: Path, out: Path) -> dict:
     for ni in g["scenes"][g.get("scene", 0)]["nodes"]:
         visit(ni, np.eye(4))
     return {"materials": mats, "shapes": shapes, "bbox_min": lo.tolist(), "bbox_max": hi.tolist(), "up_axis": "y"}
+
+
+def unpack_glb(glb: Path, dest: Path) -> Path:
+    """Split a binary glTF (.glb) into .gltf + .bin + image files so prepare_gltf can read it."""
+    data = glb.read_bytes()
+    magic, version, _ = struct.unpack_from("<III", data, 0)
+    if magic != 0x46546C67 or version != 2:
+        raise ValueError(f"{glb}: not a glTF 2.0 binary")
+    off, chunks = 12, {}
+    while off < len(data):
+        length, ctype = struct.unpack_from("<II", data, off)
+        chunks[ctype] = data[off + 8 : off + 8 + length]
+        off += 8 + length
+    g = json.loads(chunks[0x4E4F534A])
+    binary = chunks.get(0x004E4942, b"")
+    dest.mkdir(parents=True, exist_ok=True)
+    ext = {"image/png": ".png", "image/jpeg": ".jpg"}
+    for i, img in enumerate(g.get("images", [])):
+        if "bufferView" not in img:
+            continue
+        bv = g["bufferViews"][img.pop("bufferView")]
+        name = f"image_{i:03d}{ext.get(img.pop('mimeType', ''), '.png')}"
+        start = bv.get("byteOffset", 0)
+        (dest / name).write_bytes(binary[start : start + bv["byteLength"]])
+        img["uri"] = name
+    (dest / "buffer.bin").write_bytes(binary)
+    g["buffers"] = [{"uri": "buffer.bin", "byteLength": len(binary)}]
+    out = dest / (glb.stem + ".gltf")
+    out.write_text(json.dumps(g))
+    return out
 
 
 def prepare(aid: str, asset: dict, root: Path, *, force: bool = False) -> Path:
@@ -398,6 +443,9 @@ def prepare(aid: str, asset: dict, root: Path, *, force: bool = False) -> Path:
         data = prepare_car(asset, raw, out)
     elif kind == "gltf":
         data = prepare_gltf(asset, raw, out)
+    elif kind == "glb":
+        gltf = unpack_glb(raw / asset["glb"], raw / "unpacked")
+        data = prepare_gltf({**asset, "gltf": str(gltf.relative_to(raw))}, raw, out)
     elif kind == "texture":
         missing = [m for m in asset.get("maps", {}).values() if not (raw / m).is_file()]
         if missing:
