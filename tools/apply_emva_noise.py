@@ -1056,6 +1056,12 @@ def main() -> None:
         help="Scene manifest of the rendered EXR; integrate_qe then calibrates target lux as chart illuminance.",
     )
     ap.add_argument(
+        "--raw-out",
+        type=Path,
+        default=None,
+        help="Override output.raw_out (RAW16 path); PNGs and run_stats.json go next to it.",
+    )
+    ap.add_argument(
         "--regenerate-defect-map",
         action="store_true",
         help="Regenerate and overwrite persistent defect-pixel map when configured.",
@@ -1094,6 +1100,8 @@ def main() -> None:
     if args.linear_exr is not None:
         exr_in = args.linear_exr.resolve()
     raw_out = (repo / out_cfg.get("raw_out", "out/colorchecker_noisy.raw16")).resolve()
+    if args.raw_out is not None:
+        raw_out = args.raw_out.resolve()
     png_dir = raw_out.parent / f"{raw_out.stem}_png"
 
     electrons_npz = args.electrons_npz.resolve() if args.electrons_npz is not None else None

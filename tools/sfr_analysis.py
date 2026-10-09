@@ -99,48 +99,184 @@ def star_nyquist_radius_px(spokes: int) -> float:
 # =====================================================================
 # Edge detection
 # =====================================================================
-def row_edge_positions(roi: np.ndarray, window_px: float | None = None) -> np.ndarray:
-    """Sub-pixel horizontal edge location for every row, by derivative centroid.
+#: Iterations of "window on the fitted edge -> centroid -> robust fit".
+EDGE_FIT_ITERATIONS = 3
 
-    The centroid is taken only within a window around the dominant edge rather
-    than across the whole row. A plain whole-row centroid is pulled off target by
-    anything else with a gradient -- most easily by the border discontinuity a
-    zero-padded convolution leaves behind, which can shift the estimate by tens
-    of pixels and silently build the ESF around the wrong origin.
+#: Rows whose centroid is further than this many robust sigmas (1.4826 x MAD)
+#: from the fitted edge are rejected as outliers before the final fit.
+EDGE_OUTLIER_SIGMAS = 3.5
+
+
+@dataclass(frozen=True)
+class EdgeFit:
+    """Located slanted edge: per-row centroids plus the robust polynomial fit.
+
+    ``coefficients`` are ``numpy.polyval`` coefficients (highest power first)
+    of horizontal edge position, in pixels from the left of the ROI with pixel
+    *centres* at integer ``x``, as a function of row index.
+    """
+
+    positions_px: np.ndarray
+    coefficients: np.ndarray
+    inliers: np.ndarray
+    polarity: int
+
+    def position(self, rows: np.ndarray | float) -> np.ndarray:
+        return np.polyval(self.coefficients, np.asarray(rows, dtype=np.float64))
+
+    def slope(self, rows: np.ndarray | float) -> np.ndarray:
+        return np.polyval(np.polyder(self.coefficients), np.asarray(rows, dtype=np.float64))
+
+    @property
+    def angle_deg(self) -> float:
+        """Mean edge tilt from vertical (positive leans right going down)."""
+        n = self.positions_px.size
+        return math.degrees(math.atan(float(np.mean(self.slope(np.arange(n, dtype=np.float64))))))
+
+
+def _hamming_window(x: np.ndarray, centre: np.ndarray, half_width: float) -> np.ndarray:
+    """Hamming window of half-width *half_width* centred per row on *centre*."""
+    u = (x[None, :] - np.asarray(centre, dtype=np.float64)[:, None]) / float(half_width)
+    return np.where(np.abs(u) <= 1.0, 0.54 + 0.46 * np.cos(np.pi * u), 0.0)
+
+
+def _robust_polyfit(rows: np.ndarray, pos: np.ndarray, order: int) -> tuple[np.ndarray, np.ndarray]:
+    """Least-squares polynomial with iterative MAD-based outlier rejection."""
+    ok = np.isfinite(pos)
+    if ok.sum() <= order:
+        raise ValueError("could not locate an edge: is there any contrast in the ROI?")
+    coeffs = np.polyfit(rows[ok], pos[ok], order)
+    for _ in range(10):
+        resid = pos - np.polyval(coeffs, rows)
+        mad = float(np.median(np.abs(resid[ok] - np.median(resid[ok]))))
+        scale = max(1.4826 * mad, 1e-6)
+        new_ok = np.isfinite(pos) & (np.abs(resid) <= EDGE_OUTLIER_SIGMAS * scale)
+        if new_ok.sum() <= order or np.array_equal(new_ok, ok):
+            break
+        ok = new_ok
+        coeffs = np.polyfit(rows[ok], pos[ok], order)
+    return coeffs, ok
+
+
+def fit_edge(roi: np.ndarray, window_px: float | None = None, fit_order: int = 1) -> EdgeFit:
+    """Locate a near-vertical edge the way ISO 12233:2017 / ``sfrmat`` does.
+
+    Per row, the signed first derivative ``[-1, +1]`` (oriented so the edge is a
+    positive peak) is multiplied by a Hamming window centred on the current
+    edge estimate, and its centroid is taken. A polynomial of order
+    *fit_order* (1 = straight edge, as in ISO 12233; 2+ allows for lens
+    distortion, as in ``sfrmat4``) is fitted to the row centroids with
+    outlier rejection, the windows are re-centred on the fit and the process is
+    repeated (``EDGE_FIT_ITERATIONS``).
+
+    Two things make this robust where an ``|derivative|`` centroid is not:
+
+    * the derivative is *signed*, so zero-mean render or sensor noise adds zero
+      mean weight; ``|noise|`` adds a positive pedestal everywhere in the window
+      that drags every centroid toward the window centre and flattens the
+      fitted slope (it measured -2.3 deg for a -5.0 deg pbrt edge);
+    * the window follows the fitted edge row by row and a per-row derivative
+      baseline (median outside the window) is removed, so a shading ramp across
+      the ROI (vignetting, illumination fall-off) cannot pull the centroid
+      either.
+
+    References: ISO 12233:2017 / 2023, *Photography -- Electronic still picture
+    imaging -- Resolution and spatial frequency responses*, Annex D (edge
+    location by derivative centroid, Hamming window, linear fit); P. D. Burns,
+    "Slanted-edge MTF for digital camera and scanner analysis", Proc. IS&T PICS
+    2000, pp. 135-138; P. D. Burns, ``sfrmat3``/``sfrmat4`` reference
+    implementation (polynomial edge fit, centred windows).
+    """
+    a = np.asarray(roi, dtype=np.float64)
+    if a.ndim != 2 or a.shape[1] < 4 or a.shape[0] < 2:
+        raise ValueError(f"ROI must be a 2-D array with at least 2 rows and 4 columns, got {a.shape}")
+    n_rows, n_cols = a.shape
+    deriv = np.diff(a, axis=1)
+    # Derivative samples sit between pixels, i.e. at x = index + 0.5.
+    x = np.arange(deriv.shape[1], dtype=np.float64) + 0.5
+    rows = np.arange(n_rows, dtype=np.float64)
+
+    if window_px is None:
+        window_px = max(10.0, deriv.shape[1] / 4.0)
+
+    # Locate the edge from the column-summed derivative, ignoring the outer
+    # margin: a zero-padded border is a perfectly good edge as far as a gradient
+    # is concerned, and ISO 12233 ROIs are cropped away from the frame anyway.
+    profile = deriv.sum(axis=0)
+    margin = min(int(round(0.1 * deriv.shape[1])), (deriv.shape[1] - 1) // 2)
+    interior = profile[margin : deriv.shape[1] - margin]
+    if not np.any(interior):
+        raise ValueError("could not locate an edge: is there any contrast in the ROI?")
+    peak = margin + int(np.argmax(np.abs(interior)))
+    polarity = 1 if profile[peak] >= 0 else -1
+    deriv = deriv * polarity
+
+    centre = np.full(n_rows, float(x[peak]))
+    # The first pass uses a wide window around a column-constant guess, so a
+    # steep slant cannot walk the edge out of it; later passes follow the fit.
+    half_widths = [max(2.0 * window_px, float(n_rows) * 0.2)] + [float(window_px)] * EDGE_FIT_ITERATIONS
+    positions = np.full(n_rows, np.nan)
+    coeffs = np.zeros(int(fit_order) + 1)
+    inliers = np.zeros(n_rows, dtype=bool)
+    for k, hw in enumerate(half_widths):
+        win = _hamming_window(x, centre, hw)
+        outside = win <= 0.0
+        if np.any(outside):
+            masked = np.where(outside, deriv, np.nan)
+            with np.errstate(all="ignore"):
+                base = np.nanmedian(masked, axis=1)
+            base = np.where(np.isfinite(base), base, 0.0)
+        else:
+            base = np.zeros(n_rows)
+        w = win * (deriv - base[:, None])
+        total = w.sum(axis=1)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            positions = np.where(total > 1e-12 * max(np.abs(a).max(), 1e-300), (w * x).sum(axis=1) / total, np.nan)
+        order = 1 if k == 0 else int(fit_order)
+        coeffs, inliers = _robust_polyfit(rows, positions, order)
+        centre = np.polyval(coeffs, rows)
+    # Report in the requested order even if the last pass fell back.
+    if coeffs.size != int(fit_order) + 1:
+        coeffs = np.concatenate([np.zeros(int(fit_order) + 1 - coeffs.size), coeffs])
+    return EdgeFit(positions_px=positions, coefficients=coeffs, inliers=inliers, polarity=polarity)
+
+
+def row_edge_positions(roi: np.ndarray, window_px: float | None = None) -> np.ndarray:
+    """Sub-pixel horizontal edge location for every row (see :func:`fit_edge`).
+
+    These are the per-row windowed signed-derivative centroids of the final
+    iteration; rows rejected as outliers are still reported.
+    """
+    return fit_edge(roi, window_px).positions_px
+
+
+def row_edge_positions_legacy(roi: np.ndarray, window_px: float | None = None) -> np.ndarray:
+    """The pre-ISO estimator: ``|derivative|`` centroid in one fixed window.
+
+    Kept only so its bias can be demonstrated and regression-tested; do not use
+    it for measurements. On noisy renders the ``|noise|`` pedestal pulls every
+    row toward the window centre, under-estimating the slant (-2.3 deg reported
+    for a -5.0 deg edge) and smearing the ESF (MTF50 ~4x too low).
     """
     a = np.asarray(roi, dtype=np.float64)
     deriv = np.abs(np.diff(a, axis=1))
-    # Derivative samples sit between pixels, i.e. at x = index + 0.5.
     x = np.arange(deriv.shape[1], dtype=np.float64) + 0.5
-
     if window_px is None:
         window_px = max(8.0, deriv.shape[1] / 6.0)
-
-    # Locate the edge from the column-summed derivative, ignoring the outer
-    # margin. A border step is a perfectly good edge as far as a gradient is
-    # concerned, so the only reliable way to not lock onto one is to refuse to
-    # look there -- ISO 12233 ROIs are cropped away from the frame edge anyway.
     profile = deriv.sum(axis=0)
     margin = min(int(round(0.1 * deriv.shape[1])), (deriv.shape[1] - 1) // 2)
     interior = profile[margin : deriv.shape[1] - margin]
     centre = float(x[margin + int(np.argmax(interior))])
     mask = np.abs(x - centre) <= window_px
-
     weights = deriv * mask
     total = weights.sum(axis=1)
     total[total == 0] = np.nan
     return (weights * x).sum(axis=1) / total
 
 
-def find_edge_angle(roi: np.ndarray) -> float:
+def find_edge_angle(roi: np.ndarray, fit_order: int = 1) -> float:
     """Edge tilt away from vertical, in degrees (positive leans right going down)."""
-    positions = row_edge_positions(roi)
-    rows = np.arange(positions.size, dtype=np.float64)
-    valid = np.isfinite(positions)
-    if valid.sum() < 2:
-        raise ValueError("could not locate an edge: is there any contrast in the ROI?")
-    slope = np.polyfit(rows[valid], positions[valid], 1)[0]
-    return math.degrees(math.atan(slope))
+    return fit_edge(roi, fit_order=fit_order).angle_deg
 
 
 # =====================================================================
@@ -172,27 +308,86 @@ def cycles_per_mm(cycles_per_px: float | np.ndarray, pixel_pitch_um: float) -> f
     return np.asarray(cycles_per_px) * 1000.0 / pixel_pitch_um
 
 
+def _whole_phase_rows(n_rows: int, slope: float) -> int:
+    """Rows to keep so the edge sweeps a whole number of pixel phases.
+
+    ISO 12233 / ``sfrmat`` trim the ROI so ``n * |slope|`` is an integer:
+    otherwise some sub-pixel phases are sampled once more than others, which
+    puts a periodic weighting on the ESF bins.
+    """
+    s = abs(float(slope))
+    if s < 1e-9:
+        return n_rows
+    cycles = math.floor(n_rows * s)
+    if cycles < 1:
+        return n_rows
+    return max(2, min(n_rows, int(round(cycles / s))))
+
+
+def flatfield_rows(roi: np.ndarray, edge: EdgeFit, margin_px: float | None = None) -> np.ndarray:
+    """Divide each row by a straight line fitted to its bright plateau.
+
+    Opt-in shading correction for ROIs with a luminance ramp across the edge
+    (lens vignetting / illumination fall-off on wide renders). The ramp's
+    constant derivative otherwise leaks into the LSF tails and lowers the MTF
+    at low frequency; ISO 12233 instead requires uniform illumination of the
+    chart, so this is off by default. The plateau is every pixel on the bright
+    side further than *margin_px* (default ``max(10, width/4)``) from the fitted
+    edge. The correction is multiplicative because vignetting scales both the
+    bright and the dark patch.
+    """
+    a = np.asarray(roi, dtype=np.float64)
+    n_rows, n_cols = a.shape
+    if margin_px is None:
+        margin_px = max(10.0, n_cols / 4.0)
+    cols = np.arange(n_cols, dtype=np.float64)
+    centre = edge.position(np.arange(n_rows, dtype=np.float64))
+    out = a.copy()
+    for i in range(n_rows):
+        side = (cols - centre[i]) * edge.polarity
+        plate = side > margin_px
+        if plate.sum() < 3:
+            continue
+        k = np.polyfit(cols[plate], a[i, plate], 1)
+        level = np.polyval(k, cols)
+        if np.all(level > 0):
+            out[i] = a[i] / level
+    return out
+
+
 def edge_spread_function(
-    roi: np.ndarray, angle_deg: float | None = None, oversampling: int = DEFAULT_OVERSAMPLING
+    roi: np.ndarray,
+    angle_deg: float | None = None,
+    oversampling: int = DEFAULT_OVERSAMPLING,
+    *,
+    fit_order: int = 1,
+    edge: EdgeFit | None = None,
 ) -> tuple[np.ndarray, np.ndarray, float]:
     """Project every pixel onto the edge normal and bin at sub-pixel resolution.
 
     Returns ``(position_px, esf, bin_width_px)`` with position measured
-    perpendicular to the edge and zero at the edge itself.
+    perpendicular to the edge and zero at the edge itself. The edge comes from
+    :func:`fit_edge` (pass *edge* to reuse one); *angle_deg* is accepted for
+    backward compatibility and only overrides the projection cosine.
     """
     a = np.asarray(roi, dtype=np.float64)
-    if angle_deg is None:
-        angle_deg = find_edge_angle(a)
-
-    positions = row_edge_positions(a)
-    rows = np.arange(a.shape[0], dtype=np.float64)
-    valid = np.isfinite(positions)
-    slope, intercept = np.polyfit(rows[valid], positions[valid], 1)
+    if edge is None:
+        edge = fit_edge(a, fit_order=fit_order)
+    n_keep = _whole_phase_rows(a.shape[0], float(np.mean(edge.slope(np.arange(a.shape[0])))))
+    a = a[:n_keep]
+    rows = np.arange(n_keep, dtype=np.float64)
 
     cols = np.arange(a.shape[1], dtype=np.float64)
-    # Signed horizontal distance from the fitted edge, then projected onto the
+    # Fitted positions use pixel-centre coordinates (derivative samples sit at
+    # index + 0.5 between pixels j and j+1), matching ``cols``.
+    centre = edge.position(rows)
+    if angle_deg is None:
+        cos_t = np.cos(np.arctan(edge.slope(rows)))
+    else:
+        cos_t = np.full(n_keep, math.cos(math.radians(angle_deg)))
+    # Signed horizontal distance from the fitted edge, projected onto the local
     # edge normal so the ESF is a true perpendicular profile.
-    distance = (cols[None, :] - (slope * rows[:, None] + intercept)) * math.cos(math.radians(angle_deg))
+    distance = (cols[None, :] - centre[:, None]) * cos_t[:, None]
 
     bin_width = 1.0 / int(oversampling)
     d_flat = distance.ravel()
@@ -215,12 +410,30 @@ def edge_spread_function(
     return centers, esf, bin_width
 
 
+def centred_hamming(n: int, mid: float) -> np.ndarray:
+    """Hamming window over *n* samples centred on index *mid* (``sfrmat`` ``ahamming``).
+
+    The half-width is the distance from *mid* to the farther end, so the LSF
+    peak is never attenuated even when the edge is not in the middle of the ROI.
+    """
+    i = np.arange(n, dtype=np.float64)
+    wid = max(float(mid), float(n - 1) - float(mid), 1.0)
+    return 0.54 + 0.46 * np.cos(np.pi * (i - float(mid)) / wid)
+
+
 def line_spread_function(esf: np.ndarray, window: bool = True) -> np.ndarray:
-    """Differentiate the ESF, optionally Hamming-windowed to suppress tail noise."""
+    """Differentiate the ESF, optionally Hamming-windowed to suppress tail noise.
+
+    The window is centred on the LSF centroid (ISO 12233:2017 / ``sfrmat3``),
+    not on the middle of the array.
+    """
     e = np.asarray(esf, dtype=np.float64)
     lsf = np.gradient(e)
     if window:
-        lsf = lsf * np.hamming(lsf.size)
+        mag = np.abs(lsf)
+        total = mag.sum()
+        mid = float((mag * np.arange(lsf.size)).sum() / total) if total > 0 else 0.5 * (lsf.size - 1)
+        lsf = lsf * centred_hamming(lsf.size, mid)
     return lsf
 
 
@@ -276,10 +489,23 @@ def mtf50(frequency: np.ndarray, mtf: np.ndarray) -> float:
     return frequency_at_mtf(frequency, mtf, 0.5)
 
 
-def slanted_edge_sfr(roi: np.ndarray, oversampling: int = DEFAULT_OVERSAMPLING, window: bool = True) -> SfrResult:
-    """Full ISO 12233 chain: ROI -> edge angle -> ESF -> LSF -> MTF."""
-    angle = find_edge_angle(roi)
-    position, esf, bin_width = edge_spread_function(roi, angle, oversampling)
+def slanted_edge_sfr(
+    roi: np.ndarray,
+    oversampling: int = DEFAULT_OVERSAMPLING,
+    window: bool = True,
+    *,
+    fit_order: int = 1,
+    flatfield: bool = False,
+) -> SfrResult:
+    """Full ISO 12233 chain: ROI -> edge fit -> ESF -> LSF -> MTF.
+
+    *flatfield* applies :func:`flatfield_rows` before the ESF is built.
+    """
+    edge = fit_edge(roi, fit_order=fit_order)
+    angle = edge.angle_deg
+    if flatfield:
+        roi = flatfield_rows(roi, edge)
+    position, esf, bin_width = edge_spread_function(roi, None, oversampling, edge=edge)
     lsf = line_spread_function(esf, window=window)
     freq, mtf = mtf_from_lsf(lsf, bin_width)
 
