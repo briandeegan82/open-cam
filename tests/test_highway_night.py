@@ -10,6 +10,7 @@ illumination on a plane perpendicular to the incident light).
 
 from __future__ import annotations
 
+import json
 import math
 import os
 import subprocess
@@ -154,6 +155,20 @@ class TestBuilderNight(unittest.TestCase):
     def test_haze_rejected_at_night(self) -> None:
         with tempfile.TemporaryDirectory() as td, self.assertRaises(SystemExit):
             build_without_assets(Path(td), "--time-of-day", "night", "--haze", "fog")
+
+    def test_variety_lamp_posts_lit(self) -> None:
+        """--lamp-posts on (tools/highway_variety.py): its posts carry the luminaires, no duplicate poles."""
+        with tempfile.TemporaryDirectory() as td:
+            build_without_assets(Path(td), "--time-of-day", "night", "--seed", "3", "--lamp-posts", "on")
+            m = json.loads((Path(td) / "scene" / "highway_manifest.json").read_text())
+            sl = m["lighting"]["artificial"]["streetlights"]
+            heads = m["variety"]["lamp_posts"]["heads"]
+            self.assertEqual(sl["pole_source"], "tools/highway_variety.py lamp posts")
+            self.assertEqual(sl["poles"] * 2, len(heads))
+            self.assertAlmostEqual(sl["spacing_m"], m["variety"]["lamp_posts"]["spacing_m"])
+            txt = (Path(td) / "scene" / "highway.pbrt").read_text()
+            self.assertNotIn('NamedMaterial "pole"', txt)
+            self.assertGreater(sl["carriageway_illuminance"]["e_avg_lux"], 5.0)
 
     def test_dusk_moon_and_options(self) -> None:
         with tempfile.TemporaryDirectory() as td:

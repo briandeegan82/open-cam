@@ -316,16 +316,25 @@ def map_intensity(m: np.ndarray, d_img: np.ndarray) -> np.ndarray:
     return m[row, col]
 
 
-def streetlight_positions(median_x: float, z0: float, z1: float) -> list[tuple[float, float, int]]:
+def streetlight_positions(
+    median_x: float, z0: float, z1: float, spacing: float = POLE_SPACING_M, outreach: float = ARM_OUTREACH_M
+) -> list[tuple[float, float, int]]:
     """(x, z, street-side sign) of every luminaire: twin arms on median poles."""
     out = []
-    for z in np.arange(z0, z1, POLE_SPACING_M):
-        out += [(median_x + ARM_OUTREACH_M, float(z), 1), (median_x - ARM_OUTREACH_M, float(z), -1)]
+    for z in np.arange(z0, z1, spacing):
+        out += [(median_x + outreach, float(z), 1), (median_x - outreach, float(z), -1)]
     return out
 
 
 def road_illuminance(
-    flux: float, median_x: float, x_range: tuple[float, float], z_range: tuple[float, float], n: int = 256
+    flux: float,
+    median_x: float,
+    x_range: tuple[float, float],
+    z_range: tuple[float, float],
+    n: int = 256,
+    spacing: float = POLE_SPACING_M,
+    outreach: float = ARM_OUTREACH_M,
+    height: float = POLE_HEIGHT_M,
 ) -> dict:
     """Horizontal illuminance from the street lights on a carriageway grid (EN 13201-3 style)."""
     m = streetlight_map(n, flux * (1.0 - LENS_FLUX_FRACTION))
@@ -333,14 +342,14 @@ def road_illuminance(
     zs = np.linspace(*z_range, 20)
     X, Z = np.meshgrid(xs, zs)
     E = np.zeros_like(X)
-    for lx, lz, side in streetlight_positions(median_x, z_range[0] - 240.0, z_range[1] + 240.0):
-        dx, dz, dy = X - lx, Z - lz, -POLE_HEIGHT_M
+    for lx, lz, side in streetlight_positions(median_x, z_range[0] - 240.0, z_range[1] + 240.0, spacing, outreach):
+        dx, dz, dy = X - lx, Z - lz, -height
         r2 = dx**2 + dz**2 + dy**2
         r = np.sqrt(r2)
         d_img = np.stack([side * dx / r, side * dz / r, dy / r], -1)
-        E += map_intensity(m, d_img) * (POLE_HEIGHT_M / r) / r2
+        E += map_intensity(m, d_img) * (height / r) / r2
         # Lens emitter: Lambertian downward disc carrying LENS_FLUX_FRACTION of the flux.
-        E += (LENS_FLUX_FRACTION * flux / math.pi) * (POLE_HEIGHT_M / r) ** 2 / r2
+        E += (LENS_FLUX_FRACTION * flux / math.pi) * (height / r) ** 2 / r2
     return {"e_avg_lux": float(E.mean()), "e_min_lux": float(E.min()), "uniformity_u0": float(E.min() / E.mean())}
 
 
@@ -634,6 +643,10 @@ TAIL_CD, STOP_CD = 6.0, 80.0  # UN ECE R7: tail 4-12 cd (single), stop 60-185 cd
 EGO_LAMP_OFFSET = (0.75, 0.65, 1.9)  # (half track, height, ahead of the camera) [m]
 
 
+def _translate(x: float, y: float, z: float) -> list[str]:
+    return [f"Translate {_f(x)} {_f(y)} {_f(z)}"]
+
+
 def _gonio(pos, heading_deg: float, map_rel: str, spd_rel: str, rot_extra: list[str] | None = None) -> list[str]:
     return [
         "AttributeBegin",
@@ -645,7 +658,9 @@ def _gonio(pos, heading_deg: float, map_rel: str, spd_rel: str, rot_extra: list[
     ]
 
 
-def vehicle_light_lines(cars: list[dict], ego: tuple[float, float], opts: dict, assets: dict) -> tuple[list, dict]:
+def vehicle_light_lines(
+    cars: list[dict], ego: tuple[float, float], opts: dict, assets: dict, place=_translate
+) -> tuple[list, dict]:
     """Headlamps (goniometric) + lens emitters and tail/stop lamps (area lights) for every car.
 
     ``cars``: dicts with x, z, heading_deg (0 = along +z), length_m, width_m, height_m, lane.
@@ -673,7 +688,7 @@ def vehicle_light_lines(cars: list[dict], ego: tuple[float, float], opts: dict, 
         hd, half_l, half_w = c["heading_deg"], c["length_m"] / 2, c["width_m"] / 2
         lamp_y = float(np.clip(0.47 * c["height_m"], 0.55, 0.8))
         tail_y = float(np.clip(0.6 * c["height_m"], 0.7, 0.95))
-        lines += ["AttributeBegin", f"    Translate {_f(c['x'])} 0 {_f(c['z'])}", f"    Rotate {_f(hd)} 0 1 0"]
+        lines += ["AttributeBegin", *place(c["x"], 0.0, c["z"]), f"    Rotate {_f(hd)} 0 1 0"]
         if mode != "off":
             kind = lamp_kind(k + 1)
             spd = "spd/lamp_led_headlamp.spd" if kind == "led" else "spd/lamp_halogen.spd"
@@ -704,9 +719,22 @@ def vehicle_light_lines(cars: list[dict], ego: tuple[float, float], opts: dict, 
 
 
 def streetlight_lines(
-    opts: dict, assets: dict, median_x: float, z0: float, z1: float, carriageways: tuple[tuple[float, float], ...]
+    opts: dict,
+    assets: dict,
+    median_x: float,
+    z0: float,
+    z1: float,
+    carriageways: tuple[tuple[float, float], ...],
+    lamp_heads: list[dict] | None = None,
+    lamp_spacing_m: float | None = None,
+    place=_translate,
 ) -> tuple[list[str], dict]:
-    """Twin-arm 12 m median poles with full-cutoff Type III luminaires (goniometric + lens)."""
+    """Full-cutoff Type III luminaires (goniometric + lens emitter) on twin-arm median poles.
+
+    ``lamp_heads`` (from tools/highway_variety.py ``--lamp-posts``: dicts with straight-frame
+    x, y = lens underside, s, aims) lights the variety posts instead of drawing our own 12 m poles.
+    ``place(x, y, z)`` returns the transform lines for a straight-frame position (road alignment).
+    """
     kind = opts["streetlights"]
     if kind == "none":
         return [], {}
@@ -715,52 +743,85 @@ def streetlight_lines(
     head = (0.7, 0.14, 0.32)
     lens = (0.6, 0.26)
     lens_l = LENS_FLUX_FRACTION * sl["flux_lm"] / (math.pi * lens[0] * lens[1])
-    lines = [
-        "# ---- street lights (tools/highway_night.py)",
-        'MakeNamedMaterial "pole" "string type" "coateddiffuse" "spectrum reflectance" "spd/galvanized.spd"'
-        ' "float roughness" [0.3]',
-        'MakeNamedMaterial "luminaire" "string type" "diffuse" "rgb reflectance" [0.08 0.08 0.08]',
-    ]
-    poles = np.arange(z0, z1, POLE_SPACING_M)
-    lines.append('NamedMaterial "pole"')
-    for z in poles:
+    lines = ["# ---- street lights (tools/highway_night.py)"]
+    if lamp_heads:
+        spacing = float(lamp_spacing_m or POLE_SPACING_M)
+        outreach = float(np.median([abs(h["x"] - median_x) for h in lamp_heads]))
+        height = float(np.median([h["y"] for h in lamp_heads]))
+        lums = [(h["x"], h["y"] - 0.002, h["s"], 1 if h["aims"] == "+x" else -1) for h in lamp_heads]
+        poles, source = len(lamp_heads) // 2, "tools/highway_variety.py lamp posts"
+    else:
+        spacing, outreach, height = POLE_SPACING_M, ARM_OUTREACH_M, POLE_HEIGHT_M - 0.25 - head[1]
+        zs = np.arange(z0, z1, spacing)
+        lines += [
+            'MakeNamedMaterial "pole" "string type" "coateddiffuse" "spectrum reflectance" "spd/galvanized.spd"'
+            ' "float roughness" [0.3]',
+            'MakeNamedMaterial "luminaire" "string type" "diffuse" "rgb reflectance" [0.08 0.08 0.08]',
+        ]
+        for z in zs:
+            lines += [
+                "AttributeBegin",
+                *place(median_x, 0.0, float(z)),
+                'NamedMaterial "pole"',
+                "AttributeBegin",
+                "    Rotate -90 1 0 0",
+                f'    Shape "cylinder" "float radius" [0.09] "float zmin" [0] "float zmax" [{_f(POLE_HEIGHT_M)}]',
+                "AttributeEnd",
+                *_box_mesh(0.0, POLE_HEIGHT_M - 0.25, 0.0, 2 * ARM_OUTREACH_M, 0.08, 0.08),
+                'NamedMaterial "luminaire"',
+                *[
+                    m
+                    for side in (-1, 1)
+                    for m in _box_mesh(
+                        side * (ARM_OUTREACH_M + head[0] / 2 - 0.1), height + 0.002, 0.0, head[0], head[1], head[2]
+                    )
+                ],
+                "AttributeEnd",
+            ]
+        lums = [(x + side * 0.25, height, z, side) for x, z, side in streetlight_positions(median_x, z0, z1)]
+        poles, source = len(zs), "tools/highway_night.py poles"
+    for x, y, z, side in lums:
         lines += [
             "AttributeBegin",
-            f"    Translate {_f(median_x)} 0 {_f(z)}",
-            "    Rotate -90 1 0 0",
-            f'    Shape "cylinder" "float radius" [0.09] "float zmin" [0] "float zmax" [{_f(POLE_HEIGHT_M)}]',
+            *place(x, y, z),
+            *_quad_light((0, 0, 0), (0, 0, lens[1] / 2), (lens[0] / 2, 0, 0), spd, lens_l),  # emits downwards
+            *_gonio((0, -0.03, 0), 0.0 if side > 0 else 180.0, assets["streetlight"]["map"], spd),
             "AttributeEnd",
-            *_box_mesh(median_x, POLE_HEIGHT_M - 0.25, z, 2 * ARM_OUTREACH_M, 0.08, 0.08),
         ]
-    y_lens = POLE_HEIGHT_M - 0.25 - head[1]
-    lines.append('NamedMaterial "luminaire"')
-    for x, z, side in streetlight_positions(median_x, z0, z1):
-        lines += _box_mesh(x + side * head[0] / 2 - side * 0.1, y_lens + 0.002, z, head[0], head[1], head[2])
-        lines += _quad_light(
-            (x + side * 0.25, y_lens, z), (0, 0, lens[1] / 2), (lens[0] / 2, 0, 0), spd, lens_l
-        )  # right(z) x up(x) = -y: emits downwards
-        lines += _gonio(
-            (x + side * 0.25, y_lens - 0.03, z), 0.0 if side > 0 else 180.0, assets["streetlight"]["map"], spd
-        )
-    e = road_illuminance(sl["flux_lm"], median_x, carriageways[0], (100.0, 100.0 + POLE_SPACING_M))
+    e = road_illuminance(
+        sl["flux_lm"],
+        median_x,
+        carriageways[0],
+        (100.0, 100.0 + spacing),
+        spacing=spacing,
+        outreach=outreach,
+        height=height,
+    )
     meta = {
         "kind": kind,
         "spectrum": spd,
         "luminaire_flux_lm": sl["flux_lm"],
         "lens_flux_fraction": LENS_FLUX_FRACTION,
-        "pole_height_m": POLE_HEIGHT_M,
-        "spacing_m": POLE_SPACING_M,
-        "arm_outreach_m": ARM_OUTREACH_M,
-        "poles": len(poles),
+        "pole_height_m": POLE_HEIGHT_M if not lamp_heads else height + 0.03,
+        "mounting_height_m": height,
+        "spacing_m": spacing,
+        "arm_outreach_m": outreach,
+        "poles": poles,
+        "pole_source": source,
         "distribution": "analytic full-cutoff IES Type III medium",
         "carriageway_illuminance": e,
     }
     return lines + [""], meta
 
 
-def car_geometry(info: dict | None, length_m: float, x: float, heading_deg: float) -> dict:
-    """World placement and bounding size of a car (asset bbox scaled to length, or the proxy)."""
-    if info is None:
+def car_geometry(info: dict | None, length_m: float, x: float, heading_deg: float, size: tuple | None = None) -> dict:
+    """World placement and bounding size of a car (asset bbox scaled to length, or the proxy).
+
+    ``size`` = (length, width, height) [m] overrides both (e.g. heavy vehicles from highway_variety).
+    """
+    if size is not None:
+        size = tuple(float(v) for v in size)
+    elif info is None:
         size = (4.6, 1.8, 1.5)
     else:
         lo, hi = np.array(info["bbox_min"]), np.array(info["bbox_max"])
@@ -785,15 +846,24 @@ def scene_lights(
     median_x: float,
     carriageway: tuple[float, float],
     pole_z: tuple[float, float],
+    lamp_heads: list[dict] | None = None,
+    lamp_spacing_m: float | None = None,
+    place=_translate,
 ) -> tuple[list[str], dict]:
-    """All artificial lights (vehicle lamps, street lights); empty when everything is off."""
+    """All artificial lights (vehicle lamps, street lights); empty when everything is off.
+
+    ``lamp_heads``/``lamp_spacing_m``: existing lamp posts to light (tools/highway_variety.py);
+    ``place``: straight-frame -> world transform lines (road alignment, ``highway_variety.place``).
+    """
     if opts["headlamps"] == "off" and opts["streetlights"] == "none" and not opts["dark"]:
         return [], {}
     assets = write_light_assets(out_dir, spd_dir, opts)
     cars = [dict(c, z=c["distance_m"]) for c in cars_meta]
     vopts = dict(opts, brake=args.brake_lights, ego_lane=args.cam_lane)
-    lines, vmeta = vehicle_light_lines(cars, (float(eye[0]), float(eye[2])), vopts, assets)
-    slines, smeta = streetlight_lines(opts, assets, median_x, pole_z[0], pole_z[1], (carriageway,))
+    lines, vmeta = vehicle_light_lines(cars, (float(eye[0]), float(eye[2])), vopts, assets, place)
+    slines, smeta = streetlight_lines(
+        opts, assets, median_x, pole_z[0], pole_z[1], (carriageway,), lamp_heads, lamp_spacing_m, place
+    )
     meta = {
         "headlamp_beam": {
             "pattern": "analytic ECE R112/R149 class-B passing beam (RHT), goniometric map in cd",
