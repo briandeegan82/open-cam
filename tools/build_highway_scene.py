@@ -47,6 +47,7 @@ from highway_sky import (  # noqa: E402
     write_rgb_exr,
 )
 from highway_spectra import CAR_PAINTS, SURFACES, reflectance  # noqa: E402
+from highway_spectral_sky import spectral_sky_light  # noqa: E402
 from pbrt_spectral_exr_to_electrons import PBRT_CIE_Y_INTEGRAL  # noqa: E402
 
 DEFAULT_REALISTIC_LENSFILE = "config/lenses/wide_22mm.dat"
@@ -55,6 +56,7 @@ SKIES = {
     "kloofendal_48d_partly_cloudy": "sky_kloofendal_48d_partly_cloudy",
     "syferfontein_6d_clear": "sky_syferfontein_6d_clear",
     "analytic": None,
+    "hosek": None,
 }
 CAR_MODELS = ("car_bmw_m6", "car_pontiac_gto", "car_vintage")
 LANE_W = 3.66  # 12 ft
@@ -347,6 +349,13 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     ap.add_argument("--sky", choices=sorted(SKIES), default="kloofendal_43d_clear")
     ap.add_argument("--sun-elevation", type=float, default=45.0, help="Sun elevation [deg] for --sky analytic.")
     ap.add_argument(
+        "--sky-spectrum",
+        choices=("rgb", "daylight"),
+        default="rgb",
+        help="daylight: render the sky map as CIE-daylight-basis spectra (pbrt patch); --sky hosek always does.",
+    )
+    ap.add_argument("--turbidity", type=float, default=3.0, help="Atmospheric turbidity for --sky hosek (1-10).")
+    ap.add_argument(
         "--sun-azimuth", type=float, default=140.0, help="Sun azimuth [deg] from the road direction, + = right."
     )
     ap.add_argument(
@@ -442,10 +451,15 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         zs = math.radians(90.0 - elev)
         sun_l = np.array([math.sin(zs), 0.0, math.cos(zs)])
         sky_file = out_dir / "textures" / f"sky_cie12_{elev:.1f}.exr"
-        if not sky_file.is_file():
+        if not sky_file.is_file() and args.sky != "hosek":
             write_rgb_exr(sky_file, analytic_clear_sky(512, elev))
         sky_ratio = None
         sky_desc = "analytic CIE standard clear sky (type 12)"
+    if (args.sky == "hosek" or args.sky_spectrum != "rgb") and args.time_of_day != "day":
+        raise SystemExit("--sky hosek / --sky-spectrum daylight are daytime skies; not supported with --time-of-day")
+    sky_light = spectral_sky_light(args, sky_file, elev, out_dir, spd)
+    if sky_light is not None:
+        sky_file, sky_desc = sky_light["file"], sky_light["description"]
     to_world = rot_x(-90.0)
     s0 = to_world @ sun_l
     az0 = math.degrees(math.atan2(s0[0], s0[2]))
@@ -471,7 +485,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
             args,
             wl=wl,
             spd_dir=spd,
-            sky_rgb_equal_area=read_rgb_exr(sky_file),
+            sky_rgb_equal_area=sky_light["rgb"] if sky_light else read_rgb_exr(sky_file),
             sun_spd=solar_direct_spectrum(wl, elev),
             elev=elev,
             e_dn=e_dn,
@@ -543,6 +557,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         f"    Rotate {_f(sky_rot)} 0 1 0",
         "    Rotate -90 1 0 0",
         f'    LightSource "infinite" "string filename" "{os.path.relpath(sky_file, out_dir)}"',
+        *([f'        "spectrum L" [{sky_light["spectra"]}]'] if sky_light else []),
         f'        "float illuminance" [{_f(e_sky_h)}]',
         "AttributeEnd",
         "",
@@ -876,6 +891,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
                 "description": sky_desc,
                 "illuminance_horizontal_lux": e_sky_h,
                 "rotate_y_deg": sky_rot,
+                **({"spectral": sky_light["manifest"]} if sky_light else {}),
             },
             "reference_illuminance_lux": e_ref,
             "reference_illuminance_exr_lux": 683.0 * PBRT_CIE_Y_INTEGRAL * e_ref,
@@ -899,7 +915,9 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         "approximations": [
             "Road-marking glass-bead retroreflection is not modelled (pbrt has no retroreflective BSDF); "
             "markings and sign sheeting use their daytime diffuse/sheen appearance.",
-            "Sky radiance is RGB (HDRI or analytic) upsampled by pbrt; the sun is spectral.",
+            sky_light["approximation"]
+            if sky_light
+            else "Sky radiance is RGB (HDRI or analytic) upsampled by pbrt; the sun is spectral.",
             "Asphalt/grass colour maps modulate the analytic spectral reflectance by luminance only.",
             "No atmospheric scattering medium (aerial perspective comes only from the sky map)."
             if atm is None

@@ -9,6 +9,7 @@ applied by the build script, which is idempotent and leaves the submodule commit
   git submodule update --init --recursive
   tools/build_pbrt.sh                 # apply patches + CPU build -> third_party/pbrt-v4/build/pbrt
   tools/build_pbrt.sh --apply-only    # only apply the patches (e.g. before a GPU build)
+  PBRT_NATIVE=OFF tools/build_pbrt.sh # portable binary (no -march=native), as CI caches
 
 Patches:
 - 0001-retroreflective-material.patch: Material "retroreflective" (RetroreflectiveBxDF),
@@ -19,6 +20,12 @@ Patches:
   entrance), "float lobewidth" [deg] (exponential fall-off with observation angle) and
   "float entranceexponent" (q: R_A ~ (cos b_i cos b_o)^(q/2)). Used by the night/dusk
   highway scenes (tools/highway_night.py, docs/HIGHWAY_SCENES.md).
+- pbrt-v4-spectral-basis-infinite-light.patch: an "infinite" light may give both
+  "filename" and n "L" spectra; the equal-area image then has channels B0..B{n-1}, each
+  a per-pixel luminance weight of the corresponding (unit-luminance-normalised) spectrum,
+  so Le(w) = scale * sum_k B_k(w) L_k(lambda). "float illuminance" still sets the
+  upper-hemisphere illuminance. Used by the spectral highway sky (--sky hosek,
+  --sky-spectrum daylight; docs/HIGHWAY_SCENES.md). RGB maps are unaffected.
 
 To work on a patch: edit the sources in third_party/pbrt-v4, rebuild, then refresh the
 patch with `git -C third_party/pbrt-v4 diff > third_party/patches/<name>.patch` and
@@ -27,7 +34,7 @@ under a key containing the submodule SHA and the hash of the patches + build scr
 
 Without the patches pbrt still builds, but scenes using the retroreflective material
 fail to parse (the highway builder only emits it for --time-of-day dusk/night, or
---retroreflective on).
+--retroreflective on), as do spectral-sky scenes.
 
 CPU-only build (no NVIDIA OptiX SDK)
 ------------------------------------
