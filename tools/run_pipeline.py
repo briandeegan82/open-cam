@@ -288,8 +288,13 @@ def main() -> None:
     # system (vignetting, aberrations, chromatic blur) during rendering.  Applying
     # a second Gaussian blur afterwards blurs the image twice.
     post = lens_cfg.get("post_psf") or {}
+    # Exception: mode "lens_diffraction" with combine "diffraction_only" adds only the
+    # (aberration-free) diffraction of the traced pupil, which pbrt does not model.
+    diffraction_only = str(post.get("mode", "")).lower() == "lens_diffraction" and (
+        str((post.get("lens_diffraction") or {}).get("combine", "diffraction_only")).lower() == "diffraction_only"
+    )
     if bool(post.get("enabled", False)):
-        if cam == "realistic":
+        if cam == "realistic" and not diffraction_only:
             print(
                 "warning: lens.post_psf.enabled is true but lens.camera is 'realistic' — "
                 "skipping post-render PSF because PBRT already traces through the lens "
