@@ -690,6 +690,8 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         for k in (1, 2):
             white += dashes(inner + side * k * LANE_W, 0.15)
     for mat, rects in (("paint_white", white), ("paint_yellow", yellow)) if wear is None else ():
+        seg = DASH + GAP  # split solid lines: 1.5 km sliver triangles render too dark in pbrt
+        rects = [(x0, x1, z, min(z + seg, z1)) for x0, x1, z0, z1 in rects for z in np.arange(z0, z1, seg)]
         p, t = quads_mesh(rects, 0.004)
         L += [f'NamedMaterial "{mat}"', *mesh(p, t), ""]
     if wear is not None:

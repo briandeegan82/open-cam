@@ -108,6 +108,9 @@ which sits inside the measured aged-asphalt range: new asphalt is about 0.05 and
   which tilted the asphalt normals and rendered the road ~7x too dark. The asphalt and grass
   normal maps (with or without wear) are therefore converted to PNG
   (`highway_road_wear.linear_normal_map`).
+- **Solid lines** are split into one-dash-cycle (12.19 m) segments in every scene, with or
+  without wear: pbrt renders the 1.5 km x 0.2 m sliver triangles of an unsplit edge line
+  far too dark.
 
 ## Spectral sky
 
@@ -266,7 +269,8 @@ streetlight-lit pixels come out in the same units; their budgets are recorded un
 light-pollution dome); lamp lenses are Lambertian and carry a fixed flux fraction, so their
 apparent luminance is lower than real optics (no glare/flare); the asphalt normal map is
 dropped when dark (normal mapping has no masking/shadowing and speckles under grazing
-headlamp light); sign/marking retroreflection is isotropic in azimuth and has no wet-road
+headlamp light; re-checked after the PNG normal-map fix: keeping it still raises the road's
+pixel-to-pixel deviation by ~50 % at 512 spp and darkens the headlamp-lit road by ~8 %); sign/marking retroreflection is isotropic in azimuth and has no wet-road
 or dew behaviour.
 `--haze` cannot be combined with dusk/night yet: the night reference illuminance has no
 medium model, so the builder refuses the combination rather than write a wrong manifest.
