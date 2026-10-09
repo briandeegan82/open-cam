@@ -11,6 +11,10 @@
 - canon_powershot_g5_x
 - default
 - default_cmy
+- default_hdr_3exp
+- default_hdr_dcg
+- default_hdr_lofic
+- default_hdr_split_pixel
 - default_rccb
 - default_rccg
 - default_rggcy

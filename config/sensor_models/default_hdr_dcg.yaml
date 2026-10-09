@@ -1,0 +1,34 @@
+# Delta from config/sensor_models/default.yaml — dual-conversion-gain (DCG) HDR pixel.
+# Illustrative parameters (not a specific commercial sensor / datasheet): one 3.0 um
+# photodiode read at HCG (low noise, small swing) and LCG (large swing).  See
+# docs/HDR_PIXELS.md and tools/hdr_pixel.py for the model and references.
+schema_version: 1
+sensor:
+  pixel_pitch_um: 3.0
+noise:
+  emva:                       # single-exposure base = the LCG path (used when hdr.enabled: false)
+    overall_system_gain_K_e_per_DN: 6.25
+    sigma_d_e: 8.0
+    black_level_DN: 64
+  adc:
+    bit_depth: 12
+    full_well_e: 25000
+  hdr:
+    enabled: true
+    architecture: dcg
+    dcg:
+      readout: dual           # dual: both gains read and merged; switch: per-pixel gain select
+      photodiode_full_well_e: 25000
+      hcg: {K_e_per_DN: 0.7, sigma_e: 1.5, full_well_e: 2800}   # FD swing limits HCG
+      lcg: {K_e_per_DN: 6.25, sigma_e: 8.0, full_well_e: 25000}
+    merge:
+      method: snr_weighted    # minimum-variance weights over unsaturated captures
+      threshold_fraction: 0.9 # capture drops out above 90 % of its saturation
+    compand:
+      enabled: false          # linear HDR (22500/0.7 DN) fits in raw16
+model:
+  name: default_hdr_dcg
+  display_name: Default DCG HDR (illustrative)
+validation:
+  datasheet:
+    enabled: false          # illustrative model, no datasheet

@@ -157,6 +157,7 @@ def noise_config_from_camera_model(camera_model: dict, linear_rgb_in: str, raw_o
         "emva": camera_model.get("noise", {}).get("emva", {}),
         "adc": camera_model.get("noise", {}).get("adc", {}),
         "processing": camera_model.get("noise", {}).get("processing", {}),
+        "hdr": camera_model.get("noise", {}).get("hdr", {}),
         "bayer": camera_model.get("cfa", {}),
         "output": {
             "linear_rgb_in": linear_rgb_in,
