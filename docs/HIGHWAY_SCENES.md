@@ -109,6 +109,83 @@ which sits inside the measured aged-asphalt range: new asphalt is about 0.05 and
   normal maps (with or without wear) are therefore converted to PNG
   (`highway_road_wear.linear_normal_map`).
 
+## Spectral sky
+
+pbrt-v4's image `infinite` light only takes RGB maps, which pbrt turns into
+`RGBIlluminantSpectrum`s (smooth sigmoid x colour-space illuminant), so with the default sky
+every sky pixel has a D65-shaped, smooth spectrum regardless of the real sky. Two opt-in
+modes make the sky spectral, so different CFAs (RGGB, RCCB, RYYCy, ...) and sensor QE curves
+see daylight spectra:
+
+```bash
+# Hosek-Wilkie spectral clear sky (no HDRI needed); turbidity 1-10, default 3
+venv/bin/python tools/build_highway_scene.py --sky hosek --sun-elevation 43 --turbidity 3
+# keep the Poly Haven HDRI (or --sky analytic) but render it with daylight spectra
+venv/bin/python tools/build_highway_scene.py --sky kloofendal_43d_clear --sky-spectrum daylight
+```
+
+Both need pbrt built with `tools/build_pbrt.sh`, which applies
+`third_party/patches/pbrt-v4-spectral-basis-infinite-light.patch` (see `docs/BUILD_PBRT.txt`).
+The patch lets an `infinite` light take a `filename` *and* K `"spectrum L"` SPDs; the
+equal-area EXR then has channels `B0..B{K-1}` and
+`Le(w, lambda) = scale * sum_k B_k(w) L_k(lambda) / Y(L_k)`, sampled by luminance as before;
+`"float illuminance"` keeps setting the horizontal illuminance. RGB maps are unchanged, so the
+default scene renders identically.
+
+**Basis.** K = 3 spectra from the CIE daylight model S0 + M1 S1 + M2 S2 (Judd, MacAdam &
+Wyszecki 1964, JOSA 54:1031; CIE 015:2018 sec. 4.1.2), whose components were derived from
+measured daylight and skylight spectra. The CIE table (`spectra/illuminant/original/
+CIE_illum_Dxx_comp.csv`, doi:10.25039/CIE.DS.w7zunnny, CC BY-SA 4.0) is in the repo. The
+three basis SPDs are vertices of the region where the daylight model is non-negative over
+360-830 nm (so each basis SPD is physical); their triangle contains the daylight locus from
+~3800 K to infinity. Each pixel is given the daylight-model spectrum with the **same CIE XYZ**
+(exact for colours inside the triangle; outside it the negative weight is clamped and the
+luminance kept; the manifest reports `out_of_gamut_luminance_fraction`).
+
+**Sources.**
+- `--sky hosek`: Hosek & Wilkie (2012), "An Analytic Model for Full Spectral Sky-Dome
+  Radiance", ACM TOG 31(4):95. Their BSD-3 reference code/data ship with pbrt-v4
+  (`src/ext/skymodel`); the coefficient tables are copied to
+  `spectra/sky/hosek_wilkie_2012_spectral.npz` (licence in `spectra/sky/README.md`) and
+  evaluated by a NumPy port (`HosekWilkieSky`, matches the C code to 1e-15). Ground albedo
+  0.1. Spectra are 320-720 nm; the daylight-basis metamer reproduces them within ~4-10 %
+  (luminance-weighted max deviation, 400-720 nm, sun 20-70 deg) and extends them to 830 nm.
+- `--sky-spectrum daylight`: the RGB map (HDRI with the sun removed, or the CIE type-12
+  map) read as linear sRGB. For `kloofendal_43d_clear` all sky pixels are in gamut;
+  `syferfontein_6d_clear` (sun at 6 deg, orange horizon) has ~30 % of its luminance clamped.
+
+**Radiometry is unchanged.** The sun (spectral distant light) and the absolute horizontal
+sky illuminance are exactly those of the RGB path: HDRI ratio for HDRIs, the IESNA
+clear-sky fit for `hosek`/`analytic`. Hosek's own absolute diffuse illuminance is recorded as
+`lighting.sky.spectral.model_illuminance_horizontal_lux` for comparison.
+
+**Validation** (`tests/test_highway_spectral_sky.py`, turbidity 3):
+
+| sun elevation | Hosek E_diffuse / IESNA fit | sky CCT (horizontal) | sun + sky CCT |
+|---|---|---|---|
+| 10 deg | 1.24 | 9.3 kK | 5.4 kK |
+| 30 deg | 1.21 | 12.9 kK | 5.5 kK |
+| 45 deg | 1.13 | 15.5 kK | 5.6 kK |
+| 60 deg | 1.07 | 17.7 kK | 5.7 kK |
+| 70 deg | 1.05 | 17.5 kK | 5.7 kK |
+
+- Luminance: Hosek's absolute diffuse horizontal illuminance is within 30 % of the IESNA
+  clear-sky fit used by the builder, and its relative luminance distribution correlates with
+  the CIE S 011 / ISO 15469 standard clear sky type 12 (log-luminance r > 0.85 at 20-45 deg,
+  outside 10 deg of the sun).
+- Colour: horizontal skylight is 9-18 kK, slightly above the Planckian locus like the CIE
+  daylight locus (Duv +0.005 to +0.008 vs +0.003), with a bluer zenith for sun elevations up
+  to ~60 deg; sun + sky on a horizontal plane is 5.4-5.7 kK, i.e. typical daylight between
+  D50 and D65 (CIE 015:2018). The
+  `kloofendal_43d_clear` HDRI converted with `--sky-spectrum daylight` gives 11.3 kK
+  horizontal / 17 kK zenith, consistent with Hosek at the same sun elevation (14.6 kK).
+- The manifest records `horizontal_cct_k`, `zenith_cct_k` and Duv for every spectral sky.
+
+Limitations: the basis has three degrees of freedom, so spectral detail beyond the daylight
+model (e.g. the ozone Chappuis band shape, O2/H2O absorption lines) is smoothed; the Hosek
+model has no spectral data above 720 nm (the basis extrapolates as daylight); turbidity is
+not tied to the sun model's Angstrom aerosol coefficient.
+
 ## Night and dusk (`--time-of-day`)
 
 Code: `tools/highway_night.py` (hooks in `build_highway_scene.py`); tests:
@@ -329,9 +406,83 @@ basecoat, glass -> thin dielectric, tyres -> rubber, others -> the authors' text
 - Daytime markings use a glass-bead-like rough clear coat over a spectral binder and sign
   sheeting is diffuse; with `--time-of-day dusk|night` (or `--retroreflective on`) both switch
   to the patched pbrt `retroreflective` material (see "Night and dusk" below).
-- The sky radiance is RGB, upsampled by pbrt; only the sun is spectral.
+- By default the sky radiance is RGB, upsampled by pbrt; only the sun is spectral (see
+  [Spectral sky](#spectral-sky) for the opt-in spectral sky).
 - No wet road; texture colour maps only modulate luminance.
 - Haze: one HG phase function per medium (Rayleigh folded into g), horizontally uniform
   medium, flat Earth for the medium (the backdrop has curvature); without `--haze` the horizon
   is sharp and aerial perspective comes only from the sky map.
 - Asset car materials other than paint/glass/tyres are the authors' RGB values.
+
+## In-car camera effects
+
+`tools/highway_incar.py` (hooks in `build_highway_scene.py`) and `tools/render_time_slices.py`
+make the view look like a windscreen-mounted ADAS camera. Everything is opt-in; without these
+flags the scene and manifest are unchanged.
+
+```bash
+venv/bin/python tools/build_highway_scene.py \
+    --exposure-s 0.004 --rolling-shutter-line-time-us 15 \
+    --ego-speed-kmh 100 --traffic-speed-kmh lanes \
+    --windscreen --windscreen-dirt 0.03 --windscreen-rain 0.08 --vms
+venv/bin/python tools/render_time_slices.py scenes/generated/highway --spp 64 --bands 24 --jobs 2
+```
+
+**Windscreen** (`--windscreen`, `--windscreen-rake-deg 27`, `--windscreen-distance-m`,
+`--windscreen-radius-h-m/-v-m` for curvature). A closed laminated shell, 2.1 mm glass /
+0.76 mm PVB / 2.1 mm glass, raked 27 deg from horizontal (so the optical axis meets it at
+~64 deg incidence), attached to the ego car. pbrt `dielectric` (n = 1.52; PVB, n ~ 1.48, is
+treated as index-matched) bounding a `homogeneous` absorbing medium, so it needs the `volpath`
+integrator (switched on automatically). The absorption is a smooth model of green iron-bearing
+soda-lime glass: the Fe2+ band at ~1050 nm absorbs red/NIR, Fe3+ and the PVB UV absorber cut
+below ~380 nm (Bamford, *Colour Generation and Control in Glass*, 1977; Volotinen et al.,
+J. Non-Cryst. Solids 354, 2008). Luminous transmittance (CIE A, ISO 9050) is 0.80 at normal
+incidence (legal minimum 0.70: UN ECE R43, FMVSS 205 / ANSI Z26.1) and ~0.67 along the camera
+axis because of the oblique Fresnel losses; T is ~0.45 at 800 nm and ~0.16 at 1000 nm. Use
+`--windscreen-transmittance-csv nm,T` for a measured curve. The default distance keeps the
+glass ~1 cm clear of the lens (pinhole: 5 cm; realistic: front element + 1 cm).
+`--windscreen-dirt f` adds a stochastic-alpha `diffusetransmission` film (soil reflectance,
+40 % diffuse transmission) with mean coverage f; `--windscreen-rain f` adds non-overlapping
+spherical-cap water drops (n = 1.333, log-normal base radius, median 0.8 mm,
+`--rain-contact-angle-deg 45`) covering fraction f of the glass the camera sees (mesh sizes:
+~1000 drops per 10 % coverage). The windscreen sits in front of the camera, not over the road,
+so `lighting.reference_illuminance_*` (scene illuminance) is unchanged: the glass attenuation
+shows up in the rendered radiance/irradiance and therefore in the electrons, as it would in a car.
+`manifest["windscreen"]` records the geometry and the normal/axis luminous transmittance.
+With `--haze`, the glass exterior medium defaults to `haze` (`--windscreen-outside-medium` overrides),
+so rays leaving the windscreen stay in the atmosphere medium.
+
+**Exposure and motion blur** (`--exposure-s T`). The camera gets
+`shutteropen 0 / shutterclose T` and `manifest["exposure"]["integration_time_s"] = T`;
+`pbrt_spectral_exr_to_electrons.py` uses that as the integration time (an explicit
+`--integration-time-s` that differs prints a warning), so the blur and the electron count
+use the same exposure. Pass the same value to `apply_emva_noise.py --integration-time-s` for
+dark current. Ego motion (`--ego-speed-kmh`, `--ego-yaw-rate-deg-s`) animates the camera and
+the windscreen; each car gets a forward velocity (`--traffic-speed-kmh`: one value, a per-car
+comma list, or `lanes` = 125/110/95 km/h by lane and 105 km/h oncoming) via
+`TransformTimes 0 <span>` + `ActiveTransform EndTime` (`span` covers the rolling-shutter
+readout). Speeds go into `manifest["cars"]` and `manifest["ego_motion"]`. pbrt-v4 cannot
+animate area lights ("Animated area lights are not supported"), so a car whose include has an
+`AreaLightSource` is kept static and listed in `manifest["incar_warnings"]`.
+
+**Rolling shutter** (`--rolling-shutter-line-time-us`). pbrt has a global shutter, so
+`render_time_slices.py` renders row bands (`--pixelbounds`) with the shutter window of the
+band's centre row, `[r * line_time, r * line_time + T]`, and composites them. With `--bands B`
+the timing error is <= (yres / 2B) line times (24 bands at 720 rows: 15 rows). Each band re-reads
+the scene, so render time grows by ~B x scene-load time; `--jobs` runs bands concurrently.
+
+**LED flicker** (`--vms`, `--vms-pwm-hz 100`, `--vms-duty 0.25`, `--vms-phase-ms`). A
+roadside dot-matrix variable-message sign: amber AlInGaP LEDs (592 nm, 17 nm FWHM;
+Schubert, *Light-Emitting Diodes*, 2006), 24 mm dots on a 40 mm pitch,
+`--vms-luminance-cd-m2` time-averaged face luminance (EN 12966 class L3 ~ 6000 cd/m2 is the
+default), so each dot runs at L / (fill x duty) while on. Flickering emitters use a generic
+contract, `highway_incar.write_emitter(out_dir, id, lines_for_level, pwm=PWM(f, duty, phase),
+exposure_window_s=...)`: it writes `emitters/<id>.pbrt` (the level averaged over the exposure,
+or the duty cycle without one), `emitters/<id>.on.pbrt` and `.off.pbrt`, and returns the
+`Include` line and a `manifest["emitters"]` entry. Any emitter registered this way (e.g.
+vehicle LED lamps) flickers. `render_time_slices.py` splits each band's window at the PWM
+edges of all emitters and renders every sub-interval with the matching on/off includes, so a
+4 ms exposure of a 100 Hz / 25 % sign captures 2.5 ms of on-time or none at all, depending on
+the phase and the row (bands across the sign). A plain `pbrt` render of the same scene uses the
+exposure-averaged level instead (no row dependence). Samples per pixel are split in
+proportion to slice duration, so the composite has the same total spp as a plain render.

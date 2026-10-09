@@ -139,6 +139,32 @@ class TestPbrtEndToEnd(unittest.TestCase):
 
 
 @unittest.skipUnless(PBRT.is_file(), f"pbrt binary not built ({PBRT}); see docs/BUILD_PBRT.txt")
+class TestPbrtSpectralSky(unittest.TestCase):
+    """Hosek-Wilkie daylight-basis sky; needs pbrt built by tools/build_pbrt.sh (spectral-basis patch)."""
+
+    def test_hosek_sky_render(self) -> None:
+        import yaml
+
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            m = yaml.safe_load((REPO / "config" / "highway_assets.yaml").read_text())
+            m["cache_dir"] = str(tmp / "empty_cache")
+            (tmp / "assets.yaml").write_text(yaml.safe_dump(m))
+            exr = tmp / "hw.exr"
+            args = ["--out-dir", str(tmp / "scene"), "--asset-manifest", str(tmp / "assets.yaml")]
+            args += ["--allow-missing-assets", "--film-output", str(exr), "--xres", "48", "--yres", "27"]
+            args += ["--pixelsamples", "64", "--spectral-nbuckets", "3", "--sky", "hosek", "--sun-elevation", "40"]
+            args += ["--spectral-lambda-min", "400", "--spectral-lambda-max", "700"]
+            subprocess.run([sys.executable, str(REPO / "tools" / "build_highway_scene.py"), *args], check=True)
+            subprocess.run([str(PBRT), "--quiet", "--seed", "1", str(tmp / "scene" / "highway.pbrt")], check=True)
+            L, _ = spectral_buckets_from_exr(exr)
+            self.assertTrue(np.isfinite(L).all())
+            sky = L[:6].reshape(-1, L.shape[-1]).mean(0)  # 450 / 550 / 650 nm buckets
+            self.assertGreater(sky[0], 1.2 * sky[2])  # blue clear sky
+            self.assertGreater(float(L[:6].mean()), float(L[-6:].mean()))
+
+
+@unittest.skipUnless(PBRT.is_file(), f"pbrt binary not built ({PBRT}); see docs/BUILD_PBRT.txt")
 class TestPbrtHighwayHaze(unittest.TestCase):
     """The manifest's road illuminance under fog matches what pbrt's volpath delivers to the road."""
 
@@ -259,3 +285,44 @@ class TestPbrtHighwaySmoke(unittest.TestCase):
             e = next(v for k, v in npz.items() if np.asarray(v).ndim >= 2)
             self.assertTrue(np.isfinite(e).all())
             self.assertGreater(float(np.mean(e)), 0.0)
+
+    def test_incar_effects_time_slices(self) -> None:
+        """Windscreen + motion + rolling shutter + flickering VMS through render_time_slices."""
+        import render_time_slices
+        import yaml
+
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            m = yaml.safe_load((REPO / "config" / "highway_assets.yaml").read_text())
+            m["cache_dir"] = str(tmp / "empty_cache")
+            (tmp / "assets.yaml").write_text(yaml.safe_dump(m))
+            scene = tmp / "scene"
+            common = ["--asset-manifest", str(tmp / "assets.yaml"), "--allow-missing-assets"]
+            common += ["--xres", "64", "--yres", "36", "--pixelsamples", "4"]
+            common += ["--spectral-lambda-min", "400", "--spectral-lambda-max", "700"]
+            fx = ["--exposure-s", "0.004", "--rolling-shutter-line-time-us", "30", "--ego-speed-kmh", "100"]
+            fx += ["--traffic-speed-kmh", "lanes", "--windscreen", "--windscreen-rain", "0.05", "--vms"]
+            subprocess.run(
+                [sys.executable, str(REPO / "tools" / "build_highway_scene.py"), "--out-dir", str(scene), *common, *fx],
+                check=True,
+                capture_output=True,
+            )
+            exr = tmp / "rs.exr"
+            info = render_time_slices.render(scene, pbrt=PBRT, spp=4, bands=3, out=exr, jobs=1)
+            self.assertEqual(info["bands"], 3)
+            self.assertGreater(info["slices"], 3)  # PWM edges split the windows
+            L, _ = spectral_buckets_from_exr(exr)
+            self.assertEqual(L.shape[:2], (36, 64))
+            self.assertTrue(np.isfinite(L).all())
+            self.assertGreater(float(L[:12].mean()), float(L[-8:].mean()))
+            outs = []
+            for extra in ([], ["--integration-time-s", "0.004"]):
+                out = tmp / f"e{len(outs)}.npz"
+                run_tool_main(
+                    pbrt_tool.main,
+                    ["--exr", str(exr), "--camera-model-config", str(CAMERA_MODEL)]
+                    + ["--scene-manifest-json", str(scene / "highway_manifest.json"), "--out", str(out), *extra],
+                )
+                outs.append(np.load(out)["electrons_rgb"])
+            np.testing.assert_allclose(outs[0], outs[1])  # manifest exposure is the default integration time
+            self.assertGreater(float(outs[0].mean()), 0.0)

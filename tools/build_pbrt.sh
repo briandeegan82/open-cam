@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build the CPU pbrt-v4 binary from the third_party/pbrt-v4 submodule with the open-cam
 # patches in third_party/patches/*.patch applied (idempotent; the submodule commit is
-# never changed). Usage: tools/build_pbrt.sh [--apply-only] [extra cmake --build args]
+# never changed). Usage: tools/build_pbrt.sh [--apply-only|--patch-only] [extra cmake --build args]
 set -euo pipefail
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 src="$repo/third_party/pbrt-v4"
@@ -16,8 +16,9 @@ for p in "$repo"/third_party/patches/*.patch; do
     echo "applied: $(basename "$p")"
   fi
 done
-[ "${1:-}" = "--apply-only" ] && exit 0
+case "${1:-}" in --apply-only | --patch-only) exit 0 ;; esac
 
-env -u PBRT_OPTIX_PATH cmake -S "$src" -B "$build" -DCMAKE_BUILD_TYPE=Release
+env -u PBRT_OPTIX_PATH cmake -S "$src" -B "$build" -DCMAKE_BUILD_TYPE=Release \
+  -DPBRT_BUILD_NATIVE_EXECUTABLE="${PBRT_NATIVE:-ON}"
 env -u PBRT_OPTIX_PATH cmake --build "$build" -j"$(nproc)" --target pbrt_exe "$@"
 echo "pbrt: $build/pbrt"

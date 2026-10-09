@@ -58,3 +58,13 @@ You can switch to any other file in the list above, for example:
 - Existing configs that point to `D55.csv` continue to work unchanged.
 - These SPDs are intended for forward-model calibration and illumination targeting behavior.
 - Keep all custom illuminants in this same CSV format for compatibility.
+
+## CIE daylight components
+
+`original/CIE_illum_Dxx_comp.csv` — relative SPDs of the CIE daylight components S0, S1, S2,
+300–830 nm, 5 nm (columns: wavelength, S0, S1, S2; no header). Source: CIE (2022),
+"Relative spectral power distributions of CIE daylight components",
+https://files.cie.co.at/Publications-datasets/CIE_illum_Dxx_comp.csv,
+doi:10.25039/CIE.DS.w7zunnny, licence CC BY-SA 4.0 (attribution: International Commission on
+Illumination, CIE), sha256 `4056cf7c1afb23fb8820ff9cbc383a80005acdffe1c0a6945c6032616e08c6be`.
+Used for the spectral highway sky (`tools/highway_spectral_sky.py`).
