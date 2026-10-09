@@ -196,7 +196,19 @@ def main() -> None:
         "--spectral-lambda-max",
         type=float,
         default=830.0,
-        help="SpectralFilm only: lambdamax (nm), must be <= 830 (pbrt Lambda_max).",
+        help="SpectralFilm only: lambdamax (nm), must be <= --pbrt-lambda-max.",
+    )
+    ap.add_argument(
+        "--pbrt-lambda-max",
+        type=float,
+        default=830.0,
+        help="Compiled pbrt Lambda_max (830 stock; 1100 for the NIR build, see tools/build_pbrt.sh).",
+    )
+    ap.add_argument(
+        "--radiometric-light",
+        action="store_true",
+        help='Emit "bool photometric" false (patch 0002): light scale in absolute radiometric units, '
+        "required for NIR-only illuminants whose photometric integral is ~0.",
     )
     args = ap.parse_args()
 
@@ -250,9 +262,10 @@ def main() -> None:
         if not str(film_filename).lower().endswith(".exr"):
             raise ValueError(f'SpectralFilm requires an .exr filename, got "{film_filename}"')
         lo, hi = float(args.spectral_lambda_min), float(args.spectral_lambda_max)
-        if lo < 360.0 or hi > 830.0 or lo >= hi:
+        if lo < 360.0 or hi > float(args.pbrt_lambda_max) or lo >= hi:
             raise ValueError(
-                "spectral lambda range must satisfy 360 <= lambdamin < lambdamax <= 830 (pbrt-v4 spectrum range)"
+                f"spectral lambda range must satisfy 360 <= lambdamin < lambdamax <= {args.pbrt_lambda_max:g} "
+                "(compiled pbrt Lambda_max; see --pbrt-lambda-max)"
             )
         if int(args.spectral_nbuckets) < 1:
             raise ValueError("spectral-nbuckets must be >= 1")
@@ -341,6 +354,7 @@ def main() -> None:
             'LightSource "distant"',
             f'    "spectrum L" "spd/{ill_spd_name}"',
             '    "float scale" [%s]' % args.light_scale,
+            *(['    "bool photometric" false'] if args.radiometric_light else []),
             '    "point3 from" [0.12 0.55 2.9]',
             '    "point3 to" [0 0 0]',
             "",

@@ -11,8 +11,13 @@
 - canon_powershot_g5_x
 - default
 - default_cmy
+- default_quad_bayer
 - default_rccb
+- default_rccc_noircf
 - default_rccg
+- default_rgb_noircf
+- default_rgbw
+- default_rgbw_4x4
 - default_rggcy
 - default_ryycy
 - fujifilm_gfx_50r
@@ -56,7 +61,6 @@
 - research_thinlens_normal
 - research_thinlens_tele
 - research_thinlens_wide
-- study_nikon_z6_minvar
 - samsung_galaxy_note_9
 - samsung_nx30
 - sigma_fp
@@ -72,4 +76,5 @@
 - sony_rx100m3
 - sony_rx100m6
 - sony_zv_1
+- study_nikon_z6_minvar
 - xiaomi_mi_8

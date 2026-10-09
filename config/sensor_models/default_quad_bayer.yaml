@@ -1,0 +1,12 @@
+# Delta from config/sensor_models/default.yaml — only overrides are listed.
+schema_version: 1
+source:
+  qe_variant: default_quad_bayer
+  qe_variant_note: 'True periodic CFA via cfa.layout (see docs/CFA_NIR.md)'
+model:
+  name: default_quad_bayer
+  display_name: Default Quad Bayer, 2x2 charge binning (true CFA)
+cfa:
+  layout: QUAD_BAYER
+  demosaic: gradient
+  binning: charge

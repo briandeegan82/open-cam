@@ -7,7 +7,10 @@ sensor:
     blue_csv: spectra/QE/interpolated/QE_yellow.csv
 source:
   qe_variant: default_cmy
-  qe_variant_note: 'CMY approximated as RGB channels: C->R, M->G, Y->B'
+  qe_variant_note: 'True periodic CFA via cfa.layout (per-channel spectral QE). quantum_efficiency keeps the legacy 3-channel proxy for RGB-only tools; set cfa.layout: null for the old proxy behaviour. Old note: CMY approximated as RGB channels: C->R, M->G, Y->B'
 model:
   name: default_cmy
-  display_name: Default CMY (RGB-proxy)
+  display_name: Default CMY (true CFA)
+cfa:
+  layout: CMY
+  demosaic: gradient
