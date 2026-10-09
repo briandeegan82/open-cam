@@ -296,6 +296,12 @@ def weight_map_spectra(w: np.ndarray, wl: np.ndarray | None = None) -> tuple[np.
     return w0, np.asarray(w, float) @ b
 
 
+def weights_to_rgb(w: np.ndarray) -> np.ndarray:
+    """Linear-sRGB equivalent (same XYZ) of a basis-weight map, for code that expects an RGB sky."""
+    wl, b = basis_spectra()
+    return np.asarray(w, float) @ spectrum_xyz(wl, b) @ np.linalg.inv(SRGB_TO_XYZ).T
+
+
 def horizontal_spectrum(w: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Relative spectral irradiance on a horizontal plane from an equal-area weight map."""
     n = w.shape[0]
@@ -379,4 +385,5 @@ def spectral_sky_light(args, sky_file: Path, elev: float, out_dir: Path, spd_dir
         "description": desc,
         "manifest": info,
         "approximation": approx,
+        "rgb": weights_to_rgb(w),
     }

@@ -33,6 +33,11 @@ def build_offline(out: Path, *extra: str) -> tuple[dict, str]:
     return json.loads((scene / "highway_manifest.json").read_text()), (scene / "highway.pbrt").read_text()
 
 
+def hw_clear_sky_reference(elev: float) -> float:
+    e_dn, e_dif = clear_sky_illuminance_lux(elev)
+    return e_dn * np.sin(np.radians(elev)) + e_dif
+
+
 def global_horizontal_cct(elev: float) -> float:
     """CCT of sun + Hosek sky on a horizontal plane at the builder's absolute illuminances."""
     wl, e_sky = ss.horizontal_spectrum(ss.hosek_weight_map(96, elev, 3.0))
@@ -168,6 +173,17 @@ class TestBuilderSpectralSky(unittest.TestCase):
                 self.assertAlmostEqual(m["lighting"][k], m_rgb["lighting"][k])
             self.assertAlmostEqual(sky["spectral"]["model_illuminance_horizontal_lux"] / 13227.0, 1.0, delta=0.3)
             self.assertFalse(any("RGB (HDRI or analytic)" in a for a in m["approximations"]))
+
+    def test_hosek_with_haze(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            m, scene = build_offline(Path(td), "--sky", "hosek", "--haze", "hazy")
+            self.assertIn("sky_basis_0.spd", scene)
+            self.assertIn('Integrator "volpath"', scene)
+            self.assertLess(m["lighting"]["reference_illuminance_lux"], hw_clear_sky_reference(45.0))
+
+    def test_weights_to_rgb_keeps_luminance(self) -> None:
+        w = ss.hosek_weight_map(32, 30.0)
+        np.testing.assert_allclose(ss.weights_to_rgb(w) @ ss.SRGB_TO_XYZ[1], w.sum(-1), rtol=1e-9, atol=1e-12)
 
     def test_daylight_conversion_of_rgb_map_and_default(self) -> None:
         with tempfile.TemporaryDirectory() as td:
