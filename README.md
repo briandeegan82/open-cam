@@ -289,6 +289,7 @@ venv/bin/python tools/munsell_mat_to_sqlite.py --summary
 - `pbrt_exr` sensor-forward mode expects multispectral EXR and currently supports `photon_counting` calibration mode.
 - `cfa.demosaic` implements bilinear and Malvar-He-Cutler reconstruction.
 - Post-PSF is a simple Gaussian/stray-light approximation, not a full chromatic lens aberration model.
+- Highway wet road (`--road-wetness`, `--puddles`, `--spray`): flat puddles, no raindrops/ripples on the road, spray density scaling partly assumed; see `docs/HIGHWAY_SCENES.md`.
 - PBRT spectral sampling remains Monte Carlo based; use validation and repeated runs for sensitive comparisons.
 
 ## Troubleshooting

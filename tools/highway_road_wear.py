@@ -339,6 +339,7 @@ class RoadWear:
         oil_e = oil * (1.0 - 0.8 * pm)
         mul = (1.0 + 0.07 * macro) * (1.0 - 0.2 * wheel_e) * (1.0 - 0.45 * oil_e) * (1.0 - 0.6 * crk)
         gloss = np.clip(0.55 * wheel_e + 0.7 * oil_e + 0.3 * fresh, 0.0, 1.0)
+        self.wheel_map, self.texel_zx = wheel_e, sp  # wheel-path (rut) map for highway_wet puddles
         self.summary.update(
             transverse_cracks=n_tr,
             longitudinal_cracks=n_long,

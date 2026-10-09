@@ -152,9 +152,34 @@ class TestBuilderNight(unittest.TestCase):
             self.assertGreater(lit["artificial"]["streetlights"]["poles"], 0)
             self.assertIn("retroreflection", m)
 
-    def test_haze_rejected_at_night(self) -> None:
-        with tempfile.TemporaryDirectory() as td, self.assertRaises(SystemExit):
-            build_without_assets(Path(td), "--time-of-day", "night", "--haze", "fog")
+    def test_haze_at_night_reference_illuminance(self) -> None:
+        """Night + fog: reference = natural road illuminance under the medium (MC model), lights unscaled."""
+        with tempfile.TemporaryDirectory() as td:
+            m = build_without_assets(Path(td), "--time-of-day", "night", "--haze", "fog")
+            road = m["atmosphere"]["road_illuminance"]
+            t = road["sources"]["night_sky"]["total_transmittance"]
+            self.assertLess(t, 0.97)
+            self.assertGreater(t, 0.2)
+            self.assertAlmostEqual(m["lighting"]["reference_illuminance_lux"], night.NIGHT_SKY_LUX * t, places=9)
+            scene = (Path(td) / "scene" / "highway.pbrt").read_text()
+            self.assertIn('MakeNamedMedium "haze"', scene)
+            self.assertIn('"volpath"', scene)
+
+    def test_haze_at_dusk_light_reference_road(self) -> None:
+        """--haze-light-reference road: natural sources scaled so the road gets the no-medium value."""
+        with tempfile.TemporaryDirectory() as td:
+            args = ("--time-of-day", "dusk", "--moon-phase-deg", "30", "--haze", "mist")
+            m = build_without_assets(Path(td), *args, "--haze-light-reference", "road")
+            a = m["atmosphere"]
+            self.assertGreater(a["light_scale_applied"], 1.0)
+            self.assertAlmostEqual(
+                m["lighting"]["reference_illuminance_lux"], a["no_medium_horizontal_illuminance_lux"], places=9
+            )
+            self.assertAlmostEqual(
+                m["lighting"]["sky"]["illuminance_horizontal_lux"],
+                a["road_illuminance"]["sources"]["twilight_sky"]["horizontal_top_lux"],
+                places=6,
+            )
 
     def test_variety_lamp_posts_lit(self) -> None:
         """--lamp-posts on (tools/highway_variety.py): its posts carry the luminaires, no duplicate poles."""
