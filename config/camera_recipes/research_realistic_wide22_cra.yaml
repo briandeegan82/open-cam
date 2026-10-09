@@ -1,0 +1,9 @@
+schema_version: 1
+model:
+  name: research_realistic_wide22_cra
+  display_name: Research Realistic Wide 22mm + CRA/microlens shading
+lens_model: research_realistic_wide22
+sensor_model: research_realistic_wide22_cra
+source:
+  calibration_tier: research
+  notes: research_realistic_wide22 with the opt-in pixel angular response (see docs/PIXEL_ANGULAR_RESPONSE.md).

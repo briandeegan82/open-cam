@@ -1,0 +1,35 @@
+# Delta from config/sensor_models/default.yaml — only overrides are listed.
+# Example: research_realistic_wide22 with the opt-in CRA / microlens angular response
+# (tools/pixel_angular_response.py). Stack geometry below is illustrative, not measured.
+schema_version: 1
+validation:
+  datasheet:
+    enabled: false
+source:
+  calibration_tier: research
+  notes: >-
+    wide_22mm traced lens with pixel angular response (lens + colour shading). The microlens
+    shift is designed for a linear 20 deg max-CRA lens, so the wide lens (about 26 deg CRA at the
+    corner of a 25 mm film diagonal) shows residual CRA-mismatch shading.
+model:
+  name: research_realistic_wide22_cra
+  display_name: Research Realistic Wide 22mm + CRA/microlens shading
+sensor_forward:
+  model:
+    pixel_angular_response:
+      enabled: true
+      incidence: auto            # traced (realistic lensfile) | table (lens.chief_ray_angle_table) | pinhole (fov)
+      microlens_shift:
+        mode: linear             # none | matched | linear | table
+        max_cra_deg: 20.0        # designed CRA at the frame corner
+      stack:
+        stack_height_um: 2.0     # microlens to silicon surface
+        stack_index: 1.55
+        window_fraction: 0.8     # collection window width / pitch
+        collection_depth_um: 3.0
+      crosstalk:
+        enabled: false
+        cfa_pattern: RGGB        # must match cfa.pattern when enabled
+      field_grid: [9, 13]
+      pupil_grid: 24
+      normalize: normal_incidence

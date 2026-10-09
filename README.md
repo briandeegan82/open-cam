@@ -290,6 +290,7 @@ venv/bin/python tools/munsell_mat_to_sqlite.py --summary
 - `cfa.demosaic` implements bilinear and Malvar-He-Cutler reconstruction.
 - Post-PSF is a simple Gaussian/stray-light approximation, not a full chromatic lens aberration model.
 - PBRT spectral sampling remains Monte Carlo based; use validation and repeated runs for sensitive comparisons.
+- Pixel angular response (CRA / microlens shift, lens + colour shading, optional optical crosstalk) is opt-in (`sensor_forward.model.pixel_angular_response`) and uses a geometric-optics microlens with a Gaussian diffraction term; wave-optical effects at sub-2 µm pitch and real stack data are not modelled — see [`docs/PIXEL_ANGULAR_RESPONSE.md`](docs/PIXEL_ANGULAR_RESPONSE.md). Off by default.
 
 ## Troubleshooting
 
