@@ -176,8 +176,8 @@ def builder_args(scene: str, optics: dict, xres: int, yres: int, spp: int) -> li
     return args
 
 
-def _pbrt(scene_file: Path) -> None:
-    subprocess.run([str(PBRT), "--quiet", scene_file.name], cwd=scene_file.parent, check=True)
+def _pbrt(scene_file: Path, *extra: str) -> None:
+    subprocess.run([str(PBRT), "--quiet", *extra, scene_file.name], cwd=scene_file.parent, check=True)
 
 
 def gbuffer_world_positions(scene_file: Path, xres: int, yres: int) -> np.ndarray:
@@ -241,6 +241,18 @@ def render_scene(scene: str, optics: dict, out: Path, xres: int, yres: int, spp:
     t0 = time.time()
     _pbrt(scene_file)
     res = {"exr": out / film, "meta": meta, "render_s": time.time() - t0, "rois": {}, "shape": (yres, xres)}
+    if scene == "diorama":
+        # Second render with another sampler seed: the twin capture then differs in MC noise too,
+        # so the texture metric's noise PSD removes render noise as well as sensor noise.
+        # pbrt's --seed leaves the image unchanged (README), so set the sampler's in-scene seed.
+        twin = out / f"{Path(film).stem}_seed1{Path(film).suffix}"
+        seeded = scene_file.with_name(scene_file.stem + "_seed1.pbrt")
+        text, n = re.subn(r'(Sampler "\w+")', r'\1 "integer seed" [1]', scene_file.read_text(), count=1)
+        if n != 1:
+            raise RuntimeError(f"no Sampler in {scene_file}")
+        seeded.write_text(text)
+        _pbrt(seeded, "--outfile", twin.name)
+        res["exr_twin"] = twin
     if scene in ("diorama", "skin") and optics["camera"] == "realistic":
         P = gbuffer_world_positions(scene_file, xres, yres)
         if scene == "diorama":
@@ -356,8 +368,33 @@ def to_srgb_linear(e: np.ndarray, layout: cm.CfaLayout, ccm: np.ndarray, white_r
 
 
 def white_signal_e(e: np.ndarray, layout: cm.CfaLayout, roi: list[int]) -> float:
-    sites, th, tw = guide_sites(e, layout)
-    return float(hdr._roi(sites, _scale_roi(roi, th, tw)).mean())
+    """Brightest channel's mean (e-) over ``roi`` after demosaicing, so metering on it clips no channel.
+
+    Metering on the densest (guide) channel let the panchromatic W of RGBW clip, and a guide-site
+    ROI of a binned quad-Bayer raster was empty at low resolution.
+    """
+    x0, y0, x1, y1 = roi
+    chans = cm.demosaic(np.clip(e, 0.0, None), layout, "gradient")[y0:y1, x0:x1]
+    if chans.size == 0:
+        raise ValueError(f"white ROI {roi} is empty on a {e.shape} raster")
+    return float(chans.reshape(-1, chans.shape[2]).mean(axis=0).max())
+
+
+def meter_signal_e(
+    e: np.ndarray, layout: cm.CfaLayout, white_roi: list[int], card_rois: list[list[int]] = (), pct: float = 90.0
+) -> float:
+    """Metering signal: the larger of the white patch's brightest-channel mean and the ``pct``-th
+    percentile of the brightest channel in each card ROI (90th: robust to MC fireflies), so neither the
+    white patch nor the card's white side clip or cross an HDR readout transition (the slanted-edge card is brighter than the
+    ColorChecker white in the diorama)."""
+    v = white_signal_e(e, layout, white_roi)
+    if card_rois:
+        chans = cm.demosaic(np.clip(e, 0.0, None), layout, "gradient")
+        for x0, y0, x1, y1 in card_rois:
+            c = chans[y0:y1, x0:x1]
+            if c.size:
+                v = max(v, float(np.percentile(c.max(axis=2), pct)))
+    return v
 
 
 def guide_sites(e: np.ndarray, layout: cm.CfaLayout) -> tuple[np.ndarray, int, int]:
@@ -491,9 +528,15 @@ def score_recipe(recipe: str, renders: dict, tmp: Path, seed: int, images: dict 
         white = render["rois"].get("white")
         shape = render_shape(render)
 
+        cards = [render["rois"]["slanted_edge"]] if render["rois"].get("slanted_edge") else []
+
         def white_e(e: np.ndarray, white=white, shape=shape) -> float:
             lay_s, b = binned_layout(layout, e.shape, shape)
             return white_signal_e(e, lay_s, _scale_roi(white, b, b))
+
+        def meter_e(e: np.ndarray, white=white, shape=shape, cards=cards) -> float:
+            lay_s, b = binned_layout(layout, e.shape, shape)
+            return meter_signal_e(e, lay_s, _scale_roi(white, b, b), [_scale_roi(r, b, b) for r in cards])
 
         if isinstance(target, tuple) or white is None:
             pct, frac = target if isinstance(target, tuple) else (99.0, 0.8)
@@ -503,7 +546,7 @@ def score_recipe(recipe: str, renders: dict, tmp: Path, seed: int, images: dict 
             for _ in range(2):  # spot-meter the white patch; the second pass removes the dim probe's noise bias
                 k = float(sens["stats"]["exposure_scale_e_per_unit"])
                 goal = target * float(sens["stats"]["full_well_effective_e"])
-                k *= goal / max(white_e(sens["e"]), 1e-9)
+                k *= goal / max(meter_e(sens["e"]), 1e-9)
                 sens = run_sensor(recipe, render, tmp / scene, seed=seed, exposure_scale=k)
         row[f"{scene}_white_e"] = white_e(sens["e"]) if white else None
 
@@ -518,7 +561,8 @@ def score_recipe(recipe: str, renders: dict, tmp: Path, seed: int, images: dict 
         if images is not None:
             images[scene] = rgb
         if scene == "diorama":
-            twin = run_sensor(recipe, render, tmp / "diorama_twin", seed=seed + 1, exposure_scale=k)
+            twin_render = {**render, "exr": render.get("exr_twin", render["exr"])}
+            twin = run_sensor(recipe, twin_render, tmp / "diorama_twin", seed=seed + 1, exposure_scale=k)
             noise = (rgb - rgb_of(twin["e"])) / math.sqrt(2.0)
             row.update(score_diorama(rgb, render["rois"], noise=noise))
         elif scene == "skin":

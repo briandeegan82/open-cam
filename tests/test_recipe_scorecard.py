@@ -90,3 +90,28 @@ def test_binned_layout_collapses_quad_bayer_to_bayer():
     lay, b = sc.binned_layout(quad, (320, 480), (640, 960))
     assert b == 2 and lay.tile == (("R", "G"), ("G", "B"))
     assert sc.binned_layout(quad, (640, 960), (640, 960)) == (quad, 1)
+
+
+def _const_mosaic(layout, values, shape=(24, 24)):
+    th, tw = len(layout.tile), len(layout.tile[0])
+    e = np.zeros(shape)
+    for r in range(th):
+        for c in range(tw):
+            e[r::th, c::tw] = values[layout.tile[r][c]]
+    return e
+
+
+def test_white_signal_meters_on_brightest_channel():
+    rgbw = sc.cm.resolve_layout({"layout": "RGBW"})
+    e = _const_mosaic(rgbw, {"R": 1000.0, "G": 1200.0, "W": 3000.0, "B": 1100.0})
+    assert sc.white_signal_e(e, rgbw, [4, 4, 20, 20]) == pytest.approx(3000.0, rel=1e-3)
+    with pytest.raises(ValueError, match="empty"):
+        sc.white_signal_e(e, rgbw, [10, 10, 10, 20])
+
+
+def test_meter_signal_includes_card_highlights():
+    bayer = sc.cm.resolve_layout({"layout": "RGGB"})
+    e = _const_mosaic(bayer, {"R": 1000.0, "G": 1000.0, "B": 1000.0}, (48, 48))
+    e[24:, 24:] *= 2.0
+    assert sc.meter_signal_e(e, bayer, [2, 2, 20, 20]) == pytest.approx(1000.0, rel=1e-3)
+    assert sc.meter_signal_e(e, bayer, [2, 2, 20, 20], [[26, 26, 46, 46]]) == pytest.approx(2000.0, rel=1e-3)
