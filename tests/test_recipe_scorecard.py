@@ -1,0 +1,85 @@
+"""Recipe scorecard: recipe discovery, optics grouping, world-space ROIs and a pbrt smoke run."""
+
+import json
+import os
+import sys
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO / "tools"))
+
+import run_recipe_scorecard as sc  # noqa: E402
+
+
+def test_discovers_every_recipe():
+    names = sc.discover_recipes()
+    assert names == sorted(p.stem for p in (REPO / "config" / "camera_recipes").glob("*.yaml"))
+    assert "default" in names
+    with pytest.raises(SystemExit):
+        sc.discover_recipes(["no_such_recipe"])
+
+
+def test_groups_share_optics_and_cover_all_recipes():
+    names = sc.discover_recipes()
+    groups = sc.group_recipes(names)
+    assert sorted(r for g in groups.values() for r in g["recipes"]) == names
+    assert len(groups) < len(names)
+    assert {g["optics"]["camera"] for g in groups.values()} <= {"perspective", "thinlens", "realistic"}
+    hdr_family = {"default", "default_hdr_dcg", "default_hdr_split_pixel", "default_hdr_lofic", "default_hdr_3exp"}
+    keys = {k for k, g in groups.items() if hdr_family & set(g["recipes"])}
+    assert len(keys) == 1  # same optics -> one render reused by all five sensor variants
+
+
+def test_realistic_fov_from_focal_length():
+    o = {"camera": "realistic", "efl_mm": 50.0}
+    fov = sc.vertical_fov(o, 960, 640)
+    h = 35.0 * 640 / np.hypot(960, 640)
+    assert fov == pytest.approx(2 * np.degrees(np.arctan(h / 100.0)))
+    assert sc.vertical_fov({"camera": "perspective", "fov": 45.0}, 960, 640) == 45.0
+
+
+def test_framing_keeps_target_plane_in_focus():
+    args = sc.builder_args("diorama", {"camera": "thinlens", "fov": 20.0, "lens_radius": 0.04}, 360, 240, 4)
+    a = dict(zip(args[::2], args[1::2], strict=False))
+    d, z = float(a["--cam-dist"]), sc.SCENES["diorama"][3]
+    assert float(a["--focus-distance"]) == pytest.approx(d - z, rel=1e-5)
+    assert float(a["--thinlens-focal-distance"]) == pytest.approx(d - z, rel=1e-5)
+    # narrower FOV -> camera moves back so the cards fill the same fraction of the frame
+    assert (d - z) * np.tan(np.radians(10)) == pytest.approx((1.6 - z) * np.tan(np.radians(20)), rel=1e-4)
+
+
+def test_world_roi_selects_pixels_inside_rectangle():
+    yy, xx = np.mgrid[0:50, 0:80].astype(float)
+    P = np.stack([xx / 10.0, (50 - yy) / 10.0, np.zeros_like(xx)], axis=-1)
+    roi = sc.world_roi(P, [2.0, 1.0, 4.0, 3.0], 0.0, margin=0.0)
+    x0, y0, x1, y1 = roi
+    assert P[y0, x0, 0] >= 2.0 and P[y1 - 1, x1 - 1, 0] <= 4.0
+    assert P[y1 - 1, x0, 1] >= 1.0 and P[y0, x0, 1] <= 3.0
+    assert sc.world_roi(P, [2.0, 1.0, 4.0, 3.0], 5.0) is None
+
+
+def test_guide_sites_pick_green_of_bayer():
+    lay = sc.cm.resolve_layout({"layout": "GBRG"})
+    e = np.arange(16.0).reshape(4, 4)
+    sites, th, tw = sc.guide_sites(e, lay)
+    assert (th, tw) == (2, 2)
+    assert np.array_equal(sites, e[0::2, 0::2])
+
+
+@pytest.mark.skipif(
+    not sc.PBRT.is_file() and not os.environ.get("OPENCAM_REQUIRE_PBRT"), reason="pbrt binary not built"
+)
+def test_smoke_run_writes_report(tmp_path):
+    rc = sc.main(
+        ["--recipes", "default", "--scenes", "skin", "flare", "--xres", "120", "--yres", "80",
+         "--pixelsamples", "4", "--out-dir", str(tmp_path)]
+    )  # fmt: skip
+    assert rc == 0
+    data = json.loads((tmp_path / "scorecard.json").read_text())
+    row = data["rows"][0]
+    assert row["recipe"] == "default" and np.isfinite(row["skin_de00_mean"])
+    assert "| default |" in (tmp_path / "scorecard.md").read_text()
+    assert (tmp_path / "scorecard.csv").read_text().startswith("recipe,optics,cfa,hdr")

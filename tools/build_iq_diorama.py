@@ -106,7 +106,13 @@ def _patch_grid(lines, meta, proj, out, prefix, refl, wl, cols, x0, size, gap):
             f'AttributeBegin\n    Material "diffuse" "spectrum reflectance" "spd/{name}.spd"\n    '
             f"{_quad(px0, py1 - size, px0 + size, py1, CARD_Z)}\nAttributeEnd"
         )
-        meta.append({"name": name, "roi_xyxy": proj.roi(px0, py1 - size, px0 + size, py1, CARD_Z, 0.2)})
+        meta.append(
+            {
+                "name": name,
+                "world": [px0, py1 - size, px0 + size, py1, CARD_Z],
+                "roi_xyxy": proj.roi(px0, py1 - size, px0 + size, py1, CARD_Z, 0.2),
+            }
+        )
     return x0 + cols * (size + gap) + gap
 
 
