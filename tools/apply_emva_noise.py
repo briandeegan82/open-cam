@@ -925,6 +925,7 @@ def integrate_exr_spectral_qe(
     model_cfg: dict | None = None,
     scene: dict | None = None,
     channel_qe=None,
+    meta_out: dict | None = None,
 ) -> np.ndarray:
     """HxWx3 (or HxWxC with ``channel_qe``) electrons via photon counting on a PBRT spectral EXR.
 
@@ -955,7 +956,7 @@ def integrate_exr_spectral_qe(
     model["calibration"] = cal_cfg
     if "pbrt_spectral_exr" not in model and "radiometric_autocalibration" in cal_cfg:
         model["pbrt_spectral_exr"] = {"radiometric_autocalibration": cal_cfg["radiometric_autocalibration"]}
-    electrons, _ = spectral_radiance_to_electrons(
+    electrons, meta = spectral_radiance_to_electrons(
         spec,
         lam,
         repo=repo,
@@ -967,7 +968,21 @@ def integrate_exr_spectral_qe(
         scene=scene,
         channel_qe=channel_qe,
     )
+    if meta_out is not None:
+        meta_out.update(meta)
     return electrons
+
+
+def apply_silicon_diffusion(raw_e: np.ndarray, layout, cfg: dict, spectral_meta: dict, pitch_um: float) -> np.ndarray:
+    """``spatial_crosstalk.model: silicon_diffusion``: per-channel kernels from Si absorption depth."""
+    import si_diffusion  # noqa: PLC0415
+
+    if "channel_spectral_electrons" not in spectral_meta:
+        raise ValueError("spatial_crosstalk.model silicon_diffusion needs a spectral EXR (integrate_qe)")
+    kernels = si_diffusion.channel_kernels(
+        spectral_meta["wavelength_nm"], np.asarray(spectral_meta["channel_spectral_electrons"]), pitch_um, cfg
+    )
+    return si_diffusion.apply_site_kernels(raw_e, layout.site_index(*raw_e.shape), kernels)
 
 
 def _scene_radiometry(manifest_path: Path | None, repo: Path) -> dict | None:
@@ -1297,6 +1312,7 @@ def main() -> None:
             return qe_stack_for_layout(repo, cfa_layout, lam, ircf_csv=_cfa_ircf)
 
     signal_source = "linear_exr"
+    _spectral_meta: dict = {}
     if electrons_npz is not None:
         signal_e = load_electrons_npz(electrons_npz)
         signal_source = "electrons_npz"
@@ -1343,6 +1359,7 @@ def main() -> None:
                     model_cfg=_sf_model if camera_model else None,
                     scene=_scene_radiometry(args.scene_manifest_json, repo),
                     channel_qe=_cfa_qe,
+                    meta_out=_spectral_meta,
                 )
             except ValueError as exc:
                 # Some renders are RGB EXRs even when integrate_qe is configured.
@@ -1390,16 +1407,30 @@ def main() -> None:
     demosaic_alg = "malvar" if demosaic_alg == "malvar" else "bilinear"
     demosaic_srgb = bool(bayer_cfg.get("demosaic_srgb", False))
     spatial_xtalk_cfg = bayer_cfg.get("spatial_crosstalk", {}) or {}
+    si_diffusion_on = bool(spatial_xtalk_cfg.get("enabled", False)) and (
+        str(spatial_xtalk_cfg.get("model", "gaussian")).lower() == "silicon_diffusion"
+    )
 
     if bayer_on:
         signal_e = bayer_sample_rgb(signal_e, bayer_pat)
         # Spatial inter-pixel diffusion crosstalk: must be applied after CFA sampling
         # so that the blur acts on the RAW mosaic (R leaking to G/B wells, etc.).
         # Applied before the noise chain so shot noise is drawn on the correct mean.
-        signal_e = apply_cfa_spatial_crosstalk(signal_e, spatial_xtalk_cfg, bayer_pat)
+        if si_diffusion_on:
+            signal_e = apply_silicon_diffusion(
+                signal_e, resolve_layout({"layout": bayer_pat}), spatial_xtalk_cfg, _spectral_meta,
+                float(sensor.get("pixel_pitch_um", 1.4)),
+            )  # fmt: skip
+        else:
+            signal_e = apply_cfa_spatial_crosstalk(signal_e, spatial_xtalk_cfg, bayer_pat)
     elif cfa_layout is not None:
         signal_e = cfa_sample(signal_e, cfa_layout)
-        signal_e = apply_site_crosstalk(signal_e, cfa_layout, spatial_xtalk_cfg)
+        if si_diffusion_on:
+            signal_e = apply_silicon_diffusion(
+                signal_e, cfa_layout, spatial_xtalk_cfg, _spectral_meta, float(sensor.get("pixel_pitch_um", 1.4))
+            )
+        else:
+            signal_e = apply_site_crosstalk(signal_e, cfa_layout, spatial_xtalk_cfg)
 
     # Dark current mean: computed here (not in the temporal section) so that the DSNU
     # log-normal distribution can be correctly centred on it — ensuring that
@@ -1617,6 +1648,8 @@ def main() -> None:
     if hdr_pixel.hdr_enabled(cfg):
         if cfa_layout is not None:
             raise ValueError("hdr pixel modes are not yet supported with a generic cfa.layout")
+        if si_diffusion_on:
+            raise ValueError("spatial_crosstalk.model silicon_diffusion is not yet supported for HDR captures")
 
         def _hdr_capture(p: Path) -> np.ndarray:
             e = load_electrons_npz(p.resolve())
