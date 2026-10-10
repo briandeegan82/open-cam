@@ -123,6 +123,12 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--lamp-radiance", type=float, default=20000.0)
     ap.add_argument("--fill-radiance", type=float, default=3.0)
     ap.add_argument("--camera", choices=("perspective", "thinlens", "realistic"), default="perspective")
+    ap.add_argument(
+        "--lens-dispersion",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Glass dispersion for realistic lenses with a <lens>.glass.yaml sidecar (needs the patched pbrt).",
+    )
     ap.add_argument("--lensfile", default=iq.DEFAULT_REALISTIC_LENSFILE)
     ap.add_argument("--aperture-diameter-mm", type=float, default=4.0)
     ap.add_argument("--focus-distance", type=float, default=None, help="default: card plane")

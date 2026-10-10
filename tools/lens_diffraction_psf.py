@@ -73,10 +73,11 @@ from __future__ import annotations
 import argparse
 import math
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import numpy as np
+from lens_glass import glass_map_path, refractive_indices
 from lens_prescription import load_lens_file
 
 # pbrt RGB film channels: same representative wavelengths as apply_spectral_psf.
@@ -105,7 +106,9 @@ class LensSystem:
         *,
         aperture_blades: int = 0,
         blade_rotation_deg: float = 0.0,
+        wavelength_nm: float | None = None,
     ) -> LensSystem:
+        """Load a pbrt lens file; with ``wavelength_nm`` use the glass dispersion of its sidecar."""
         rows = np.asarray(load_lens_file(Path(path)), dtype=np.float64)
         radius, thick, eta, ap = rows.T.copy()
         stop = int(np.flatnonzero(radius == 0.0)[0])
@@ -113,7 +116,7 @@ class LensSystem:
             if aperture_diameter_mm <= 0:
                 raise ValueError("aperture diameter must be positive")
             ap[stop] = min(float(aperture_diameter_mm), ap[stop])  # pbrt clamps to the listed stop
-        n_after = np.where(eta == 0.0, 1.0, eta)
+        n_after = np.where(eta == 0.0, 1.0, eta) if wavelength_nm is None else refractive_indices(path, wavelength_nm)
         return cls(radius, thick, n_after, 0.5 * ap, stop, int(aperture_blades), float(blade_rotation_deg))
 
     @property
@@ -672,20 +675,28 @@ class LensPsfModel:
     pupil_amplitude: str = "radiometric"
     apodisation_w: float | None = None
     kernel_size: int | None = None
+    dispersive_lens: Path | None = None  # lens file whose glass sidecar gives n(lambda); None = n_d
     _pupils: dict = field(default_factory=dict, repr=False)
+
+    def lens_at(self, lam_nm: float | None) -> LensSystem:
+        """The lens with its indices at ``lam_nm`` (focus stays at the n_d film distance, as in pbrt)."""
+        if self.dispersive_lens is None or lam_nm is None:
+            return self.lens
+        return replace(self.lens, n_after=refractive_indices(self.dispersive_lens, lam_nm))
 
     @property
     def aberrations(self) -> bool:
         return self.combine == "wave_optics"
 
-    def pupil(self, image_height_mm: float) -> FieldPupil:
-        key = round(image_height_mm, 6)
+    def pupil(self, image_height_mm: float, lam_nm: float | None = None) -> FieldPupil:
+        lam_key = None if self.dispersive_lens is None or lam_nm is None else round(float(lam_nm), 1)
+        key = (round(image_height_mm, 6), lam_key)
         if key not in self._pupils:
             self._pupils[key] = trace_field_pupil(
-                self.lens,
+                self.lens_at(lam_key),
                 self.z_obj,
                 self.z_film,
-                key,
+                key[0],
                 n_pupil=self.n_pupil,
                 pupil_amplitude=self.pupil_amplitude,
                 apodisation_w=self.apodisation_w,
@@ -704,7 +715,7 @@ class LensPsfModel:
         # pbrt RealisticCamera raster -> film: x_film = -dc p, y_film = +dr p.
         fx, fy = -dc * self.pitch_um * 1e-3, dr * self.pitch_um * 1e-3
         r = math.hypot(fx, fy)
-        fp = self.pupil(r)
+        fp = self.pupil(r, lam_nm)
         delta = (math.atan2(fy, fx) + 0.5 * math.pi) if r > 0 else 0.0
         m = _rotation(-delta) @ np.diag([-1.0, 1.0])
         return pixel_kernel(fp, lam_nm, self.pitch_um, kernel_size, aberrations=self.aberrations, m=m)
@@ -715,7 +726,7 @@ class LensPsfModel:
         w, h = self.film_res
         corner = 1e-3 * self.pitch_um * 0.5 * math.hypot(w, h) * (1 - 1 / max(self.tile_grid))
         sizes = [
-            auto_kernel_size(self.pupil(rr), lam_nm, self.pitch_um, self.aberrations)
+            auto_kernel_size(self.pupil(rr, lam_nm), lam_nm, self.pitch_um, self.aberrations)
             for rr in np.linspace(0.0, corner, 3)
         ]
         return max(sizes)
@@ -816,6 +827,7 @@ def model_from_config(
     t_film = pbrt_film_distance_mm(lens, 1e3 * float(focus_m), diag)
     z_film = float(lens.z_vertex[-1]) + t_film
     tg = cfg.get("tile_grid", [9, 7])
+    dispersion = cfg.get("dispersion", lens_cfg.get("dispersion", True)) is not False
     return LensPsfModel(
         lens=lens,
         z_film=z_film,
@@ -828,6 +840,7 @@ def model_from_config(
         pupil_amplitude=str(cfg.get("pupil_amplitude", "radiometric")),
         apodisation_w=None if cfg.get("apodisation_w") is None else float(cfg["apodisation_w"]),
         kernel_size=cfg.get("kernel_size_px"),
+        dispersive_lens=lens_path if dispersion and glass_map_path(lens_path).is_file() else None,
     )
 
 

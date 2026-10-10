@@ -19,6 +19,7 @@ known analytic answer.
 |---|---|---|
 | [IQ_LAB_HDR.md](IQ_LAB_HDR.md) | 120 dB emissive chart: SNR, SNR = 1 / 10 dynamic range, CDP vs luminance | `build_hdr_dr_chart.py` → `run_hdr_dr_test.py` |
 | [IQ_LAB_FLARE.md](IQ_LAB_FLARE.md) | Veiling glare (black holes), point-source stray light, traced-ghost sweep | `build_flare_test_scene.py` → `run_flare_test.py` |
+| [LENS_SCATTER.md](LENS_SCATTER.md) | Polished-surface scatter (Rayleigh–Rice TIS, ABg) + traced ghosts in the scorecard's veiling glare | `lens_scatter.py`, `run_recipe_scorecard.py` |
 | [IQ_LAB_SKIN.md](IQ_LAB_SKIN.md) | Skin-tone ΔE00 / ΔL* / ΔC* / Δh / ITA under 4 illuminants | `build_skin_tone_chart.py` → `run_skin_tone_test.py` |
 | [IQ_LAB_DIORAMA.md](IQ_LAB_DIORAMA.md) | One-frame tabletop scene for every axis | `build_iq_diorama.py` → `iqlab` on `diorama.json` ROIs |
 

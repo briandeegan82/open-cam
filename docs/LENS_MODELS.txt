@@ -198,7 +198,9 @@ dgauss.50mm.dat at f/2, f/5.6, f/11 and five field points vs the wave-optics MTF
 Stop diameters for a traced N: f/2 25.0 mm (clamped to 17.1), f/5.6 6.194 mm,
 f/11 3.155 mm (traced_f_number; 8.93 mm is f/3.88, not f/5.6).
 
-Not modelled: dispersion / chromatic aberration (one index per glass in the pbrt
-format), bucket-width averaging (centre wavelength per bucket), polarisation and
+Dispersion: lenses with a <lens>.glass.yaml sidecar trace and diffract at n(lambda)
+(docs/LENS_DISPERSION.md); lenses without one use n_d at every wavelength.
+
+Not modelled: bucket-width averaging (centre wavelength per bucket), polarisation and
 high-NA vector effects, Fresnel losses, coatings, scatter, ghosts, microlens /
 crosstalk, and lens tilt/decentre (rotational symmetry is assumed).

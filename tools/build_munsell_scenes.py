@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+from lens_glass import pbrt_camera_lines
 from munsell_mat import load_joensuu_mat, parse_munsell_label, sanitize_filename
 
 HUE_FAMILY_ORDER = ("R", "YR", "Y", "GY", "G", "BG", "B", "PB", "P", "RP", "N")
@@ -340,6 +341,7 @@ def emit_hue_scene(
                 f'    "string lensfile" ["{lens_for_scene}"]',
                 f'    "float aperturediameter" [{float(args.aperture_diameter_mm):.6g}]',
                 f'    "float focusdistance" [{focus_d:.6g}]',
+                *pbrt_camera_lines(lens_repo, getattr(args, "lens_dispersion", True)),
             ]
         )
 
@@ -491,6 +493,12 @@ def main() -> None:
     ap.add_argument("--light-scale", type=float, default=2.0)
     ap.add_argument("--cam-dist", type=float, default=6.0)
     ap.add_argument("--camera", choices=("perspective", "realistic"), default="perspective")
+    ap.add_argument(
+        "--lens-dispersion",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Glass dispersion for realistic lenses with a <lens>.glass.yaml sidecar (needs the patched pbrt).",
+    )
     ap.add_argument("--lensfile", type=str, default=DEFAULT_REALISTIC_LENSFILE)
     ap.add_argument("--aperture-diameter-mm", type=float, default=4.0)
     ap.add_argument("--focus-distance", type=float, default=None)

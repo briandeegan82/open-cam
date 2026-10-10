@@ -260,6 +260,8 @@ def main() -> None:
                 str(float(realistic_aperture_mm)),
             ]
         )
+        if lens_cfg.get("dispersion") is False:
+            build_cmd.append("--no-lens-dispersion")
         focus_dist = pick_override(
             lens_overrides,
             "realistic_focus_distance",
