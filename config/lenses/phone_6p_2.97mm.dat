@@ -1,0 +1,23 @@
+# Six-element plastic aspheric phone lens, f = 2.97 mm, F/2.45, HFOV 37.2 deg, TTL 3.73 mm.
+# US 8,390,940 B2 (Largan Precision, "Photographing optical lens assembly"), Embodiment 1,
+# Table 1-1 (aspheric coefficients of Table 1-2 in phone_6p_2.97mm.asphere.yaml).
+# Not in the patent: clear apertures (traced: all rays through the full stop for 0..37.2 deg, +5 %;
+# row 9 (K = 15.8) is undefined beyond r = 1.101 mm, which vignettes the upper rim at full field);
+# the stop row has the patent's -0.120 mm (stop 0.12 mm behind the L1 vertex; pbrt patch 0004
+# treats a negative-thickness stop as a virtual clipping plane). The 0.2 mm IR-cut plate is
+# omitted (open-cam applies the IR-cut filter spectrally); the last gap is the air-equivalent
+# back focus 0.500 + 0.200/1.517 + 0.305, and pbrt refocuses it anyway.
+# radius	sep	n	aperture
+0	-0.120	0	1.212
+1.376280	0.496	1.544	1.297
+22.925300	0.122	1	1.417
+-52.516000	0.200	1.640	1.439
+2.494920	0.107	1	1.536
+2.694370	0.200	1.640	1.627
+2.706010	0.078	1	1.733
+1.979700	0.245	1.544	1.832
+2.788380	0.265	1	1.982
+-4.510600	0.517	1.535	2.125
+-0.775240	0.046	1	2.434
+16.750200	0.521	1.535	2.825
+0.780520	0.937	1	3.686

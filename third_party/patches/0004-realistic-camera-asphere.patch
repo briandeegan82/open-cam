@@ -1,0 +1,194 @@
+--- a/src/pbrt/cameras.cpp
++++ b/src/pbrt/cameras.cpp
+@@ -695,7 +695,8 @@
+ RealisticCamera::RealisticCamera(CameraBaseParameters baseParameters,
+                                  std::vector<Float> &lensParameters, Float focusDistance,
+                                  Float setApertureDiameter, Image apertureImage,
+-                                 const std::vector<Float> &dispersion, Allocator alloc)
++                                 const std::vector<Float> &dispersion,
++                                 const std::vector<Float> &asphere, Allocator alloc)
+     : CameraBase(baseParameters),
+       elementInterfaces(alloc),
+       exitPupilBounds(alloc),
+@@ -738,6 +739,15 @@
+             if (element.dispersionScale != 0)
+                 hasDispersion = true;
+         }
++        if (!asphere.empty() && curvatureRadius != 0) {
++            const Float *a = &asphere[8 * (i / 4)];
++            element.asphereK = a[0];
++            element.isAsphere = a[0] != 0;
++            for (int k = 0; k < 7; ++k) {
++                element.asphereA[k] = a[1 + k];
++                element.isAsphere |= a[1 + k] != 0;
++            }
++        }
+         elementInterfaces.push_back(element);
+     }
+ 
+@@ -775,17 +785,15 @@
+         if (isStop) {
+             // Compute _t_ at plane of aperture stop
+             t = (elementZ - rLens.o.z) / rLens.d.z;
+-            if (t < 0)
++            if (t < 0 && element.thickness >= 0)
+                 return 0;
+ 
+         } else {
+             // Intersect ray with element to compute _t_ and _n_
+-            Float radius = element.curvatureRadius;
+-            Float zCenter = elementZ + element.curvatureRadius;
+-            if (!IntersectSphericalElement(radius, zCenter, rLens, &t, &n))
++            if (!IntersectElement(element, elementZ, rLens, &t, &n))
+                 return 0;
+         }
+-        DCHECK_GE(t, 0);
++        DCHECK(t >= 0 || (isStop && element.thickness < 0));
+ 
+         // Test intersection point against element aperture
+         Point3f pHit = rLens(t);
+@@ -802,7 +810,8 @@
+             if (Sqr(pHit.x) + Sqr(pHit.y) > Sqr(element.apertureRadius))
+                 return 0;
+         }
+-        rLens.o = pHit;
++        if (!(isStop && element.thickness < 0))  // virtual stop: clip only
++            rLens.o = pHit;
+ 
+         // Update ray path for element interface interaction
+         if (!isStop) {
+@@ -987,12 +996,10 @@
+         bool isStop = (element.curvatureRadius == 0);
+         if (isStop) {
+             t = (elementZ - rLens.o.z) / rLens.d.z;
+-            if (t < 0)
++            if (t < 0 && element.thickness >= 0)
+                 return 0;
+         } else {
+-            Float radius = element.curvatureRadius;
+-            Float zCenter = elementZ + element.curvatureRadius;
+-            if (!IntersectSphericalElement(radius, zCenter, rLens, &t, &n))
++            if (!IntersectElement(element, elementZ, rLens, &t, &n))
+                 return 0;
+         }
+ 
+@@ -1002,7 +1009,8 @@
+         Float r2 = pHit.x * pHit.x + pHit.y * pHit.y;
+         if (r2 > element.apertureRadius * element.apertureRadius)
+             return 0;
+-        rLens.o = pHit;
++        if (!(isStop && element.thickness < 0))  // virtual stop: clip only
++            rLens.o = pHit;
+ 
+         // Update ray path for from-scene element interface interaction
+         if (!isStop) {
+@@ -1459,9 +1467,16 @@
+               int(7 * (lensParameters.size() / 4)), int(dispersion.size()));
+         return nullptr;
+     }
++    std::vector<Float> asphere = parameters.GetFloatArray("asphere");
++    if (!asphere.empty() && asphere.size() != 8 * (lensParameters.size() / 4)) {
++        Error(loc, "\"asphere\" needs 8 values (k, A4..A16) per lens interface (%d), got %d.",
++              int(8 * (lensParameters.size() / 4)), int(asphere.size()));
++        return nullptr;
++    }
+     return alloc.new_object<RealisticCamera>(cameraBaseParameters, lensParameters,
+                                              focusDistance, apertureDiameter,
+-                                             std::move(apertureImage), dispersion, alloc);
++                                             std::move(apertureImage), dispersion, asphere,
++                                             alloc);
+ }
+ 
+ }  // namespace pbrt
+--- a/src/pbrt/cameras.h
++++ b/src/pbrt/cameras.h
+@@ -469,7 +469,8 @@
+     RealisticCamera(CameraBaseParameters baseParameters,
+                     std::vector<Float> &lensParameters, Float focusDistance,
+                     Float apertureDiameter, Image apertureImage,
+-                    const std::vector<Float> &dispersion, Allocator alloc);
++                    const std::vector<Float> &dispersion,
++                    const std::vector<Float> &asphere, Allocator alloc);
+ 
+     static RealisticCamera *Create(const ParameterDictionary &parameters,
+                                    const CameraTransform &cameraTransform, Film film,
+@@ -530,6 +531,28 @@
+                 return eta;
+             return eta + dispersionScale * (Sellmeier(lambda) - Sellmeier(Float(587.5618)));
+         }
++        // open-cam even asphere (lens-file mm units): z(r) = c r^2 / (1 + sqrt(1 - (1+k) c^2 r^2))
++        // + sum_k A[k] r^(4+2k), c = 1/R, z toward the film for R > 0.
++        bool isAsphere = false;
++        Float asphereK = 0;
++        Float asphereA[7] = {0, 0, 0, 0, 0, 0, 0};
++        PBRT_CPU_GPU double AsphereSagMM(double r, double *slope) const {
++            double c = 1 / (double(curvatureRadius) * 1000), r2 = r * r;
++            double arg = 1 - (1 + double(asphereK)) * c * c * r2;
++            if (arg <= 0)
++                return std::numeric_limits<double>::quiet_NaN();
++            double sq = std::sqrt(arg);
++            double z = c * r2 / (1 + sq), s = c * r / sq;
++            double rp = r2 * r2, rs = r2 * r;
++            for (int k = 0; k < 7; ++k) {
++                z += double(asphereA[k]) * rp;
++                s += (4 + 2 * k) * double(asphereA[k]) * rs;
++                rp *= r2;
++                rs *= r2;
++            }
++            *slope = s;
++            return z;
++        }
+         std::string ToString() const;
+     };
+ 
+@@ -551,6 +574,50 @@
+     PBRT_CPU_GPU
+     Float TraceLensesFromFilm(const Ray &rCamera, Ray *rOut, Float lambda = 0) const;
+ 
++    // Newton on z(t) - zVertex - sag(r(t)) from the vertex plane (tools/lens_asphere.py).
++    PBRT_CPU_GPU
++    static bool IntersectAsphericalElement(const LensElementInterface &e, Float zVertex,
++                                           const Ray &ray, Float *t, Normal3f *n) {
++        double ox = ray.o.x, oy = ray.o.y, oz = ray.o.z;
++        double dx = ray.d.x, dy = ray.d.y, dz = ray.d.z;
++        double tt = (double(zVertex) - oz) / dz, f = 1, s = 0, px = 0, py = 0, r = 0;
++        for (int it = 0; it < 40; ++it) {
++            px = ox + tt * dx;
++            py = oy + tt * dy;
++            r = std::sqrt(px * px + py * py);
++            double sag = e.AsphereSagMM(r * 1000, &s) / 1000;
++            if (!std::isfinite(sag))
++                return false;
++            f = oz + tt * dz - double(zVertex) - sag;
++            double df = dz - (r > 0 ? s * (px * dx + py * dy) / r : 0);
++            double step = f / df;
++            if (!std::isfinite(step))
++                return false;
++            tt -= step;
++            if (std::abs(step) < 1e-13)
++                break;
++        }
++        px = ox + tt * dx;
++        py = oy + tt * dy;
++        r = std::sqrt(px * px + py * py);
++        f = oz + tt * dz - double(zVertex) - e.AsphereSagMM(r * 1000, &s) / 1000;
++        if (!(std::abs(f) < 1e-11) || tt < 0)
++            return false;
++        *t = Float(tt);
++        Vector3f nv(r > 0 ? Float(-s * px / r) : 0, r > 0 ? Float(-s * py / r) : 0, 1);
++        *n = FaceForward(Normal3f(Normalize(nv)), -ray.d);
++        return true;
++    }
++
++    PBRT_CPU_GPU
++    static bool IntersectElement(const LensElementInterface &e, Float zVertex, const Ray &ray,
++                                 Float *t, Normal3f *n) {
++        if (e.isAsphere)
++            return IntersectAsphericalElement(e, zVertex, ray, t, n);
++        return IntersectSphericalElement(e.curvatureRadius, zVertex + e.curvatureRadius, ray,
++                                         t, n);
++    }
++
+     PBRT_CPU_GPU
+     static bool IntersectSphericalElement(Float radius, Float zCenter, const Ray &ray,
+                                           Float *t, Normal3f *n) {
