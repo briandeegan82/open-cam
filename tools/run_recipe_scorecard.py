@@ -68,6 +68,7 @@ PBRT = REPO / "third_party" / "pbrt-v4" / "build" / "pbrt"
 FILM_DIAGONAL_MM = 35.0  # pbrt-v4 RealisticCamera default
 VIEW = "monitor_100pct"
 CC_WHITE = 18  # ColorChecker "white 9.5"
+HDR_MIN_SPP = 128  # the chart is rendered once; MC noise must stay well below sensor noise for CDP
 HDR_MIN_XRES = 960  # HDR-chart patches are ~2 % of the width; 4x4 CFA tiles (quad Bayer) need >= 4 guide sites
 
 # builder, default fov, default cam_dist, target-plane z, exposure: white-patch fraction of full well
@@ -217,8 +218,10 @@ def world_roi(P: np.ndarray, rect: list[float], z: float, margin: float = 0.15) 
 def render_scene(scene: str, optics: dict, out: Path, xres: int, yres: int, spp: int) -> dict:
     """Build + render ``scene`` for one optics group; returns EXR path, manifest and raster ROIs."""
     out.mkdir(parents=True, exist_ok=True)
-    if scene == "hdr" and xres < HDR_MIN_XRES:
-        xres, yres = HDR_MIN_XRES, round(yres * HDR_MIN_XRES / xres)
+    if scene == "hdr":
+        spp = max(spp, HDR_MIN_SPP)
+        if xres < HDR_MIN_XRES:
+            xres, yres = HDR_MIN_XRES, round(yres * HDR_MIN_XRES / xres)
     builder = SCENES[scene][0]
     cmd = [sys.executable, str(TOOLS / builder), "--out-dir", str(out), *builder_args(scene, optics, xres, yres, spp)]
     subprocess.run(cmd, check=True, capture_output=True, text=True)
@@ -367,6 +370,14 @@ def guide_sites(e: np.ndarray, layout: cm.CfaLayout) -> tuple[np.ndarray, int, i
     raise RuntimeError("guide channel not in tile")
 
 
+def binned_layout(layout: cm.CfaLayout, e_shape: tuple, shape: tuple) -> tuple[cm.CfaLayout, int]:
+    """CFA of a ``b x b`` charge-binned readout (e.g. quad Bayer -> Bayer) and ``b``; ``b = 1`` if unbinned."""
+    b = round(shape[0] / e_shape[0])
+    if b <= 1:
+        return layout, 1
+    return dataclasses.replace(layout, tile=tuple(tuple(row[::b]) for row in layout.tile[::b])), b
+
+
 def _scale_roi(roi: list[int], th: int, tw: int) -> list[int]:
     x0, y0, x1, y1 = roi
     return [math.ceil(x0 / tw), math.ceil(y0 / th), x1 // tw, y1 // th]
@@ -377,8 +388,17 @@ def _luma(rgb: np.ndarray) -> np.ndarray:
 
 
 # ------------------------------------------------------------------------------------------ scoring
-def score_hdr(e: np.ndarray, layout: cm.CfaLayout, chart: dict, saturation_e: float) -> dict:
+def score_hdr(
+    e: np.ndarray, layout: cm.CfaLayout, chart: dict, saturation_e: float, *, b: int = 1, e2: np.ndarray | None = None
+) -> dict:
+    """``e2``: a second capture (other noise seed) so SNR uses temporal noise, free of pbrt MC and PRNU."""
     sites, th, tw = guide_sites(e, layout)
+    frames = [sites] + ([guide_sites(e2, layout)[0]] if e2 is not None else [])
+    chart = {**chart, "patches": [
+        {**p, "low": {**p["low"], "roi_xyxy": _scale_roi(p["low"]["roi_xyxy"], b, b)},
+         "high": {**p["high"], "roi_xyxy": _scale_roi(p["high"]["roi_xyxy"], b, b)}}
+        for p in chart["patches"]
+    ]}  # fmt: skip
 
     def big_enough(roi: list[int]) -> bool:
         x0, y0, x1, y1 = _scale_roi(roi, th, tw)
@@ -388,8 +408,8 @@ def score_hdr(e: np.ndarray, layout: cm.CfaLayout, chart: dict, saturation_e: fl
     if not kept:
         return {"hdr_patches_used": 0}
     chart = {**chart, "patches": kept}
-    low = [[hdr._roi(sites, _scale_roi(p["low"]["roi_xyxy"], th, tw))] for p in kept]
-    high = [[hdr._roi(sites, _scale_roi(p["high"]["roi_xyxy"], th, tw))] for p in kept]
+    low = [[hdr._roi(f, _scale_roi(p["low"]["roi_xyxy"], th, tw)) for f in frames] for p in kept]
+    high = [[hdr._roi(f, _scale_roi(p["high"]["roi_xyxy"], th, tw)) for f in frames] for p in kept]
     res = hdr.analyse(chart, low, high, saturation_e=0.98 * saturation_e)
     out = {"cdp_min_level_db_at_0p9": res.get("cdp_min_level_db_at_0p9"), "hdr_patches_used": len(kept)}
     for thr in (1, 10):
@@ -460,12 +480,21 @@ def score_recipe(recipe: str, renders: dict, tmp: Path, seed: int, images: dict 
             sens = run_sensor(
                 recipe, render, tmp / scene, percentile=100.0, fraction=0.9 * arch.max_reference_e / fw, seed=seed
             )
-            row.update(score_hdr(sens["e"], layout, render["meta"], arch.max_reference_e))
+            k = float(sens["stats"]["exposure_scale_e_per_unit"])
+            twin = run_sensor(recipe, render, tmp / "hdr_twin", seed=seed + 1, exposure_scale=k)
+            lay_s, b = binned_layout(layout, sens["e"].shape, render_shape(render))
+            row.update(score_hdr(sens["e"], lay_s, render["meta"], arch.max_reference_e, b=b, e2=twin["e"]))
             if images is not None:
-                images[scene] = guide_sites(sens["e"], layout)[0] / arch.max_reference_e
+                images[scene] = guide_sites(sens["e"], lay_s)[0] / arch.max_reference_e
             continue
         target = SCENES[scene][4]
         white = render["rois"].get("white")
+        shape = render_shape(render)
+
+        def white_e(e: np.ndarray, white=white, shape=shape) -> float:
+            lay_s, b = binned_layout(layout, e.shape, shape)
+            return white_signal_e(e, lay_s, _scale_roi(white, b, b))
+
         if isinstance(target, tuple) or white is None:
             pct, frac = target if isinstance(target, tuple) else (99.0, 0.8)
             sens = run_sensor(recipe, render, tmp / scene, percentile=pct, fraction=frac, seed=seed)
@@ -474,13 +503,13 @@ def score_recipe(recipe: str, renders: dict, tmp: Path, seed: int, images: dict 
             for _ in range(2):  # spot-meter the white patch; the second pass removes the dim probe's noise bias
                 k = float(sens["stats"]["exposure_scale_e_per_unit"])
                 goal = target * float(sens["stats"]["full_well_effective_e"])
-                k *= goal / max(white_signal_e(sens["e"], layout, white), 1e-9)
+                k *= goal / max(white_e(sens["e"]), 1e-9)
                 sens = run_sensor(recipe, render, tmp / scene, seed=seed, exposure_scale=k)
-        row[f"{scene}_white_e"] = white_signal_e(sens["e"], layout, white) if white else None
-        shape = render_shape(render)
+        row[f"{scene}_white_e"] = white_e(sens["e"]) if white else None
 
         def rgb_of(e: np.ndarray, white=white, shape=shape) -> np.ndarray:
-            rgb = to_srgb_linear(e, layout, ccm, white)
+            lay_s, b = binned_layout(layout, e.shape, shape)
+            rgb = to_srgb_linear(e, lay_s, ccm, _scale_roi(white, b, b) if white else None)
             if rgb.shape[:2] != shape:
                 rgb = ndimage.zoom(rgb, (shape[0] / rgb.shape[0], shape[1] / rgb.shape[1], 1), order=1)
             return rgb

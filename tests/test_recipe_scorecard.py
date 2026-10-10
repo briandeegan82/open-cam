@@ -83,3 +83,10 @@ def test_smoke_run_writes_report(tmp_path):
     assert row["recipe"] == "default" and np.isfinite(row["skin_de00_mean"])
     assert "| default |" in (tmp_path / "scorecard.md").read_text()
     assert (tmp_path / "scorecard.csv").read_text().startswith("recipe,optics,cfa,hdr")
+
+
+def test_binned_layout_collapses_quad_bayer_to_bayer():
+    quad = sc.cm.resolve_layout({"layout": "QUAD_BAYER"})
+    lay, b = sc.binned_layout(quad, (320, 480), (640, 960))
+    assert b == 2 and lay.tile == (("R", "G"), ("G", "B"))
+    assert sc.binned_layout(quad, (640, 960), (640, 960)) == (quad, 1)
