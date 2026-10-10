@@ -65,7 +65,7 @@ def test_apply_silicon_diffusion_bayer_routes_by_source_and_needs_spectra():
 
     lay = cm.resolve_layout({"layout": "RGGB"})
     # [K, C]: R sees only 650 nm, G only 550 nm, B only 450 nm.
-    meta = {"wavelength_nm": [450.0, 550.0, 650.0], "channel_spectral_electrons": [[0, 0, 1], [0, 1, 0], [1, 0, 0]]}
+    meta = {"channel_spectra": {"wavelength_nm": [450.0, 550.0, 650.0], "electrons": [[0, 0, 1], [0, 1, 0], [1, 0, 0]]}}
     raw = np.zeros((16, 16))
     raw[8, 8] = 1000.0  # an R site (RGGB, even row/col)
     out = aen.apply_silicon_diffusion(raw, lay, {"architecture": "fsi"}, meta, 1.4)

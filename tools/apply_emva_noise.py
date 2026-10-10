@@ -977,11 +977,10 @@ def apply_silicon_diffusion(raw_e: np.ndarray, layout, cfg: dict, spectral_meta:
     """``spatial_crosstalk.model: silicon_diffusion``: per-channel kernels from Si absorption depth."""
     import si_diffusion  # noqa: PLC0415
 
-    if "channel_spectral_electrons" not in spectral_meta:
+    spectra = spectral_meta.get("channel_spectra")
+    if not spectra:
         raise ValueError("spatial_crosstalk.model silicon_diffusion needs a spectral EXR (integrate_qe)")
-    kernels = si_diffusion.channel_kernels(
-        spectral_meta["wavelength_nm"], np.asarray(spectral_meta["channel_spectral_electrons"]), pitch_um, cfg
-    )
+    kernels = si_diffusion.channel_kernels(spectra["wavelength_nm"], np.asarray(spectra["electrons"]), pitch_um, cfg)
     return si_diffusion.apply_site_kernels(raw_e, layout.site_index(*raw_e.shape), kernels)
 
 
