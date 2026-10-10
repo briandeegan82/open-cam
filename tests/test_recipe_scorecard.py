@@ -90,3 +90,79 @@ def test_binned_layout_collapses_quad_bayer_to_bayer():
     lay, b = sc.binned_layout(quad, (320, 480), (640, 960))
     assert b == 2 and lay.tile == (("R", "G"), ("G", "B"))
     assert sc.binned_layout(quad, (640, 960), (640, 960)) == (quad, 1)
+
+
+def _const_mosaic(layout, values, shape=(24, 24)):
+    th, tw = len(layout.tile), len(layout.tile[0])
+    e = np.zeros(shape)
+    for r in range(th):
+        for c in range(tw):
+            e[r::th, c::tw] = values[layout.tile[r][c]]
+    return e
+
+
+def test_white_signal_meters_on_brightest_channel():
+    rgbw = sc.cm.resolve_layout({"layout": "RGBW"})
+    e = _const_mosaic(rgbw, {"R": 1000.0, "G": 1200.0, "W": 3000.0, "B": 1100.0})
+    assert sc.white_signal_e(e, rgbw, [4, 4, 20, 20]) == pytest.approx(3000.0, rel=1e-3)
+    with pytest.raises(ValueError, match="empty"):
+        sc.white_signal_e(e, rgbw, [10, 10, 10, 20])
+
+
+def test_meter_signal_includes_card_highlights():
+    bayer = sc.cm.resolve_layout({"layout": "RGGB"})
+    e = _const_mosaic(bayer, {"R": 1000.0, "G": 1000.0, "B": 1000.0}, (48, 48))
+    e[24:, 24:] *= 2.0
+    assert sc.meter_signal_e(e, bayer, [2, 2, 20, 20]) == pytest.approx(1000.0, rel=1e-3)
+    assert sc.meter_signal_e(e, bayer, [2, 2, 20, 20], [[26, 26, 46, 46]]) == pytest.approx(2000.0, rel=1e-3)
+
+
+def test_despeckle_removes_fireflies_but_keeps_edge():
+    crop = np.where(np.arange(40)[None, :] < 20, 0.1, 1.0) * np.ones((40, 1))
+    hot = crop.copy()
+    hot[5, 30] = hot[17, 25] = 8.0
+    np.testing.assert_allclose(sc.despeckle(hot), crop)
+    np.testing.assert_array_equal(sc.despeckle(crop), crop)
+
+
+def test_saturation_e_uses_adc_ceiling_and_first_hdr_transition():
+    quad = {"full_well_effective_e": 19200.0, "bit_depth": 10, "black_level_DN": 16.0, "K_effective_e_per_DN": 4.77}
+    assert sc.saturation_e(quad) == pytest.approx((1023 - 16) * 4.77)
+    dcg = {"full_well_effective_e": 25000.0, "hdr": {"transitions_reference_e": {"hcg": 2520.0, "lcg": 22500.0}}}
+    assert sc.saturation_e(dcg) == 2520.0
+
+
+def test_flare_reports_nan_when_holes_are_missing():
+    img = np.ones((90, 90))
+    for cy in (15, 45, 75):
+        for cx in (15, 45, 75):
+            img[cy - 3 : cy + 3, cx - 3 : cx + 3] = 0.001
+    full = sc.score_flare(np.repeat(img[..., None], 3, -1))
+    assert full["n_holes"] == 9 and 0 < full["veiling_glare_pct"] < 1
+    img[:60] = 1.0
+    part = sc.score_flare(np.repeat(img[..., None], 3, -1))
+    assert part["n_holes"] == 3 and np.isnan(part["veiling_glare_pct"])
+
+
+def test_texture_buried_in_noise_is_nan_without_warnings():
+    rng = np.random.default_rng(0)
+    rgb = 0.5 + 0.01 * rng.standard_normal((64, 64, 3))
+    noise = 0.2 * rng.standard_normal((64, 64, 3))
+    with np.errstate(all="raise"):
+        out = sc.score_diorama(rgb, {"dead_leaves": [0, 0, 64, 64]}, noise=noise)
+    assert np.isnan(out["texture_acutance"])
+
+
+def test_mtf_rebound_flags_non_monotonic_mtf():
+    f = np.linspace(0, 0.5, 51)
+    assert sc.mtf_rebound(f, np.exp(-((f / 0.3) ** 2))) < 1e-9
+    dip = 1 - 0.6 * np.sin(np.pi * f / 0.4) ** 2 * (f < 0.4)
+    assert sc.mtf_rebound(f, dip) > 0.5
+
+
+def test_guide_image_picks_brightest_channel():
+    lay = sc.cm.resolve_layout({"layout": "RCCB"})
+    t = np.array(lay.tile)
+    e = np.tile(np.where(t == "C", 20.0, 5.0), (8, 8))
+    img = sc.guide_image(e, lay, [0, 0, e.shape[1], e.shape[0]])
+    assert img.shape == e.shape and np.allclose(img, 20.0)

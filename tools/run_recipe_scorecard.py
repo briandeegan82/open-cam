@@ -86,6 +86,9 @@ METRICS = (
     ("cdp_min_level_db_at_0p9", "CDP≥0.9 from dB", "{:.1f}"),
     ("edge_mtf50_cy_px", "MTF50 cy/px", "{:.3f}"),
     ("edge_acutance", "Edge acutance", "{:.3f}"),
+    ("edge_mtf_rebound", "MTF rebound", "{:.2f}"),
+    ("edge_mtf50_sensor_cy_px", "Sensor MTF50 cy/px", "{:.3f}"),
+    ("edge_acutance_sensor", "Sensor edge acutance", "{:.3f}"),
     ("texture_acutance", "Texture acutance", "{:.3f}"),
     ("skin_de00_mean", "Skin ΔE00 mean", "{:.2f}"),
     ("skin_de00_max", "Skin ΔE00 max", "{:.2f}"),
@@ -176,8 +179,8 @@ def builder_args(scene: str, optics: dict, xres: int, yres: int, spp: int) -> li
     return args
 
 
-def _pbrt(scene_file: Path) -> None:
-    subprocess.run([str(PBRT), "--quiet", scene_file.name], cwd=scene_file.parent, check=True)
+def _pbrt(scene_file: Path, *extra: str) -> None:
+    subprocess.run([str(PBRT), "--quiet", *extra, scene_file.name], cwd=scene_file.parent, check=True)
 
 
 def gbuffer_world_positions(scene_file: Path, xres: int, yres: int) -> np.ndarray:
@@ -215,6 +218,12 @@ def world_roi(P: np.ndarray, rect: list[float], z: float, margin: float = 0.15) 
     return [int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1]
 
 
+# The window and the practical lamp light the slanted-edge card unevenly (white side ~18 % brighter at the
+# ROI border than at the edge), which flattens the measured MTF near 0.5 and makes MTF50 noise-driven.
+# Charts are scored under the uniform fill panel alone, as in a lab; the HDR and flare scenes cover glare.
+DIORAMA_UNIFORM_LIGHT = ["--lamp-radiance", "0", "--window-radiance", "0"]
+
+
 def render_scene(scene: str, optics: dict, out: Path, xres: int, yres: int, spp: int) -> dict:
     """Build + render ``scene`` for one optics group; returns EXR path, manifest and raster ROIs."""
     out.mkdir(parents=True, exist_ok=True)
@@ -224,6 +233,8 @@ def render_scene(scene: str, optics: dict, out: Path, xres: int, yres: int, spp:
             xres, yres = HDR_MIN_XRES, round(yres * HDR_MIN_XRES / xres)
     builder = SCENES[scene][0]
     cmd = [sys.executable, str(TOOLS / builder), "--out-dir", str(out), *builder_args(scene, optics, xres, yres, spp)]
+    if scene == "diorama":
+        cmd += DIORAMA_UNIFORM_LIGHT
     subprocess.run(cmd, check=True, capture_output=True, text=True)
     if scene == "hdr":
         meta = json.loads((out / "chart.json").read_text())
@@ -241,6 +252,18 @@ def render_scene(scene: str, optics: dict, out: Path, xres: int, yres: int, spp:
     t0 = time.time()
     _pbrt(scene_file)
     res = {"exr": out / film, "meta": meta, "render_s": time.time() - t0, "rois": {}, "shape": (yres, xres)}
+    if scene == "diorama":
+        # Second render with another sampler seed: the twin capture then differs in MC noise too,
+        # so the texture metric's noise PSD removes render noise as well as sensor noise.
+        # pbrt's --seed leaves the image unchanged (README), so set the sampler's in-scene seed.
+        twin = out / f"{Path(film).stem}_seed1{Path(film).suffix}"
+        seeded = scene_file.with_name(scene_file.stem + "_seed1.pbrt")
+        text, n = re.subn(r'(Sampler "\w+")', r'\1 "integer seed" [1]', scene_file.read_text(), count=1)
+        if n != 1:
+            raise RuntimeError(f"no Sampler in {scene_file}")
+        seeded.write_text(text)
+        _pbrt(seeded, "--outfile", twin.name)
+        res["exr_twin"] = twin
     if scene in ("diorama", "skin") and optics["camera"] == "realistic":
         P = gbuffer_world_positions(scene_file, xres, yres)
         if scene == "diorama":
@@ -356,8 +379,47 @@ def to_srgb_linear(e: np.ndarray, layout: cm.CfaLayout, ccm: np.ndarray, white_r
 
 
 def white_signal_e(e: np.ndarray, layout: cm.CfaLayout, roi: list[int]) -> float:
-    sites, th, tw = guide_sites(e, layout)
-    return float(hdr._roi(sites, _scale_roi(roi, th, tw)).mean())
+    """Brightest channel's mean (e-) over ``roi`` after demosaicing, so metering on it clips no channel.
+
+    Metering on the densest (guide) channel let the panchromatic W of RGBW clip, and a guide-site
+    ROI of a binned quad-Bayer raster was empty at low resolution.
+    """
+    x0, y0, x1, y1 = roi
+    chans = cm.demosaic(np.clip(e, 0.0, None), layout, "gradient")[y0:y1, x0:x1]
+    if chans.size == 0:
+        raise ValueError(f"white ROI {roi} is empty on a {e.shape} raster")
+    return float(chans.reshape(-1, chans.shape[2]).mean(axis=0).max())
+
+
+def saturation_e(stats: dict) -> float:
+    """Metering ceiling in electrons: full well, or the ADC ceiling if lower (a 2x2 charge-binned
+    quad Bayer keeps the 4800 e- photodiode's conversion gain, so its ADC clips well below 19200 e-)."""
+    fw = float(stats["full_well_effective_e"])
+    if "hdr" in stats:
+        # First readout transition (e.g. DCG's HCG ceiling): diorama and skin then stay on the primary
+        # readout, as on a linear sensor, instead of straddling a merge switch inside the edge card.
+        return min(float(v) for v in stats["hdr"]["transitions_reference_e"].values())
+    if "bit_depth" not in stats:
+        return fw
+    adc = (2 ** int(stats["bit_depth"]) - 1 - float(stats["black_level_DN"])) * float(stats["K_effective_e_per_DN"])
+    return min(fw, adc)
+
+
+def meter_signal_e(
+    e: np.ndarray, layout: cm.CfaLayout, white_roi: list[int], card_rois: list[list[int]] = (), pct: float = 90.0
+) -> float:
+    """Metering signal: the larger of the white patch's brightest-channel mean and the ``pct``-th
+    percentile of the brightest channel in each card ROI (90th: robust to MC fireflies), so neither the
+    white patch nor the card's white side clip or cross an HDR readout transition (the slanted-edge card is brighter than the
+    ColorChecker white in the diorama)."""
+    v = white_signal_e(e, layout, white_roi)
+    if card_rois:
+        chans = cm.demosaic(np.clip(e, 0.0, None), layout, "gradient")
+        for x0, y0, x1, y1 in card_rois:
+            c = chans[y0:y1, x0:x1]
+            if c.size:
+                v = max(v, float(np.percentile(c.max(axis=2), pct)))
+    return v
 
 
 def guide_sites(e: np.ndarray, layout: cm.CfaLayout) -> tuple[np.ndarray, int, int]:
@@ -424,16 +486,48 @@ def score_hdr(
     return out
 
 
-def score_diorama(rgb: np.ndarray, rois: dict, seed: int = 0, noise: np.ndarray | None = None) -> dict:
+def despeckle(crop: np.ndarray, factor: float = 1.5) -> np.ndarray:
+    """Replace pbrt fireflies (pixels above ``factor`` x the white plateau, the 75th percentile) with
+    their 3x3 median; sensor noise on the plateau never reaches that level, so the edge is untouched."""
+    hot = crop > factor * np.percentile(crop, 75)
+    return np.where(hot, ndimage.median_filter(crop, size=3), crop) if hot.any() else crop
+
+
+def mtf_rebound(f: np.ndarray, mtf: np.ndarray, f_max: float = 0.5) -> float:
+    """Largest rise of the MTF above its running minimum up to ``f_max``: ~0 for a monotonic (optical)
+    MTF. A high-gain CCM mixing a dense channel with sparse, more blurred ones gives a non-monotonic
+    output MTF (dip then overshoot), whose MTF50 is not comparable with other recipes'."""
+    m = np.asarray(mtf)[np.asarray(f) <= f_max]
+    return float(np.max(m - np.minimum.accumulate(m))) if m.size else float("nan")
+
+
+def guide_image(e: np.ndarray, layout: cm.CfaLayout, white_roi: list[int]) -> np.ndarray:
+    """Demosaiced channel brightest on ``white_roi`` (G, C, W, ...): sensor-domain sharpness, before the CCM."""
+    chans = cm.demosaic(np.clip(e, 0.0, None), layout, "gradient")
+    x0, y0, x1, y1 = white_roi
+    return chans[..., int(np.argmax(chans[y0:y1, x0:x1].reshape(-1, chans.shape[2]).mean(axis=0)))]
+
+
+def score_diorama(
+    rgb: np.ndarray, rois: dict, seed: int = 0, noise: np.ndarray | None = None, sensor: np.ndarray | None = None
+) -> dict:
     """``noise``: difference of two noise realisations / sqrt(2); its PSD is removed from the texture PSD."""
     y = _luma(rgb)
     view = cpiq.viewing_condition(VIEW, y.shape[0])
     out: dict = {}
     if rois.get("slanted_edge"):
         x0, y0, x1, y1 = rois["slanted_edge"]
-        r = sfr.slanted_edge_sfr(y[y0:y1, x0:x1])
+        r = sfr.slanted_edge_sfr(despeckle(y[y0:y1, x0:x1]))
         out["edge_mtf50_cy_px"] = float(r.mtf50_cy_per_px)
         out["edge_acutance"] = float(cpiq.acutance(r.frequency_cy_per_px, r.mtf, view))
+        out["edge_mtf_rebound"] = mtf_rebound(r.frequency_cy_per_px, r.mtf)
+        if sensor is not None:
+            try:
+                rs = sfr.slanted_edge_sfr(despeckle(sensor[y0:y1, x0:x1]))
+                out["edge_mtf50_sensor_cy_px"] = float(rs.mtf50_cy_per_px)
+                out["edge_acutance_sensor"] = float(cpiq.acutance(rs.frequency_cy_per_px, rs.mtf, view))
+            except ValueError:
+                out["edge_mtf50_sensor_cy_px"] = out["edge_acutance_sensor"] = float("nan")
     if rois.get("dead_leaves"):
         x0, y0, x1, y1 = rois["dead_leaves"]
         crop = y[y0:y1, x0:x1]
@@ -443,8 +537,9 @@ def score_diorama(rgb: np.ndarray, rois: dict, seed: int = 0, noise: np.ndarray 
         noise_patch = _luma(noise)[y0:y1, x0:x1] if noise is not None else None
         f, m = texture_mtf(crop, ideal, noise_patch)
         low = (f > 0) & (f <= 0.05)
-        m = m / (m[low].mean() if low.any() else 1.0)
-        out["texture_acutance"] = float(cpiq.acutance(f, m, view))
+        ref = float(m[low].mean()) if low.any() else 1.0
+        # Noise PSD >= capture PSD at low frequency: the texture is buried in noise and unmeasurable.
+        out["texture_acutance"] = float(cpiq.acutance(f, m / ref, view)) if ref > 0 else float("nan")
     return out
 
 
@@ -456,10 +551,13 @@ def score_skin(rgb: np.ndarray, chart: dict, rois: list) -> dict:
     return {"skin_de00_mean": s["mean_delta_e00"], "skin_de00_max": s["max_delta_e00"]}
 
 
-def score_flare(rgb: np.ndarray) -> dict:
+def score_flare(rgb: np.ndarray, expected_holes: int = 9) -> dict:
     holes = flare.black_hole_glare(_luma(rgb))
+    # Fewer holes than the scene has means segmentation failed (e.g. a large CFA colour matrix drives the
+    # luma negative); the median of the rest is then meaningless, so report NaN.
     g = [h.glare_percent for h in holes if np.isfinite(h.glare_percent)]
-    return {"veiling_glare_pct": float(np.median(g)) if g else float("nan"), "n_holes": len(g)}
+    out = {"veiling_glare_pct": float(np.median(g)) if len(g) >= expected_holes else float("nan"), "n_holes": len(g)}
+    return out
 
 
 def score_recipe(recipe: str, renders: dict, tmp: Path, seed: int, images: dict | None = None) -> dict:
@@ -491,20 +589,29 @@ def score_recipe(recipe: str, renders: dict, tmp: Path, seed: int, images: dict 
         white = render["rois"].get("white")
         shape = render_shape(render)
 
+        cards = [render["rois"]["slanted_edge"]] if render["rois"].get("slanted_edge") else []
+
         def white_e(e: np.ndarray, white=white, shape=shape) -> float:
             lay_s, b = binned_layout(layout, e.shape, shape)
             return white_signal_e(e, lay_s, _scale_roi(white, b, b))
+
+        def meter_e(e: np.ndarray, white=white, shape=shape, cards=cards) -> float:
+            lay_s, b = binned_layout(layout, e.shape, shape)
+            return meter_signal_e(e, lay_s, _scale_roi(white, b, b), [_scale_roi(r, b, b) for r in cards])
 
         if isinstance(target, tuple) or white is None:
             pct, frac = target if isinstance(target, tuple) else (99.0, 0.8)
             sens = run_sensor(recipe, render, tmp / scene, percentile=pct, fraction=frac, seed=seed)
         else:
             sens = run_sensor(recipe, render, tmp / scene, seed=seed)
-            for _ in range(2):  # spot-meter the white patch; the second pass removes the dim probe's noise bias
+            # Spot-meter until converged: a clipped probe under-reads, so one correction is not enough.
+            for _ in range(6):
                 k = float(sens["stats"]["exposure_scale_e_per_unit"])
-                goal = target * float(sens["stats"]["full_well_effective_e"])
-                k *= goal / max(white_e(sens["e"]), 1e-9)
-                sens = run_sensor(recipe, render, tmp / scene, seed=seed, exposure_scale=k)
+                goal = target * saturation_e(sens["stats"])
+                ratio = goal / max(meter_e(sens["e"]), 1e-9)
+                if abs(ratio - 1.0) < 0.02:
+                    break
+                sens = run_sensor(recipe, render, tmp / scene, seed=seed, exposure_scale=k * ratio)
         row[f"{scene}_white_e"] = white_e(sens["e"]) if white else None
 
         def rgb_of(e: np.ndarray, white=white, shape=shape) -> np.ndarray:
@@ -518,9 +625,15 @@ def score_recipe(recipe: str, renders: dict, tmp: Path, seed: int, images: dict 
         if images is not None:
             images[scene] = rgb
         if scene == "diorama":
-            twin = run_sensor(recipe, render, tmp / "diorama_twin", seed=seed + 1, exposure_scale=k)
+            k = float(sens["stats"]["exposure_scale_e_per_unit"])
+            twin_render = {**render, "exr": render.get("exr_twin", render["exr"])}
+            twin = run_sensor(recipe, twin_render, tmp / "diorama_twin", seed=seed + 1, exposure_scale=k)
             noise = (rgb - rgb_of(twin["e"])) / math.sqrt(2.0)
-            row.update(score_diorama(rgb, render["rois"], noise=noise))
+            lay_s, b = binned_layout(layout, sens["e"].shape, shape)
+            guide = guide_image(sens["e"], lay_s, _scale_roi(white, b, b))
+            if guide.shape != shape:
+                guide = ndimage.zoom(guide, (shape[0] / guide.shape[0], shape[1] / guide.shape[1]), order=1)
+            row.update(score_diorama(rgb, render["rois"], noise=noise, sensor=guide))
         elif scene == "skin":
             row.update(score_skin(rgb, render["meta"], render["rois"]["patches"]))
         else:
