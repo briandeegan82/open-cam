@@ -381,10 +381,14 @@ def white_signal_e(e: np.ndarray, layout: cm.CfaLayout, roi: list[int]) -> float
 
 
 def saturation_e(stats: dict) -> float:
-    """Output saturation in electrons: full well, or the ADC ceiling if lower (a 2x2 charge-binned
+    """Metering ceiling in electrons: full well, or the ADC ceiling if lower (a 2x2 charge-binned
     quad Bayer keeps the 4800 e- photodiode's conversion gain, so its ADC clips well below 19200 e-)."""
     fw = float(stats["full_well_effective_e"])
-    if "hdr" in stats or "bit_depth" not in stats:
+    if "hdr" in stats:
+        # First readout transition (e.g. DCG's HCG ceiling): diorama and skin then stay on the primary
+        # readout, as on a linear sensor, instead of straddling a merge switch inside the edge card.
+        return min(float(v) for v in stats["hdr"]["transitions_reference_e"].values())
+    if "bit_depth" not in stats:
         return fw
     adc = (2 ** int(stats["bit_depth"]) - 1 - float(stats["black_level_DN"])) * float(stats["K_effective_e_per_DN"])
     return min(fw, adc)

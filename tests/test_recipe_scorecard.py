@@ -123,3 +123,10 @@ def test_despeckle_removes_fireflies_but_keeps_edge():
     hot[5, 30] = hot[17, 25] = 8.0
     np.testing.assert_allclose(sc.despeckle(hot), crop)
     np.testing.assert_array_equal(sc.despeckle(crop), crop)
+
+
+def test_saturation_e_uses_adc_ceiling_and_first_hdr_transition():
+    quad = {"full_well_effective_e": 19200.0, "bit_depth": 10, "black_level_DN": 16.0, "K_effective_e_per_DN": 4.77}
+    assert sc.saturation_e(quad) == pytest.approx((1023 - 16) * 4.77)
+    dcg = {"full_well_effective_e": 25000.0, "hdr": {"transitions_reference_e": {"hcg": 2520.0, "lcg": 22500.0}}}
+    assert sc.saturation_e(dcg) == 2520.0
