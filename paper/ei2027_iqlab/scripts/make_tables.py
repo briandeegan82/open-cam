@@ -21,7 +21,13 @@ import numpy as np
 
 PAPER = Path(__file__).resolve().parents[1]
 
-HDR_NAMES = {"linear": "Linear", "dcg": "Dual conversion gain", "split_pixel": "Split pixel", "lofic": "LOFIC", "multi_exposure": "Multi-exposure"}
+HDR_NAMES = {
+    "linear": "Linear",
+    "dcg": "Dual conversion gain",
+    "split_pixel": "Split pixel",
+    "lofic": "LOFIC",
+    "multi_exposure": "Multi-exposure",
+}
 
 
 def tt(s: str) -> str:
