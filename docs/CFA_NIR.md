@@ -70,9 +70,10 @@ model. Example: [`config/examples/cfa_custom_layout.yaml`](../config/examples/cf
 ### Not modelled / approximations
 
 * HDR pixel modes (DCG / split pixel / LOFIC / multi-exposure) run only on the legacy Bayer/RGB path; combining them with a generic `cfa.layout` raises an error.
-* ColorChecker and most material reflectances in `spectra/` are measured to 730-780 nm; pbrt holds
-  the last value constant beyond, so NIR reflectances of the chart, asphalt, vegetation etc. are
-  extrapolations, not data.
+* The X-Rite ColorChecker (`spectra/xrite`, 380-730 nm) and the skin chart built from its
+  light-skin patch have no public measured NIR data; pbrt holds each patch at its 730 nm value, so
+  their no-IRCF, clear-channel and 850/940 nm results are extrapolations. Use the measured
+  **USGS NIR material chart** (below) when an NIR result has to rest on data.
 * Si QE ignores the pixel stack (microlens, anti-reflection, deep-trench isolation), so NIR QE is an
   upper-bound-style model; real sensors with DTI/NIR enhancement differ.
 * Lens transmission and the camera-specific IRCF are not extended beyond their CSV ranges.
@@ -102,3 +103,28 @@ recipe/lux/t (the JSON predates later radiometry changes on main), so its absolu
 reproduced; the pipeline is compared with the same analytic formula on the current chain instead.
 At 500 lux and 0.12 s the white patch exceeds the 4800 e- full well, so colour is evaluated at
 100 lux (25 lux binned). SNR is from ~225 sites per patch (sampling uncertainty about +-0.4 dB).
+
+## Measured NIR material chart (`spectra/usgs_nir`)
+
+24 materials from the USGS Spectral Library v7 (Kokaly et al. 2017, USGS Data Series 1035,
+doi:10.5066/F7RR1WDJ; public domain), ASD FieldSpec absolute reflectance, resampled to 1 nm over
+350-1100 nm. It uses the ColorChecker's 6 x 4 layout:
+
+```bash
+python tools/build_colorchecker_scene.py --patch-dir spectra/usgs_nir \
+  --illuminant spectra/illuminant/nir/LED_850nm.csv --radiometric-light \
+  --lambda-max 1100 --pbrt-lambda-max 1100 --spectral-lambda-max 1100
+```
+
+Rows: leaves, pine needles, dry grass, plywood, burlap; red, green, blue and black nylon, white
+cotton; green tarp, red vinyl, yellow HDPE, blue pipe, black HDPE, white PVC; painted aluminium,
+red and grey brick, road concrete, road asphalt, black tar paper, Spectralon. Their red edges differ
+strongly: the fresh oak leaf goes from 0.11 at 650 nm to 0.85 at 850 nm, and the green tarp from
+0.12 at 730 nm to 0.61 at 850 nm, while black HDPE, grey brick and Spectralon stay flat.
+`tools/nir_materials.py` regenerates the CSVs from the sha256-checked archive (cached, gitignored);
+`tests/test_nir_materials.py` checks coverage, the red edges and the `--patch-dir` scene build.
+
+Limits: single field samples (not population means); the curves are hemispherical-directional
+reflectance used as Lambertian albedo; none of the materials is a colour reference like the
+ColorChecker, so ΔE-type colour metrics still use `spectra/xrite`.
+

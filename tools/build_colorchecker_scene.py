@@ -117,6 +117,13 @@ def main() -> None:
         default=None,
         help="Illuminant CSV (default: spectra/illuminant/interpolated/D55.csv)",
     )
+    ap.add_argument(
+        "--patch-dir",
+        type=Path,
+        default=Path("spectra/xrite"),
+        help="Directory of 24 NN_*.csv reflectances, 6x4 row-major (default: the X-Rite ColorChecker, "
+        "380-730 nm; spectra/usgs_nir is the measured 350-1100 nm NIR material chart).",
+    )
     ap.add_argument("--step-nm", type=float, default=5.0, help="SPD file wavelength step (nm)")
     ap.add_argument("--lambda-min", type=float, default=360.0)
     ap.add_argument("--lambda-max", type=float, default=830.0)
@@ -223,7 +230,7 @@ def main() -> None:
     out_dir = (args.out_dir or (repo / "scenes" / "generated")).resolve()
     spd_dir = out_dir / "spd"
     ill_path = args.illuminant or (repo / "spectra" / "illuminant" / "interpolated" / "D55.csv")
-    xrite_dir = repo / "spectra" / "xrite"
+    xrite_dir = (repo / args.patch_dir).resolve()
 
     out_dir.mkdir(parents=True, exist_ok=True)
     (repo / "out").mkdir(parents=True, exist_ok=True)
