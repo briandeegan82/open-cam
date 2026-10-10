@@ -1,0 +1,11 @@
+# Glass dispersion for phone_6p_2.97mm.dat (tools/lens_glass.py). Keys are 0-based data-row indices.
+# n_d and nu_d from US 8,390,940 B2 Table 1-1 (optical plastics). The SCHOTT glass only sets the
+# shape of n(lambda) (nearest n_d); nu_d pins n_F - n_C to the patent's plastic.
+source: US 8,390,940 B2 Embodiment 1 (n_d, nu_d); Sellmeier shape from the nearest SCHOTT glass
+rows:
+  1: {glass: N-BAK2, nu_d: 55.9}
+  3: {glass: F2, nu_d: 23.3}
+  5: {glass: F2, nu_d: 23.3}
+  7: {glass: N-BAK2, nu_d: 55.9}
+  9: {glass: N-BAK2, nu_d: 56.3}
+  11: {glass: N-BAK2, nu_d: 56.3}

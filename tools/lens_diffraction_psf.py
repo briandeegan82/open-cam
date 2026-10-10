@@ -77,6 +77,8 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import numpy as np
+from lens_asphere import intersect as intersect_asphere
+from lens_asphere import load_aspheres
 from lens_glass import glass_map_path, refractive_indices
 from lens_prescription import load_lens_file
 
@@ -97,6 +99,7 @@ class LensSystem:
     stop_index: int
     aperture_blades: int = 0
     blade_rotation_deg: float = 0.0
+    aspheres: tuple | None = None
 
     @classmethod
     def from_file(
@@ -117,7 +120,17 @@ class LensSystem:
                 raise ValueError("aperture diameter must be positive")
             ap[stop] = min(float(aperture_diameter_mm), ap[stop])  # pbrt clamps to the listed stop
         n_after = np.where(eta == 0.0, 1.0, eta) if wavelength_nm is None else refractive_indices(path, wavelength_nm)
-        return cls(radius, thick, n_after, 0.5 * ap, stop, int(aperture_blades), float(blade_rotation_deg))
+        asph = load_aspheres(path)
+        return cls(
+            radius,
+            thick,
+            n_after,
+            0.5 * ap,
+            stop,
+            int(aperture_blades),
+            float(blade_rotation_deg),
+            None if asph is None else tuple(asph),
+        )
 
     @property
     def n_surfaces(self) -> int:
@@ -180,9 +193,13 @@ def trace(
         order = reversed(list(order))
     for i in order:
         zv, rad = zv_all[i], lens.radius[i]
+        asph = lens.aspheres[i] if lens.aspheres is not None else None
         if rad == 0.0:
             t = (zv - o[:, 2]) / d[:, 2]
             nrm = None
+        elif asph is not None:
+            t, nrm, ok_a = intersect_asphere(o, d, zv, rad, asph)
+            ok &= ok_a
         else:
             c = np.array([0.0, 0.0, zv + rad])
             oc = o - c
@@ -203,7 +220,8 @@ def trace(
         else:
             if clip:
                 ok &= p[:, 0] ** 2 + p[:, 1] ** 2 <= lens.semi_aperture[i] ** 2
-            nrm = (p - np.array([0.0, 0.0, zv + rad])) / rad
+            if asph is None:
+                nrm = (p - np.array([0.0, 0.0, zv + rad])) / rad
             n_out = lens.n_before(i) if reverse else lens.n_after[i]
             d, ok_r = _refract(d, nrm, n_in, n_out)
             ok &= ok_r

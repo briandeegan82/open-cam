@@ -136,11 +136,16 @@ def pbrt_dispersion_values(lens_path: str | Path) -> list[float] | None:
 
 
 def pbrt_camera_lines(lens_path: str | Path, enabled: bool = True) -> list[str]:
-    """``"float dispersion"`` line for a ``Camera "realistic"`` block ([] if off or no sidecar)."""
+    """Lens sidecar lines for a ``Camera "realistic"`` block.
+
+    ``"float dispersion"`` when ``enabled`` and a glass sidecar exists, plus ``"float asphere"``
+    whenever an asphere sidecar exists (surface shape is geometry, not an option).
+    """
+    from lens_asphere import pbrt_camera_lines as asphere_lines
+
     vals = pbrt_dispersion_values(lens_path) if enabled else None
-    if not vals:
-        return []
-    return [f'    "float dispersion" [{" ".join(f"{v:.9g}" for v in vals)}]']
+    lines = [f'    "float dispersion" [{" ".join(f"{v:.9g}" for v in vals)}]'] if vals else []
+    return lines + asphere_lines(lens_path)
 
 
 def abbe_number(g: GlassDispersion) -> float:

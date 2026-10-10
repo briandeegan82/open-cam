@@ -126,11 +126,11 @@ focal length and f/# of the lens being simulated.
 
 Caveats and future work
 -----------------------
-- All four prescriptions use spherical surfaces only (no aspheres).  Modern
-  phone lenses are 5–7 element plastic aspheric designs with significantly
-  different aberration signatures.  For phone models, enabling the post_psf
-  chromatic_gaussian mode (lens.post_psf.enabled: true) may give more realistic
-  MTF behaviour than the refractive trace alone.
+- The four classical prescriptions use spherical surfaces only.  Modern phone
+  lenses are 5–7 element plastic aspheric designs; config/lenses/phone_6p_2.97mm.dat
+  (US 8,390,940 B2 Emb. 1, f = 2.97 mm, F/2.45, all 12 surfaces aspheric via
+  phone_6p_2.97mm.asphere.yaml) is one, traced in pbrt and the diffraction PSF
+  (docs/LENS_ASPHERE.md).  The iphone_8 recipe still uses its spherical stand-in.
 
 - Focus distance is fixed at 1.0 m in all new models, while the pipeline default
   chart distance is 4.0 m (realistic_focus_distance_override).  PBRT will focus
