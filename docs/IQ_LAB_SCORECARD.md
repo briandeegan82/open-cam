@@ -29,6 +29,7 @@ Outputs: `scorecard.csv` (one row per recipe), `scorecard.json` (settings, optic
 
 - Diorama and skin chart are spot-metered on the white patch: ColorChecker white at 50 % of full well, and the skin chart's 90 % white at 60 %. Highlights such as the window and lamp clip, as they would on a real camera.
 - The HDR chart's brightest patch is placed at 90 % of the recipe's HDR saturation.
+  The chart is always rendered at least 960 px wide and with at least 128 spp, whatever `--xres`/`--pixelsamples` say. The patches are only about 2 % of the frame width, and a 4×4 CFA tile leaves just one guide site per tile. The chart is captured twice with different noise seeds, so SNR and DR use temporal noise, free of pbrt Monte-Carlo noise and PRNU. CDP uses the first capture. For binned readouts such as 2×2 quad-Bayer charge binning, ROIs are scaled to the binned raster and the CFA collapses to its binned tile (`binned_layout`).
 - The flare scene uses the 95th percentile at 50 %.
 
 **Processing.** Gradient demosaic (`cfa_mosaic.demosaic`), then per-channel white balance on the white patch, then the recipe's spectral ColorChecker CCM under D65 (`cfa_mosaic.colorchecker_spectral_ccm`). The skin chart is never used to fit the CCM. SNR, DR and CDP use electrons at the guide-channel sites only (G, or C for RCCB-type CFAs), so no demosaic correlation enters them.
@@ -43,3 +44,5 @@ Outputs: `scorecard.csv` (one row per recipe), `scorecard.json` (settings, optic
 - Veiling glare is what pbrt's path tracer delivers: no coating or ghost model in the spectral render. Pinhole groups are about 0. For traced ghosts, see `run_flare_test.py --ghost-sweep`.
 - ΔE00 includes the recipe's QE and IRCF. Recipes without an IR-cut filter (`ircf_csv: null`) colour-correct worse. That is a property of the recipe, not a scorer error.
 - The metrics follow published methods (ISO 12233 slanted edge, CPIQ acutance, IEEE P2020 CDP, ISO 19567-2 dead leaves). They are not certified implementations.
+
+**Long sweeps.** Each recipe's row is cached in `<out>/work/rows/<recipe>.json`, keyed on resolution, spp, seed and scenes. A rerun skips finished recipes, and skips any optics group whose recipes are all cached. If a recipe raises, it is reported under *Failed recipes* in `scorecard.md` and the sweep continues.
