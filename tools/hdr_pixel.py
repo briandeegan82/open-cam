@@ -151,6 +151,7 @@ class HdrArchitecture:
     hdr_K_e_per_DN: float | None = None
     compander: Compander | None = None
     notes: dict = field(default_factory=dict)
+    second_order: dict = field(default_factory=dict)
 
     def collector(self, name: str) -> Collector:
         for c in self.collectors:
@@ -242,6 +243,54 @@ def _pwl_auto_knees(max_in: float, out_max: float, n_segments: int) -> tuple[lis
     ys = a + 2.0 * s * (np.sqrt(xs) - s)
     ys[-1] = out_max
     return [0.0, *xs.tolist()], [0.0, *ys.tolist()]
+
+
+SECOND_ORDER_KEYS = (
+    "switch_threshold_std",
+    "switch_threshold_temporal_std",
+    "row_fpn_e",
+    "col_fpn_e",
+    "row_noise_1f_e",
+    "blooming_fraction",
+    "adc_inl_dn",
+    "spd_crosstalk_fraction",
+    "spd_offset_e",
+)
+
+
+def _second_order_cfg(d: dict | None, arch_name: str) -> dict:
+    """Validate ``noise.hdr.second_order``; empty when disabled (first-order model unchanged)."""
+    if not d or not d.get("enabled", False):
+        return {}
+    unknown = set(d) - set(SECOND_ORDER_KEYS) - {"enabled"}
+    if unknown:
+        raise ValueError(f"unknown noise.hdr.second_order keys {sorted(unknown)}")
+    out = {k: float(d.get(k, 0.0)) for k in SECOND_ORDER_KEYS}
+    if any(out[k] < 0 for k in SECOND_ORDER_KEYS if k != "spd_offset_e"):
+        raise ValueError("noise.hdr.second_order values must be >= 0 (except spd_offset_e)")
+    if out["blooming_fraction"] > 0.5:
+        raise ValueError("noise.hdr.second_order.blooming_fraction must be <= 0.5 (per vertical neighbour)")
+    if (out["spd_crosstalk_fraction"] or out["spd_offset_e"]) and arch_name != "split_pixel":
+        raise ValueError("spd_crosstalk_fraction / spd_offset_e need architecture: split_pixel")
+    return out
+
+
+def _pink_rows(rng: np.random.Generator, n: int, std: float) -> np.ndarray:
+    """Row-wise 1/f (pink) offsets: PSD proportional to 1/f along the row readout order, std ``std``."""
+    if n < 2:
+        return np.zeros(n)
+    f = np.fft.rfftfreq(n)
+    f[0] = f[1]
+    x = np.fft.irfft(np.fft.rfft(rng.standard_normal(n)) / np.sqrt(f), n)
+    x -= x.mean()
+    return std * x / max(float(x.std()), 1e-12)
+
+
+def _vertical_neighbours(x: np.ndarray) -> np.ndarray:
+    out = np.zeros_like(x)
+    out[1:] += x[:-1]
+    out[:-1] += x[1:]
+    return out
 
 
 def build_architecture(hdr_cfg: dict, base: dict) -> HdrArchitecture:
@@ -353,6 +402,9 @@ def build_architecture(hdr_cfg: dict, base: dict) -> HdrArchitecture:
     )
     if not 0 < a.threshold_fraction <= 1:
         raise ValueError("noise.hdr.merge.threshold_fraction must be in (0, 1]")
+    so = _second_order_cfg(hdr_cfg.get("second_order"), a.name)
+    if so:
+        a = HdrArchitecture(**{**a.__dict__, "second_order": so})
     comp = hdr_cfg.get("compand") or {}
     if comp.get("enabled", False):
         bits = int(comp.get("bit_depth", 12))
@@ -416,6 +468,14 @@ def simulate_captures(
     for c in arch.collectors:
         if c.pd not in fpn:
             fpn[c.pd] = (spatial_rng.standard_normal(shape), spatial_rng.standard_normal(shape))
+    so = arch.second_order
+    two_d = len(shape) == 2
+    rowcol: dict[str, np.ndarray] = {}
+    if so and two_d and (so["row_fpn_e"] > 0 or so["col_fpn_e"] > 0):
+        for r in arch.readouts:  # fixed row / column offsets of each readout chain
+            rowcol[r.name] = so["row_fpn_e"] * spatial_rng.standard_normal((shape[0], 1)) + so[
+                "col_fpn_e"
+            ] * spatial_rng.standard_normal((1, shape[1]))
     out: dict[str, np.ndarray] = {}
     for c in arch.collectors:
         if c.name in capture_signal_e:
@@ -424,10 +484,18 @@ def simulate_captures(
                 raise ValueError(f"capture {c.name!r} electrons shape {sig.shape} != {shape}")
         else:
             sig = signal_e * response_map(c, shape, bayer_pattern)
+        if so.get("spd_crosstalk_fraction") and c.pd == "spd":
+            # Large-photodiode photo-charge leaking into the small photodiode (split-pixel crosstalk).
+            sig = sig + so["spd_crosstalk_fraction"] * signal_e * response_map(
+                arch.collector("lpd"), shape, bayer_pattern
+            )
         zp, zd = fpn[c.pd]
         mean = sig * (1.0 + c.prnu_std * zp) + c.dark_e + c.dsnu_std_e * zd
         mean = np.maximum(mean, 0.0)
         q = rng.poisson(mean).astype(np.float64) if use_poisson else mean
+        if so.get("blooming_fraction") and two_d and c.overflow_capacity_e <= 0 and math.isfinite(c.full_well_e):
+            # Charge above full well spills into the two column neighbours; the rest is drained.
+            q = q + so["blooming_fraction"] * _vertical_neighbours(np.maximum(q - c.full_well_e, 0.0))
         q_pd = np.minimum(q, c.full_well_e)
         q_ov = np.clip(q - c.full_well_e, 0.0, c.overflow_capacity_e) if c.overflow_capacity_e > 0 else None
         d_cap = None
@@ -440,8 +508,20 @@ def simulate_captures(
                     d_cap = rng.poisson(c.overflow_dark_e, shape).astype(np.float64) if c.overflow_dark_e > 0 else 0.0
                 charge = q_pd + (q_ov if q_ov is not None else 0.0) + d_cap
             charge = np.minimum(charge, r.full_well_e)
+            if so:
+                if c.pd == "spd" and so["spd_offset_e"]:
+                    charge = charge + so["spd_offset_e"]
+                if r.name in rowcol:
+                    charge = charge + rowcol[r.name]
+                if so["row_noise_1f_e"] > 0 and two_d:
+                    charge = charge + _pink_rows(rng, shape[0], so["row_noise_1f_e"])[:, None]
             e = charge + rng.normal(0.0, r.sigma_e, shape) if r.sigma_e > 0 else charge
-            out[r.name] = np.clip(np.rint(e / r.K_e_per_DN + r.black_DN), 0.0, r.max_dn)
+            dn = e / r.K_e_per_DN + r.black_DN
+            if so.get("adc_inl_dn"):
+                # Bow-shaped integral non-linearity, peak adc_inl_dn at mid-scale, zero at both ends.
+                x = np.clip((dn - r.black_DN) / (r.max_dn - r.black_DN), 0.0, 1.0)
+                dn = dn + so["adc_inl_dn"] * 4.0 * x * (1.0 - x)
+            out[r.name] = np.clip(np.rint(dn), 0.0, r.max_dn)
     return out
 
 
@@ -501,9 +581,19 @@ def _weights(arch: HdrArchitecture, C: np.ndarray, valid: np.ndarray) -> np.ndar
 
 
 def merge_captures(
-    arch: HdrArchitecture, dn: dict[str, np.ndarray], *, bayer_pattern: str | None = None
+    arch: HdrArchitecture,
+    dn: dict[str, np.ndarray],
+    *,
+    bayer_pattern: str | None = None,
+    rng: np.random.Generator | None = None,
+    spatial_rng: np.random.Generator | None = None,
 ) -> tuple[np.ndarray, dict]:
-    """Merge per-readout DN into linear HDR reference electrons (dark-subtracted)."""
+    """Merge per-readout DN into linear HDR reference electrons (dark-subtracted).
+
+    With ``second_order.switch_threshold_std`` / ``switch_threshold_temporal_std`` each pixel's
+    switch-over threshold is ``thr (1 + s z + t n)``: ``z`` fixed per pixel (comparator offset,
+    ``spatial_rng``), ``n`` new each frame (comparator noise, ``rng``).
+    """
     ro = arch.readouts
     shape = np.asarray(dn[ro[0].name]).shape
     flat = {r.name: np.asarray(dn[r.name], dtype=np.float64).ravel() for r in ro}
@@ -513,6 +603,20 @@ def merge_captures(
     ]
     thr = [arch.threshold_fraction * arch.saturation_e(r) for r in ro]
     pilot_order = np.argsort([t for t in (dict(arch.transitions_e())[r.name] for r in ro)])
+    so = arch.second_order
+    thr_px = None
+    if so and (so["switch_threshold_std"] > 0 or so["switch_threshold_temporal_std"] > 0):
+        srng = spatial_rng if spatial_rng is not None else np.random.default_rng(1)
+        trng = rng if rng is not None else np.random.default_rng()
+        thr_px = [
+            thr[k]
+            * (
+                1.0
+                + so["switch_threshold_std"] * srng.standard_normal(P)
+                + so["switch_threshold_temporal_std"] * trng.standard_normal(P)
+            )
+            for k in range(len(ro))
+        ]
     hdr = np.empty(P)
     n_valid_hist = np.zeros(len(ro) + 1, dtype=np.int64)
     for s in range(0, P, _CHUNK):
@@ -520,7 +624,9 @@ def merge_captures(
         charge = np.stack([(flat[r.name][sl] - r.black_DN) * r.K_e_per_DN for r in ro], axis=-1)
         resp = [rf[sl] for rf in resp_full]
         est = np.stack([(charge[:, k] - arch.readout_dark_e(r)) / resp[k] for k, r in enumerate(ro)], axis=-1)
-        valid = np.stack([charge[:, k] <= thr[k] for k in range(len(ro))], axis=-1)
+        valid = np.stack(
+            [charge[:, k] <= (thr_px[k][sl] if thr_px is not None else thr[k]) for k in range(len(ro))], axis=-1
+        )
         pilot = np.full(est.shape[0], np.nan)
         for k in pilot_order[::-1]:
             pilot = np.where(valid[:, k], est[:, k], pilot)
@@ -676,7 +782,13 @@ def run_hdr(
         bayer_pattern=bayer_pattern,
         use_poisson=use_poisson,
     )
-    hdr_e, merge_info = merge_captures(arch, dn, bayer_pattern=bayer_pattern)
+    hdr_e, merge_info = merge_captures(
+        arch,
+        dn,
+        bayer_pattern=bayer_pattern,
+        rng=np.random.default_rng([int(seed), 0x4D455247]),
+        spatial_rng=np.random.default_rng([int(spatial_seed), 0x4D455247]),
+    )
     hdr_e = np.minimum(hdr_e, arch.max_reference_e)
     K = arch.K_hdr
     hdr_dn = hdr_e / K
