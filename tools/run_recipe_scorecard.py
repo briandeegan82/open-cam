@@ -215,6 +215,12 @@ def world_roi(P: np.ndarray, rect: list[float], z: float, margin: float = 0.15) 
     return [int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1]
 
 
+# The window and the practical lamp light the slanted-edge card unevenly (white side ~18 % brighter at the
+# ROI border than at the edge), which flattens the measured MTF near 0.5 and makes MTF50 noise-driven.
+# Charts are scored under the uniform fill panel alone, as in a lab; the HDR and flare scenes cover glare.
+DIORAMA_UNIFORM_LIGHT = ["--lamp-radiance", "0", "--window-radiance", "0"]
+
+
 def render_scene(scene: str, optics: dict, out: Path, xres: int, yres: int, spp: int) -> dict:
     """Build + render ``scene`` for one optics group; returns EXR path, manifest and raster ROIs."""
     out.mkdir(parents=True, exist_ok=True)
@@ -224,6 +230,8 @@ def render_scene(scene: str, optics: dict, out: Path, xres: int, yres: int, spp:
             xres, yres = HDR_MIN_XRES, round(yres * HDR_MIN_XRES / xres)
     builder = SCENES[scene][0]
     cmd = [sys.executable, str(TOOLS / builder), "--out-dir", str(out), *builder_args(scene, optics, xres, yres, spp)]
+    if scene == "diorama":
+        cmd += DIORAMA_UNIFORM_LIGHT
     subprocess.run(cmd, check=True, capture_output=True, text=True)
     if scene == "hdr":
         meta = json.loads((out / "chart.json").read_text())
