@@ -1,0 +1,159 @@
+diff --git a/src/pbrt/cameras.cpp b/src/pbrt/cameras.cpp
+index 6b8fb3c..058bf17 100644
+--- a/src/pbrt/cameras.cpp
++++ b/src/pbrt/cameras.cpp
+@@ -695,7 +695,7 @@ std::string SphericalCamera::ToString() const {
+ RealisticCamera::RealisticCamera(CameraBaseParameters baseParameters,
+                                  std::vector<Float> &lensParameters, Float focusDistance,
+                                  Float setApertureDiameter, Image apertureImage,
+-                                 Allocator alloc)
++                                 const std::vector<Float> &dispersion, Allocator alloc)
+     : CameraBase(baseParameters),
+       elementInterfaces(alloc),
+       exitPupilBounds(alloc),
+@@ -726,8 +726,19 @@ RealisticCamera::RealisticCamera(CameraBaseParameters baseParameters,
+                 apertureDiameter = setApertureDiameter;
+         }
+         // Add element interface to end of _elementInterfaces_
+-        elementInterfaces.push_back(
+-            {curvatureRadius, thickness, eta, apertureDiameter / 2});
++        LensElementInterface element{curvatureRadius, thickness, eta,
++                                     apertureDiameter / 2};
++        if (!dispersion.empty()) {
++            const Float *d = &dispersion[7 * (i / 4)];
++            element.dispersionScale = d[0];
++            for (int k = 0; k < 3; ++k) {
++                element.sellmeierB[k] = d[1 + k];
++                element.sellmeierC[k] = d[4 + k];
++            }
++            if (element.dispersionScale != 0)
++                hasDispersion = true;
++        }
++        elementInterfaces.push_back(element);
+     }
+ 
+     // Compute lens--film distance for given focus distance
+@@ -746,7 +757,8 @@ RealisticCamera::RealisticCamera(CameraBaseParameters baseParameters,
+     FindMinimumDifferentials(this);
+ }
+ 
+-PBRT_CPU_GPU Float RealisticCamera::TraceLensesFromFilm(const Ray &rCamera, Ray *rOut) const {
++PBRT_CPU_GPU Float RealisticCamera::TraceLensesFromFilm(const Ray &rCamera, Ray *rOut,
++                                                        Float lambda) const {
+     Float elementZ = 0, weight = 1;
+     // Transform _rCamera_ from camera to lens system space
+     Ray rLens(Point3f(rCamera.o.x, rCamera.o.y, -rCamera.o.z),
+@@ -795,9 +807,9 @@ PBRT_CPU_GPU Float RealisticCamera::TraceLensesFromFilm(const Ray &rCamera, Ray
+         // Update ray path for element interface interaction
+         if (!isStop) {
+             Vector3f w;
+-            Float eta_i = element.eta;
++            Float eta_i = element.Eta(lambda);
+             Float eta_t = (i > 0 && elementInterfaces[i - 1].eta != 0)
+-                              ? elementInterfaces[i - 1].eta
++                              ? elementInterfaces[i - 1].Eta(lambda)
+                               : 1;
+             if (!Refract(Normalize(-rLens.d), n, eta_t / eta_i, nullptr, &w))
+                 return 0;
+@@ -931,7 +943,13 @@ PBRT_CPU_GPU pstd::optional<CameraRay> RealisticCamera::GenerateRay(CameraSample
+         return {};
+     Ray rFilm(pFilm, eps->pPupil - pFilm);
+     Ray ray;
+-    Float weight = TraceLensesFromFilm(rFilm, &ray);
++    // Dispersive glass refracts each wavelength differently: follow the hero wavelength only.
++    Float lambdaTrace = 0;
++    if (hasDispersion) {
++        lambda.TerminateSecondary();
++        lambdaTrace = lambda[0];
++    }
++    Float weight = TraceLensesFromFilm(rFilm, &ray, lambdaTrace);
+     if (weight == 0)
+         return {};
+ 
+@@ -1435,9 +1453,15 @@ RealisticCamera *RealisticCamera::Create(const ParameterDictionary &parameters,
+         }
+     }
+ 
++    std::vector<Float> dispersion = parameters.GetFloatArray("dispersion");
++    if (!dispersion.empty() && dispersion.size() != 7 * (lensParameters.size() / 4)) {
++        Error(loc, "\"dispersion\" needs 7 values per lens interface (%d), got %d.",
++              int(7 * (lensParameters.size() / 4)), int(dispersion.size()));
++        return nullptr;
++    }
+     return alloc.new_object<RealisticCamera>(cameraBaseParameters, lensParameters,
+                                              focusDistance, apertureDiameter,
+-                                             std::move(apertureImage), alloc);
++                                             std::move(apertureImage), dispersion, alloc);
+ }
+ 
+ }  // namespace pbrt
+diff --git a/src/pbrt/cameras.h b/src/pbrt/cameras.h
+index 53ecd2e..503c579 100644
+--- a/src/pbrt/cameras.h
++++ b/src/pbrt/cameras.h
+@@ -468,7 +468,8 @@ class RealisticCamera : public CameraBase {
+     // RealisticCamera Public Methods
+     RealisticCamera(CameraBaseParameters baseParameters,
+                     std::vector<Float> &lensParameters, Float focusDistance,
+-                    Float apertureDiameter, Image apertureImage, Allocator alloc);
++                    Float apertureDiameter, Image apertureImage,
++                    const std::vector<Float> &dispersion, Allocator alloc);
+ 
+     static RealisticCamera *Create(const ParameterDictionary &parameters,
+                                    const CameraTransform &cameraTransform, Film film,
+@@ -513,6 +514,22 @@ class RealisticCamera : public CameraBase {
+         Float thickness;
+         Float eta;
+         Float apertureRadius;
++        // open-cam glass dispersion: eta(lambda) = eta + dispersionScale *
++        // (nS(lambda) - nS(587.5618 nm)), nS the Sellmeier index (B, C in um^2).
++        Float dispersionScale = 0;
++        Float sellmeierB[3] = {0, 0, 0};
++        Float sellmeierC[3] = {0, 0, 0};
++        PBRT_CPU_GPU Float Sellmeier(Float lambda) const {
++            Float l2 = Sqr(lambda * Float(1e-3)), n2 = 1;
++            for (int k = 0; k < 3; ++k)
++                n2 += sellmeierB[k] * l2 / (l2 - sellmeierC[k]);
++            return std::sqrt(n2);
++        }
++        PBRT_CPU_GPU Float Eta(Float lambda) const {
++            if (dispersionScale == 0 || eta == 0 || lambda <= 0)
++                return eta;
++            return eta + dispersionScale * (Sellmeier(lambda) - Sellmeier(Float(587.5618)));
++        }
+         std::string ToString() const;
+     };
+ 
+@@ -532,7 +549,7 @@ class RealisticCamera : public CameraBase {
+     Float RearElementRadius() const { return elementInterfaces.back().apertureRadius; }
+ 
+     PBRT_CPU_GPU
+-    Float TraceLensesFromFilm(const Ray &rCamera, Ray *rOut) const;
++    Float TraceLensesFromFilm(const Ray &rCamera, Ray *rOut, Float lambda = 0) const;
+ 
+     PBRT_CPU_GPU
+     static bool IntersectSphericalElement(Float radius, Float zCenter, const Ray &ray,
+@@ -580,6 +597,7 @@ class RealisticCamera : public CameraBase {
+     // RealisticCamera Private Members
+     Bounds2f physicalExtent;
+     pstd::vector<LensElementInterface> elementInterfaces;
++    bool hasDispersion = false;
+     Image apertureImage;
+     pstd::vector<Bounds2f> exitPupilBounds;
+ };
+diff --git a/src/pbrt/film.h b/src/pbrt/film.h
+index 1476ccb..b61af32 100644
+--- a/src/pbrt/film.h
++++ b/src/pbrt/film.h
+@@ -447,7 +447,11 @@ class SpectralFilm : public FilmBase {
+         L *= weight * CIE_Y_integral;
+ 
+         // Accumulate contributions in spectral buckets.
++        // Skip terminated secondary wavelengths (dispersion): their L was not traced
++        // along this path's geometry.
+         for (int i = 0; i < NSpectrumSamples; ++i) {
++            if (lambda.PDF()[i] == 0)
++                continue;
+             int b = LambdaToBucket(lambda[i]);
+             pixel.bucketSums[b] += L[i];
+             pixel.weightSums[b] += weight;

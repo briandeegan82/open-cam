@@ -14,6 +14,7 @@ import re
 from pathlib import Path
 
 import numpy as np
+from lens_glass import pbrt_camera_lines
 
 LEGACY_REALISTIC_LENSFILE = "scenes/lenses/wide_22mm.dat"
 DEFAULT_REALISTIC_LENSFILE = "config/lenses/wide_22mm.dat"
@@ -133,6 +134,12 @@ def main() -> None:
             '"thinlens" (perspective + lensradius/focaldistance), '
             'or "realistic" (traced lens; needs --lensfile).'
         ),
+    )
+    ap.add_argument(
+        "--lens-dispersion",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Glass dispersion for realistic lenses with a <lens>.glass.yaml sidecar (needs the patched pbrt).",
     )
     ap.add_argument(
         "--lensfile",
@@ -342,6 +349,7 @@ def main() -> None:
                 f'    "string lensfile" ["{lens_for_scene}"]',
                 f'    "float aperturediameter" [{float(args.aperture_diameter_mm):.6g}]',
                 f'    "float focusdistance" [{focus_d:.6g}]',
+                *pbrt_camera_lines(lens_repo, getattr(args, "lens_dispersion", True)),
             ]
         )
 

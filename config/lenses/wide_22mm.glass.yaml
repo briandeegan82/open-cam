@@ -1,0 +1,13 @@
+# Glass dispersion for wide_22mm.dat (tools/lens_glass.py). Keys are 0-based data-row indices.
+# INFERRED: the source (Smith, Modern Lens Design, p. 360, Nakamura) lists n_d only here, so each
+# row uses the SCHOTT glass nearest in n_d, a flint for the negative elements (the 1.617 rows)
+# and the catalogue nu_d. Replace with the patent's nu_d when known.
+source: inferred from n_d (no nu_d in the lens file source)
+rows:
+  0: {glass: N-BAK2}
+  2: {glass: N-LAF34}
+  3: {glass: F2}
+  6: {glass: F2}
+  8: {glass: N-LAK8}
+  9: {glass: N-SF6}
+  11: {glass: F2}
