@@ -82,6 +82,13 @@ TOPICS: tuple[Topic, ...] = (
         scenarios_module="opencam_gui.topics.image_generation.scenarios",
         app_module="opencam_gui.ui.desktop.image_generation_app",
     ),
+    Topic(
+        id="iq_lab",
+        title="08 - Image-quality lab (test scenes and metrics)",
+        aliases=("iqlab", "iq", "scorecard"),
+        scenarios_module="opencam_gui.topics.iq_lab.scenarios",
+        app_module="opencam_gui.ui.desktop.iq_lab_app",
+    ),
 )
 
 TOPIC_BY_NAME: dict[str, Topic] = {name: topic for topic in TOPICS for name in topic.command_names}
