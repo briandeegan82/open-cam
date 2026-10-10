@@ -154,18 +154,64 @@ The example sensor models are **illustrative, not datasheets**. Only the LOFIC t
 (120 ke⁻) is taken from a published sensor (Takayanagi et al. 2019); its PD/capacitor split, the
 read noise and the 19.2 fF capacitance (120 ke⁻ over an assumed 1 V swing) are assumptions.
 
+## Second-order effects (`noise.hdr.second_order`)
+
+Opt-in. With `enabled: false` or the block absent, the captures are bit-identical to the
+first-order model. All values default to 0, and none of the example sensor models sets them.
+
+```yaml
+noise:
+  hdr:
+    second_order:
+      enabled: true
+      switch_threshold_std: 0.02          # fixed per-pixel comparator offset (fraction of threshold)
+      switch_threshold_temporal_std: 0.005 # comparator noise, new each frame
+      row_fpn_e: 2.0                      # fixed row offsets per readout chain (e- rms)
+      col_fpn_e: 1.5                      # fixed column offsets per readout chain (e- rms)
+      row_noise_1f_e: 1.0                 # temporal row offsets with 1/f PSD along readout order
+      blooming_fraction: 0.05             # share of over-full-well charge per column neighbour
+      adc_inl_dn: 1.5                     # bow INL: +adc_inl_dn at mid-scale, 0 at ends
+      spd_crosstalk_fraction: 0.002       # split pixel: LPD photo-charge leaking into the SPD
+      spd_offset_e: 5.0                   # split pixel: uncorrected SPD offset (e-)
+```
+
+* **Stochastic switching.** Each pixel's switch-over threshold is `thr·(1 + s·z + t·n)`. `z` is
+  fixed per pixel and readout (merge spatial seed), and `n` is redrawn every frame. Pixels near a
+  transition therefore switch at different signals, which spreads the SNR dip and adds FPN at the
+  transition.
+* **Row/column FPN** and **1/f row noise** are drawn independently for each readout chain (HCG,
+  LCG, LPD, SPD). Each chain adds them to its charge before read noise.
+* **Blooming.** On photodiodes without an overflow capacitor, a share `f` of the charge above
+  full well spills into each of the two column neighbours. The rest goes to the anti-blooming drain.
+* **ADC INL** is applied to each readout before rounding.
+* **SPD offset and crosstalk** bias the merged signal wherever the SPD dominates, by
+  `offset / r_spd` and `f·(r_lpd / r_spd)·μ`. Because the bias appears only above the LPD
+  transition, it makes the merged response non-linear across the knee.
+
+The analytic `theory_snr` and the merge weights do **not** include these effects. They stay the
+first-order model, as an ISP calibrated on the nominal model would be.
+`tests/test_hdr_second_order.py` checks each effect against its analytic expectation:
+- bit-identity when disabled;
+- row-mean spread;
+- the mid-scale INL bow;
+- 1/f PSD slope;
+- column-only blooming of `f·(Q − FW)`;
+- the SPD offset and crosstalk bias;
+- the switching spread (Φ(−1) at 1σ below threshold).
+
 ## Approximations and not modelled
 
 * The theory switches deterministically at the mean signal. Near each threshold (±4σ), the
-  real per-pixel switching is stochastic and biased (truncation). The Monte Carlo shows this,
-  but the theory does not.
-* In HDR mode the single-exposure extras are **not** applied to the captures: row/column FPN,
-  1/f noise, blooming, ADC INL/DNL. ISO gain applies only through the base defaults. Defect
+  real per-pixel switching is stochastic and biased (truncation). The Monte Carlo shows this
+  (plus comparator offsets with `second_order`), but the theory does not.
+* The single-exposure noise extras are not reused in HDR mode. Their HDR counterparts are in
+  `second_order`, with per-chain row/column FPN, 1/f, blooming and INL; DNL is not modelled.
+  Blooming spreads along columns only. ISO gain applies only through the base defaults. Defect
   pixels and crosstalk act on the shared input signal; per-capture inputs get crosstalk but no defects.
 * PRNU/DSNU are Gaussian (no log-normal dark-current tails). Readouts of one photodiode share
   fully correlated patterns, and split-pixel photodiodes have independent patterns.
-* Split pixel: no LPD/SPD optical crosstalk and no spatial centroid offset of the SPD (the MTF
-  effect discussed by Deegan 2014). The per-channel SPD ratio is supported but not populated,
+* Split pixel: LPD→SPD crosstalk is in-pixel only (`spd_crosstalk_fraction`), and there is no
+  spatial centroid offset of the SPD (the MTF effect discussed by Deegan 2014). The per-channel SPD ratio is supported but not populated,
   because no verified spectral data was available.
 * LOFIC: ideal overflow at exactly the photodiode full well (no soft knee, no transfer
   inefficiency, linear capacitor), and capacitor dark charge does not consume capacity.
