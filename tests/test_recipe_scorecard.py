@@ -151,3 +151,18 @@ def test_texture_buried_in_noise_is_nan_without_warnings():
     with np.errstate(all="raise"):
         out = sc.score_diorama(rgb, {"dead_leaves": [0, 0, 64, 64]}, noise=noise)
     assert np.isnan(out["texture_acutance"])
+
+
+def test_mtf_rebound_flags_non_monotonic_mtf():
+    f = np.linspace(0, 0.5, 51)
+    assert sc.mtf_rebound(f, np.exp(-((f / 0.3) ** 2))) < 1e-9
+    dip = 1 - 0.6 * np.sin(np.pi * f / 0.4) ** 2 * (f < 0.4)
+    assert sc.mtf_rebound(f, dip) > 0.5
+
+
+def test_guide_image_picks_brightest_channel():
+    lay = sc.cm.resolve_layout({"layout": "RCCB"})
+    t = np.array(lay.tile)
+    e = np.tile(np.where(t == "C", 20.0, 5.0), (8, 8))
+    img = sc.guide_image(e, lay, [0, 0, e.shape[1], e.shape[0]])
+    assert img.shape == e.shape and np.allclose(img, 20.0)

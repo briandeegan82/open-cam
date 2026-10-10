@@ -86,6 +86,9 @@ METRICS = (
     ("cdp_min_level_db_at_0p9", "CDP≥0.9 from dB", "{:.1f}"),
     ("edge_mtf50_cy_px", "MTF50 cy/px", "{:.3f}"),
     ("edge_acutance", "Edge acutance", "{:.3f}"),
+    ("edge_mtf_rebound", "MTF rebound", "{:.2f}"),
+    ("edge_mtf50_sensor_cy_px", "Sensor MTF50 cy/px", "{:.3f}"),
+    ("edge_acutance_sensor", "Sensor edge acutance", "{:.3f}"),
     ("texture_acutance", "Texture acutance", "{:.3f}"),
     ("skin_de00_mean", "Skin ΔE00 mean", "{:.2f}"),
     ("skin_de00_max", "Skin ΔE00 max", "{:.2f}"),
@@ -490,7 +493,24 @@ def despeckle(crop: np.ndarray, factor: float = 1.5) -> np.ndarray:
     return np.where(hot, ndimage.median_filter(crop, size=3), crop) if hot.any() else crop
 
 
-def score_diorama(rgb: np.ndarray, rois: dict, seed: int = 0, noise: np.ndarray | None = None) -> dict:
+def mtf_rebound(f: np.ndarray, mtf: np.ndarray, f_max: float = 0.5) -> float:
+    """Largest rise of the MTF above its running minimum up to ``f_max``: ~0 for a monotonic (optical)
+    MTF. A high-gain CCM mixing a dense channel with sparse, more blurred ones gives a non-monotonic
+    output MTF (dip then overshoot), whose MTF50 is not comparable with other recipes'."""
+    m = np.asarray(mtf)[np.asarray(f) <= f_max]
+    return float(np.max(m - np.minimum.accumulate(m))) if m.size else float("nan")
+
+
+def guide_image(e: np.ndarray, layout: cm.CfaLayout, white_roi: list[int]) -> np.ndarray:
+    """Demosaiced channel brightest on ``white_roi`` (G, C, W, ...): sensor-domain sharpness, before the CCM."""
+    chans = cm.demosaic(np.clip(e, 0.0, None), layout, "gradient")
+    x0, y0, x1, y1 = white_roi
+    return chans[..., int(np.argmax(chans[y0:y1, x0:x1].reshape(-1, chans.shape[2]).mean(axis=0)))]
+
+
+def score_diorama(
+    rgb: np.ndarray, rois: dict, seed: int = 0, noise: np.ndarray | None = None, sensor: np.ndarray | None = None
+) -> dict:
     """``noise``: difference of two noise realisations / sqrt(2); its PSD is removed from the texture PSD."""
     y = _luma(rgb)
     view = cpiq.viewing_condition(VIEW, y.shape[0])
@@ -500,6 +520,14 @@ def score_diorama(rgb: np.ndarray, rois: dict, seed: int = 0, noise: np.ndarray 
         r = sfr.slanted_edge_sfr(despeckle(y[y0:y1, x0:x1]))
         out["edge_mtf50_cy_px"] = float(r.mtf50_cy_per_px)
         out["edge_acutance"] = float(cpiq.acutance(r.frequency_cy_per_px, r.mtf, view))
+        out["edge_mtf_rebound"] = mtf_rebound(r.frequency_cy_per_px, r.mtf)
+        if sensor is not None:
+            try:
+                rs = sfr.slanted_edge_sfr(despeckle(sensor[y0:y1, x0:x1]))
+                out["edge_mtf50_sensor_cy_px"] = float(rs.mtf50_cy_per_px)
+                out["edge_acutance_sensor"] = float(cpiq.acutance(rs.frequency_cy_per_px, rs.mtf, view))
+            except ValueError:
+                out["edge_mtf50_sensor_cy_px"] = out["edge_acutance_sensor"] = float("nan")
     if rois.get("dead_leaves"):
         x0, y0, x1, y1 = rois["dead_leaves"]
         crop = y[y0:y1, x0:x1]
@@ -601,7 +629,11 @@ def score_recipe(recipe: str, renders: dict, tmp: Path, seed: int, images: dict 
             twin_render = {**render, "exr": render.get("exr_twin", render["exr"])}
             twin = run_sensor(recipe, twin_render, tmp / "diorama_twin", seed=seed + 1, exposure_scale=k)
             noise = (rgb - rgb_of(twin["e"])) / math.sqrt(2.0)
-            row.update(score_diorama(rgb, render["rois"], noise=noise))
+            lay_s, b = binned_layout(layout, sens["e"].shape, shape)
+            guide = guide_image(sens["e"], lay_s, _scale_roi(white, b, b))
+            if guide.shape != shape:
+                guide = ndimage.zoom(guide, (shape[0] / guide.shape[0], shape[1] / guide.shape[1]), order=1)
+            row.update(score_diorama(rgb, render["rois"], noise=noise, sensor=guide))
         elif scene == "skin":
             row.update(score_skin(rgb, render["meta"], render["rois"]["patches"]))
         else:
