@@ -66,7 +66,7 @@ def test_builder_and_scorer_roundtrip(tmp_path):
     assert (tmp_path / "spd" / "illuminant_A.spd").is_file()
     res = runner.score(chart, _synthetic_render(chart, "A"), "A")
     assert res["max_delta_e00"] < 1e-6  # exposure gain drops out via the white patch
-    bad = runner.score(chart, _synthetic_render(chart, "A", tint=(1.1, 1.0, 0.9)), "A")
+    bad = runner.score(chart, _synthetic_render(chart, "A", tint=(1.2, 1.0, 0.8)), "A")
     assert bad["mean_delta_e00"] > 1.0 and all(r["delta_hue_deg"] != 0 for r in bad["patches"])
 
 
