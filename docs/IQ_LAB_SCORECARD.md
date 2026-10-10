@@ -38,6 +38,8 @@ Outputs: `scorecard.csv` (one row per recipe), `scorecard.json` (settings, optic
 
 **Sharpness before and after the CCM.** `edge_mtf50_cy_px` and `edge_acutance` are measured on the output luminance, after the recipe CCM. Several non-Bayer CFAs need large CCMs (coefficients up to about 4 for RCCB/RCCG, 14 for RGBW). Their output luminance then subtracts sparsely sampled, more blurred channels from the dense one: RCCB luma ≈ 2.7 C − 1.35 B − 0.27 R. The output MTF dips and then overshoots instead of falling monotonically. The image really looks like this, but its MTF50 cannot be compared with other recipes' (on one capture, RCCB reads 0.11 cy/px after the CCM and 0.38 on the clear channel). Two more columns cover this. `edge_mtf_rebound` is the largest rise of the output MTF above its running minimum up to 0.5 cy/px. It is about 0.1–0.2 (noise) for Bayer, CMY and RGGCY, and about 0.9–1.3 for RCCB, RCCG and RGBW; treat the output MTF50 as not comparable above 0.5. `edge_mtf50_sensor_cy_px` and `edge_acutance_sensor` are measured on the brightest demosaiced channel before the CCM (G, C or W), and are comparable across CFAs.
 
+At 480×320 the slanted-edge ROI behind the realistic lenses is only about 44 px square, so the measured MTF ripples by about ±0.1 between 0.2 and 0.4 cy/px. Where it hovers near 0.5, MTF50 can jump between neighbouring crossings: `canon_eos_r` reads 0.40 cy/px and `nikon_z6` 0.30 cy/px behind the same lens, with no rebound. Rank sharpness on edge acutance, which integrates the curve, or render at a higher resolution.
+
 **Viewing condition.** Acutance uses `monitor_100pct` (CPIQ CSF).
 
 ## Caveats
