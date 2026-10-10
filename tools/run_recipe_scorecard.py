@@ -429,7 +429,7 @@ def score_flare(rgb: np.ndarray) -> dict:
     return {"veiling_glare_pct": float(np.median(g)) if g else float("nan"), "n_holes": len(g)}
 
 
-def score_recipe(recipe: str, renders: dict, tmp: Path, seed: int) -> dict:
+def score_recipe(recipe: str, renders: dict, tmp: Path, seed: int, images: dict | None = None) -> dict:
     model = load_camera_model(RECIPE_DIR / f"{recipe}.yaml")
     cfg = noise_config_from_camera_model(model, "", "")
     layout = recipe_layout(cfg)
@@ -448,6 +448,8 @@ def score_recipe(recipe: str, renders: dict, tmp: Path, seed: int) -> dict:
                 recipe, render, tmp / scene, percentile=100.0, fraction=0.9 * arch.max_reference_e / fw, seed=seed
             )
             row.update(score_hdr(sens["e"], layout, render["meta"], arch.max_reference_e))
+            if images is not None:
+                images[scene] = guide_sites(sens["e"], layout)[0] / arch.max_reference_e
             continue
         target = SCENES[scene][4]
         white = render["rois"].get("white")
@@ -471,6 +473,8 @@ def score_recipe(recipe: str, renders: dict, tmp: Path, seed: int) -> dict:
             return rgb
 
         rgb = rgb_of(sens["e"])
+        if images is not None:
+            images[scene] = rgb
         if scene == "diorama":
             twin = run_sensor(recipe, render, tmp / "diorama_twin", seed=seed + 1, exposure_scale=k)
             noise = (rgb - rgb_of(twin["e"])) / math.sqrt(2.0)
