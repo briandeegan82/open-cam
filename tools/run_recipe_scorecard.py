@@ -501,8 +501,9 @@ def score_diorama(rgb: np.ndarray, rois: dict, seed: int = 0, noise: np.ndarray 
         noise_patch = _luma(noise)[y0:y1, x0:x1] if noise is not None else None
         f, m = texture_mtf(crop, ideal, noise_patch)
         low = (f > 0) & (f <= 0.05)
-        m = m / (m[low].mean() if low.any() else 1.0)
-        out["texture_acutance"] = float(cpiq.acutance(f, m, view))
+        ref = float(m[low].mean()) if low.any() else 1.0
+        # Noise PSD >= capture PSD at low frequency: the texture is buried in noise and unmeasurable.
+        out["texture_acutance"] = float(cpiq.acutance(f, m / ref, view)) if ref > 0 else float("nan")
     return out
 
 
@@ -514,10 +515,13 @@ def score_skin(rgb: np.ndarray, chart: dict, rois: list) -> dict:
     return {"skin_de00_mean": s["mean_delta_e00"], "skin_de00_max": s["max_delta_e00"]}
 
 
-def score_flare(rgb: np.ndarray) -> dict:
+def score_flare(rgb: np.ndarray, expected_holes: int = 9) -> dict:
     holes = flare.black_hole_glare(_luma(rgb))
+    # Fewer holes than the scene has means segmentation failed (e.g. a large CFA colour matrix drives the
+    # luma negative); the median of the rest is then meaningless, so report NaN.
     g = [h.glare_percent for h in holes if np.isfinite(h.glare_percent)]
-    return {"veiling_glare_pct": float(np.median(g)) if g else float("nan"), "n_holes": len(g)}
+    out = {"veiling_glare_pct": float(np.median(g)) if len(g) >= expected_holes else float("nan"), "n_holes": len(g)}
+    return out
 
 
 def score_recipe(recipe: str, renders: dict, tmp: Path, seed: int, images: dict | None = None) -> dict:
@@ -585,6 +589,7 @@ def score_recipe(recipe: str, renders: dict, tmp: Path, seed: int, images: dict 
         if images is not None:
             images[scene] = rgb
         if scene == "diorama":
+            k = float(sens["stats"]["exposure_scale_e_per_unit"])
             twin_render = {**render, "exr": render.get("exr_twin", render["exr"])}
             twin = run_sensor(recipe, twin_render, tmp / "diorama_twin", seed=seed + 1, exposure_scale=k)
             noise = (rgb - rgb_of(twin["e"])) / math.sqrt(2.0)

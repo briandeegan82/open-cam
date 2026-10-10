@@ -130,3 +130,24 @@ def test_saturation_e_uses_adc_ceiling_and_first_hdr_transition():
     assert sc.saturation_e(quad) == pytest.approx((1023 - 16) * 4.77)
     dcg = {"full_well_effective_e": 25000.0, "hdr": {"transitions_reference_e": {"hcg": 2520.0, "lcg": 22500.0}}}
     assert sc.saturation_e(dcg) == 2520.0
+
+
+def test_flare_reports_nan_when_holes_are_missing():
+    img = np.ones((90, 90))
+    for cy in (15, 45, 75):
+        for cx in (15, 45, 75):
+            img[cy - 3 : cy + 3, cx - 3 : cx + 3] = 0.001
+    full = sc.score_flare(np.repeat(img[..., None], 3, -1))
+    assert full["n_holes"] == 9 and 0 < full["veiling_glare_pct"] < 1
+    img[:60] = 1.0
+    part = sc.score_flare(np.repeat(img[..., None], 3, -1))
+    assert part["n_holes"] == 3 and np.isnan(part["veiling_glare_pct"])
+
+
+def test_texture_buried_in_noise_is_nan_without_warnings():
+    rng = np.random.default_rng(0)
+    rgb = 0.5 + 0.01 * rng.standard_normal((64, 64, 3))
+    noise = 0.2 * rng.standard_normal((64, 64, 3))
+    with np.errstate(all="raise"):
+        out = sc.score_diorama(rgb, {"dead_leaves": [0, 0, 64, 64]}, noise=noise)
+    assert np.isnan(out["texture_acutance"])
