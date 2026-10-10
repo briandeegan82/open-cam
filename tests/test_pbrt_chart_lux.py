@@ -107,7 +107,9 @@ class TestChartLuxAgreement(unittest.TestCase):
                 tmp,
                 recipe,
                 ["--camera", "realistic", "--lensfile", lensfile, "--aperture-diameter-mm", f"{aperture}"]
-                + ["--cam-dist", f"{dist}", "--focus-distance", f"{dist}"],
+                + ["--cam-dist", f"{dist}", "--focus-distance", f"{dist}"]
+                # Dispersive lenses trace one hero wavelength per sample: ~2x the colour noise on 3x3 px.
+                + ["--pixelsamples", "1024"],
             )
         pinhole = scenes["pinhole"]
         cls.centres = _patch_centres_px(json.loads((pinhole / "colorchecker_manifest.json").read_text()))
