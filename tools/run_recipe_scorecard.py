@@ -54,12 +54,18 @@ sys.path.insert(0, str(TOOLS))
 
 import apply_emva_noise  # noqa: E402
 import cfa_mosaic as cm  # noqa: E402
+import lens_ghosts  # noqa: E402
 import lens_prescription as lp  # noqa: E402
+import lens_scatter  # noqa: E402
 import run_hdr_dr_test as hdr  # noqa: E402
 import run_skin_tone_test as skin  # noqa: E402
 import sfr_analysis as sfr  # noqa: E402
 from camera_model import load_camera_model, noise_config_from_camera_model  # noqa: E402
-from exr_multispectral import read_separate_exr_channels  # noqa: E402
+from exr_multispectral import (  # noqa: E402
+    parse_s0_wavelength_nm,
+    read_separate_exr_channels,
+    write_separate_channels_exr,
+)
 from iqlab import cpiq, flare  # noqa: E402
 from iqlab.dead_leaves import dead_leaves, texture_mtf  # noqa: E402
 
@@ -79,6 +85,12 @@ SCENES = {
     "skin": ("build_skin_tone_chart.py", 40.0, 1.5, 0.0, 0.6),
     "flare": ("build_flare_test_scene.py", 60.0, 2.0, None, (95.0, 0.5)),
 }
+# Lens stray light added to the realistic-lens flare render (pbrt's lens trace has none): traced
+# two-reflection ghosts (``lens_ghosts``) plus polished-surface micro-roughness scatter
+# (``lens_scatter``). The uniform field is clustered coarsely: ghost images of neighbouring field
+# points overlap, and 40 px cells keep it at ~3 min per lens group.
+STRAY_LIGHT = {"ghosts": {"cluster_px": 40, "pupil_samples": 32, "max_sources": 100000}, "scatter": {}}
+
 METRICS = (
     ("dr_snr1_db", "DR (SNR=1) dB", "{:.1f}"),
     ("dr_snr10_db", "DR (SNR=10) dB", "{:.1f}"),
@@ -224,7 +236,44 @@ def world_roi(P: np.ndarray, rect: list[float], z: float, margin: float = 0.15) 
 DIORAMA_UNIFORM_LIGHT = ["--lamp-radiance", "0", "--window-radiance", "0"]
 
 
-def render_scene(scene: str, optics: dict, out: Path, xres: int, yres: int, spp: int) -> dict:
+def add_lens_stray_light(exr: Path, optics: dict, focus_m: float, cfg: dict | None = None) -> tuple[Path, dict]:
+    """Add traced ghosts and surface scatter to a realistic-lens spectral render; returns the new EXR."""
+    cfg = cfg or STRAY_LIGHT
+    ch = read_separate_exr_channels(str(exr))
+    names = [n for n in ch if parse_s0_wavelength_nm(n) is not None]
+    lams = [parse_s0_wavelength_nm(n) for n in names]
+    cube = np.stack([ch[n] for n in names], -1).astype(np.float32)
+    h, w, _ = cube.shape
+    gcfg = lens_ghosts.resolve_config(
+        {
+            **cfg.get("ghosts", {}),
+            "enabled": True,
+            "lens_file": optics["lensfile"],
+            "aperture_diameter_mm": optics["aperture_diameter_mm"],
+            "focus_distance_m": focus_m,
+            "camera": "realistic",
+            "apply_primary_transmittance": True,
+        }
+    )
+    lens = lens_ghosts.lens_from_config(gcfg, REPO)
+    ghost, trans, grep = lens_ghosts.render_ghosts(cube, lams, np.ones(len(lams), bool), lens, gcfg)
+    primary = cube * trans if trans is not None else cube
+    pixel_mm = lens_ghosts.PBRT_DEFAULT_FILM_DIAGONAL_MM / math.hypot(w, h)
+    scattered, sinfo = lens_scatter.apply_scatter(primary, lams, lens, pixel_mm, cfg.get("scatter"))
+    out_cube = scattered + ghost
+    out = exr.with_name(f"{exr.stem}_stray{exr.suffix}")
+    write_separate_channels_exr(out, {**ch, **{n: out_cube[:, :, i] for i, n in enumerate(names)}})
+    report = {
+        "ghost_to_source_energy": grep["ghost_to_source_energy"],
+        "n_ghost_paths": grep["n_ghost_paths"],
+        "scatter_tis_reference": sinfo["tis_reference"],
+        "scatter_reference_nm": sinfo["reference_nm"],
+        "roughness_nm": sinfo["roughness_nm"],
+    }
+    return out, report
+
+
+def render_scene(scene: str, optics: dict, out: Path, xres: int, yres: int, spp: int, stray_light: bool = True) -> dict:
     """Build + render ``scene`` for one optics group; returns EXR path, manifest and raster ROIs."""
     out.mkdir(parents=True, exist_ok=True)
     if scene == "hdr":
@@ -252,6 +301,9 @@ def render_scene(scene: str, optics: dict, out: Path, xres: int, yres: int, spp:
     t0 = time.time()
     _pbrt(scene_file)
     res = {"exr": out / film, "meta": meta, "render_s": time.time() - t0, "rois": {}, "shape": (yres, xres)}
+    if scene == "flare" and stray_light and optics["camera"] == "realistic":
+        res["exr_pbrt"] = res["exr"]
+        res["exr"], res["stray_light"] = add_lens_stray_light(res["exr"], optics, SCENES["flare"][2])
     if scene == "diorama":
         # Second render with another sampler seed: the twin capture then differs in MC noise too,
         # so the texture metric's noise PSD removes render noise as well as sensor noise.
@@ -638,6 +690,9 @@ def score_recipe(recipe: str, renders: dict, tmp: Path, seed: int, images: dict 
             row.update(score_skin(rgb, render["meta"], render["rois"]["patches"]))
         else:
             row.update(score_flare(rgb))
+            sl = render.get("stray_light") or {}
+            row["flare_ghost_to_source"] = sl.get("ghost_to_source_energy")
+            row["flare_scatter_tis"] = sl.get("scatter_tis_reference")
     return row
 
 
@@ -734,6 +789,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out-dir", type=Path, default=REPO / "out" / "iq_lab" / "scorecard")
     ap.add_argument("--figure", action="store_true")
+    ap.add_argument(
+        "--no-stray-light",
+        action="store_true",
+        help="score the bare pbrt flare render (no traced ghosts or surface scatter)",
+    )
     args = ap.parse_args(argv)
 
     recipes = discover_recipes(args.recipes)
@@ -742,6 +802,7 @@ def main(argv: list[str] | None = None) -> int:
     rows, timing = [], {"render": 0.0, "sensor": 0.0}
     settings = {"xres": args.xres, "yres": args.yres, "pixelsamples": args.pixelsamples, "seed": args.seed}
     settings["scenes"] = sorted(args.scenes)
+    settings["stray_light"] = None if args.no_stray_light else STRAY_LIGHT
     cache_dir = work / "rows"
     cache_dir.mkdir(parents=True, exist_ok=True)
 
@@ -767,7 +828,9 @@ def main(argv: list[str] | None = None) -> int:
                 renders["hdr"] = hdr_render
             else:
                 d = work / re.sub(r"[^A-Za-z0-9._-]", "_", key) / scene
-                renders[scene] = render_scene(scene, g["optics"], d, args.xres, args.yres, args.pixelsamples)
+                renders[scene] = render_scene(
+                    scene, g["optics"], d, args.xres, args.yres, args.pixelsamples, not args.no_stray_light
+                )
         timing["render"] += time.time() - t0
         t0 = time.time()
         for r in g["recipes"]:
