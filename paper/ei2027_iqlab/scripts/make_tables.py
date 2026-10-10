@@ -125,6 +125,9 @@ def validation_tables(val: dict, macros: dict) -> str:
 
 
 # ------------------------------------------------------------------------------------- scorecard
+REBOUND_LIMIT = 0.5
+
+
 def scorecard_tables(sc: dict, macros: dict) -> dict[str, str]:
     rows = [r for r in sc["rows"] if not r.get("error")]
     s = sc["settings"]
@@ -147,7 +150,7 @@ def scorecard_tables(sc: dict, macros: dict) -> dict[str, str]:
         "drMedDcg",
     ):
         macros.setdefault(k, "--")
-    for name in ("mtf", "glare", "drOne", "tex"):
+    for name in ("mtf", "mtfSensor", "glare", "drOne", "tex"):
         macros.setdefault(f"{name}Min", "--")
         macros.setdefault(f"{name}Max", "--")
     out = {"skin": table("lrrl", ["Recipe", "Mean", "Max", "CFA"], [["--", "--", "--", "--"]])}
@@ -188,6 +191,29 @@ def scorecard_tables(sc: dict, macros: dict) -> dict[str, str]:
     ]
     out["optics"] = table("lrrrrr", ["Optics", "$n$", "MTF50", "Edge acut.", "Tex. acut.", "Glare \\%"], body)
 
+    # Sharpness by CFA: output luma (after the CCM) vs the dense channel before it; rebound flags
+    # non-monotonic output MTFs whose MTF50 is not comparable across recipes.
+    by_cfa = defaultdict(list)
+    for r in rows:
+        by_cfa[r.get("cfa", "")].append(r)
+    body = [
+        [
+            tt(k),
+            str(len(rs)),
+            med(rs, "edge_mtf50_cy_px", "{:.3f}"),
+            med(rs, "edge_mtf_rebound", "{:.2f}"),
+            med(rs, "edge_mtf50_sensor_cy_px", "{:.3f}"),
+            med(rs, "edge_acutance_sensor", "{:.2f}"),
+        ]
+        for k, rs in sorted(by_cfa.items(), key=lambda kv: (-len(kv[1]), kv[0]))
+    ]
+    out["cfa"] = table(
+        "lrrrrr", ["CFA", "$n$", "MTF50 (out)", "Rebound", "MTF50 (sensor)", "Edge acut. (sensor)"], body
+    )
+    flagged = [r for r in rows if fin(r.get("edge_mtf_rebound")) and r["edge_mtf_rebound"] > REBOUND_LIMIT]
+    macros["nRebound"] = str(len(flagged))
+    macros["reboundLimit"] = f"{REBOUND_LIMIT:g}"
+
     de = sorted((r for r in rows if fin(r.get("skin_de00_mean"))), key=lambda r: r["skin_de00_mean"])
     if de:
         pick = de[:4] + de[-4:] if len(de) > 8 else de
@@ -195,7 +221,7 @@ def scorecard_tables(sc: dict, macros: dict) -> dict[str, str]:
             "lrrl",
             ["Recipe", "Mean", "Max", "CFA"],
             [
-                [tt(r["recipe"]), f"{r['skin_de00_mean']:.2f}", f"{r['skin_de00_max']:.2f}", r.get("cfa", "")]
+                [tt(r["recipe"]), f"{r['skin_de00_mean']:.2f}", f"{r['skin_de00_max']:.2f}", tt(r.get("cfa", ""))]
                 for r in pick
             ],
         )
@@ -210,6 +236,7 @@ def scorecard_tables(sc: dict, macros: dict) -> dict[str, str]:
         )
     for key, name, f in (
         ("edge_mtf50_cy_px", "mtf", "{:.3f}"),
+        ("edge_mtf50_sensor_cy_px", "mtfSensor", "{:.3f}"),
         ("veiling_glare_pct", "glare", "{:.2f}"),
         ("dr_snr1_db", "drOne", "{:.1f}"),
         ("texture_acutance", "tex", "{:.2f}"),
