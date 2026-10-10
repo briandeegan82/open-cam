@@ -380,6 +380,16 @@ def white_signal_e(e: np.ndarray, layout: cm.CfaLayout, roi: list[int]) -> float
     return float(chans.reshape(-1, chans.shape[2]).mean(axis=0).max())
 
 
+def saturation_e(stats: dict) -> float:
+    """Output saturation in electrons: full well, or the ADC ceiling if lower (a 2x2 charge-binned
+    quad Bayer keeps the 4800 e- photodiode's conversion gain, so its ADC clips well below 19200 e-)."""
+    fw = float(stats["full_well_effective_e"])
+    if "hdr" in stats or "bit_depth" not in stats:
+        return fw
+    adc = (2 ** int(stats["bit_depth"]) - 1 - float(stats["black_level_DN"])) * float(stats["K_effective_e_per_DN"])
+    return min(fw, adc)
+
+
 def meter_signal_e(
     e: np.ndarray, layout: cm.CfaLayout, white_roi: list[int], card_rois: list[list[int]] = (), pct: float = 90.0
 ) -> float:
@@ -461,6 +471,13 @@ def score_hdr(
     return out
 
 
+def despeckle(crop: np.ndarray, factor: float = 1.5) -> np.ndarray:
+    """Replace pbrt fireflies (pixels above ``factor`` x the white plateau, the 75th percentile) with
+    their 3x3 median; sensor noise on the plateau never reaches that level, so the edge is untouched."""
+    hot = crop > factor * np.percentile(crop, 75)
+    return np.where(hot, ndimage.median_filter(crop, size=3), crop) if hot.any() else crop
+
+
 def score_diorama(rgb: np.ndarray, rois: dict, seed: int = 0, noise: np.ndarray | None = None) -> dict:
     """``noise``: difference of two noise realisations / sqrt(2); its PSD is removed from the texture PSD."""
     y = _luma(rgb)
@@ -468,7 +485,7 @@ def score_diorama(rgb: np.ndarray, rois: dict, seed: int = 0, noise: np.ndarray 
     out: dict = {}
     if rois.get("slanted_edge"):
         x0, y0, x1, y1 = rois["slanted_edge"]
-        r = sfr.slanted_edge_sfr(y[y0:y1, x0:x1])
+        r = sfr.slanted_edge_sfr(despeckle(y[y0:y1, x0:x1]))
         out["edge_mtf50_cy_px"] = float(r.mtf50_cy_per_px)
         out["edge_acutance"] = float(cpiq.acutance(r.frequency_cy_per_px, r.mtf, view))
     if rois.get("dead_leaves"):
@@ -543,11 +560,14 @@ def score_recipe(recipe: str, renders: dict, tmp: Path, seed: int, images: dict 
             sens = run_sensor(recipe, render, tmp / scene, percentile=pct, fraction=frac, seed=seed)
         else:
             sens = run_sensor(recipe, render, tmp / scene, seed=seed)
-            for _ in range(2):  # spot-meter the white patch; the second pass removes the dim probe's noise bias
+            # Spot-meter until converged: a clipped probe under-reads, so one correction is not enough.
+            for _ in range(6):
                 k = float(sens["stats"]["exposure_scale_e_per_unit"])
-                goal = target * float(sens["stats"]["full_well_effective_e"])
-                k *= goal / max(meter_e(sens["e"]), 1e-9)
-                sens = run_sensor(recipe, render, tmp / scene, seed=seed, exposure_scale=k)
+                goal = target * saturation_e(sens["stats"])
+                ratio = goal / max(meter_e(sens["e"]), 1e-9)
+                if abs(ratio - 1.0) < 0.02:
+                    break
+                sens = run_sensor(recipe, render, tmp / scene, seed=seed, exposure_scale=k * ratio)
         row[f"{scene}_white_e"] = white_e(sens["e"]) if white else None
 
         def rgb_of(e: np.ndarray, white=white, shape=shape) -> np.ndarray:

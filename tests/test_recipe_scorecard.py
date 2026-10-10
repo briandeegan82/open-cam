@@ -115,3 +115,11 @@ def test_meter_signal_includes_card_highlights():
     e[24:, 24:] *= 2.0
     assert sc.meter_signal_e(e, bayer, [2, 2, 20, 20]) == pytest.approx(1000.0, rel=1e-3)
     assert sc.meter_signal_e(e, bayer, [2, 2, 20, 20], [[26, 26, 46, 46]]) == pytest.approx(2000.0, rel=1e-3)
+
+
+def test_despeckle_removes_fireflies_but_keeps_edge():
+    crop = np.where(np.arange(40)[None, :] < 20, 0.1, 1.0) * np.ones((40, 1))
+    hot = crop.copy()
+    hot[5, 30] = hot[17, 25] = 8.0
+    np.testing.assert_allclose(sc.despeckle(hot), crop)
+    np.testing.assert_array_equal(sc.despeckle(crop), crop)
