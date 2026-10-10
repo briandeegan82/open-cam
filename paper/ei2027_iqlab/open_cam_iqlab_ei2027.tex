@@ -85,8 +85,7 @@ The scorecard was run at \scRes{} with \scSpp{} samples per pixel (HDR chart 960
 \input{tables/hdr}
 \end{table}
 
-\textbf{Dynamic range.} %% TODO(after full sweep): interpret Table hdr.
-DR at SNR\,=\,1 spans \drOneMin--\drOneMax\,dB across all recipes (Table~\ref{tab:hdr}).
+\textbf{Dynamic range.} DR at SNR\,=\,1 spans \drOneMin--\drOneMax\,dB across all recipes (Table~\ref{tab:hdr}). The linear recipes have a median of \drMedLinear\,dB, and the HDR architectures order as their design intends: dual conversion gain \drMedDcg, LOFIC \drMedLofic, split pixel \drMedSplitpixel{} and multi-exposure \drMedMultiexposure\,dB. The lowest level with CDP\,$\geq$\,0.9 extends with DR, from $-36$\,dB for the linear median to $-78$\,dB for multi-exposure. The split-pixel and multi-exposure pixels pay for their range with a lower SNR at 18\,\% of saturation (about 32\,dB against 35\,dB for the linear median), because the merge switches to a shorter or less sensitive readout below that level.
 
 \begin{table*}[t]
 \caption{Diorama and flare metrics by optical configuration (medians over the recipes sharing it). MTF50 in cycles/pixel; acutance for a 100\,\% monitor view.}
@@ -96,30 +95,27 @@ DR at SNR\,=\,1 spans \drOneMin--\drOneMax\,dB across all recipes (Table~\ref{ta
 \input{tables/optics}
 \end{table*}
 
-\textbf{Sharpness and flare.} %% TODO(after full sweep): interpret Table optics.
-MTF50 ranges from \mtfMin{} to \mtfMax{}\,cy/px and veiling glare from \glareMin{} to \glareMax\,\% (Table~\ref{tab:optics}).
+\textbf{Sharpness and flare.} Behind the realistic lenses the median output MTF50 is 0.25--0.33\,cy/px, below the 0.34--0.42\,cy/px of the pinhole and thin-lens groups, whose only blur is the pixel aperture and demosaicing. Edge acutance varies much less (0.80--0.86 across groups), consistent with the MTF50 ripple discussed below. Over all recipes MTF50 ranges from \mtfMin{} to \mtfMax{}\,cy/px and veiling glare from \glareMin{} to \glareMax\,\% (Table~\ref{tab:optics}).
 
-\begin{table}[t]
+\begin{table*}[t]
 \caption{Edge sharpness by CFA (medians): MTF50 of the output luminance (after the CCM), its MTF rebound, and MTF50 and edge acutance of the brightest channel before the CCM.}
 \label{tab:cfa}
 \vspace{14pt}
 \centering\small
 \input{tables/cfa}
-\end{table}
+\end{table*}
 
-\textbf{Sharpness by CFA.} %% TODO(after full sweep): interpret Table cfa.
-\nRebound{} recipes have an output MTF rebound above \reboundLimit{} (Table~\ref{tab:cfa}); sensor MTF50 ranges from \mtfSensorMin{} to \mtfSensorMax{}\,cy/px.
+\textbf{Sharpness by CFA.} \nRebound{} recipes have an output MTF rebound above \reboundLimit{} (Table~\ref{tab:cfa}): RCCB, RCCG and both RGBW layouts. Their output MTF50 (0.11--0.50\,cy/px) reflects the CCM, not the sensor. Before the CCM, the clear channel of RCCB and RCCG reaches 0.37--0.38\,cy/px, close to the Bayer reference on the same pinhole render (0.41). Across all recipes sensor MTF50 ranges from \mtfSensorMin{} to \mtfSensorMax{}\,cy/px. The lowest values are physical: the binned quad-Bayer raster has half the sampling rate (0.16\,cy/px in full-resolution pixels), and the $2\times2$ RGBW and CMY tiles sample their brightest channel on fewer sites (0.19--0.20).
 
-\begin{table}[t]
+\begin{table*}[t]
 \caption{Skin-tone $\Delta E_{00}$ (D65, 12 patches): the four best and four worst recipes.}
 \label{tab:skin}
 \vspace{14pt}
 \centering\small
 \input{tables/skin}
-\end{table}
+\end{table*}
 
-\textbf{Skin tones.} %% TODO(after full sweep): interpret Table skin.
-The median recipe reaches a mean $\Delta E_{00}$ of \deMedian{}, from \deBest{} (\deBestRecipe) to \deWorst{} (\deWorstRecipe); \deUnderTwo{} recipes stay below 2.
+\textbf{Skin tones.} The median recipe reaches a mean $\Delta E_{00}$ of \deMedian{}, from \deBest{} (\deBestRecipe) to \deWorst{} (\deWorstRecipe); \deUnderTwo{} recipes stay below 2. The two worst recipes are the ones without an IR-cut filter, whose near-infrared response the visible-band CCM cannot remove.
 
 \begin{figure*}[t]
 \centering
@@ -131,7 +127,7 @@ The median recipe reaches a mean $\Delta E_{00}$ of \deMedian{}, from \deBest{} 
 \section{Discussion and limitations}
 Three lessons from building the scorecard generalise to any simulated IQ comparison. First, a metric that is unbiased on laboratory captures is not automatically unbiased on simulation: noise-free inputs exposed the 4$\times$ binning bias in MTF50 that real noise would hide. Second, render noise must be kept apart from sensor noise: two captures with different sensor seeds separate them for SNR and DR, and texture metrics also need two independently seeded renders. Third, exposure and chart lighting are part of the measurement. A first full sweep metered only on the ColorChecker white, and it clipped the unevenly lit edge card on every linear recipe. That made the clipped linear sensors look sharper than the HDR pixels, which did not clip. Removing the clipping exposed the uneven lighting, which made MTF50 noise-driven. It also clipped the W channel of RGBW and the ADC of the binned quad-Bayer readout. None of these errors made a run fail, and the metric code was unbiased; only the implausible numbers exposed them. Fourth, ROIs must be found where the lens actually places the target, not where a pinhole would.
 
-The limitations are explicit. P2020 and CPIQ implementations are uncertified. The synthetic skin tones are not measured population data. Colour correction uses each recipe's spectral ColorChecker matrix, so the skin result measures the sensor and its matrix, not a tuned ISP. pbrt's realistic camera traces no inter-reflections, so the veiling glare reported here excludes ghosts and coatings; open-cam models those separately~\cite{hullin2011flare} but the scorecard does not yet include them. The HDR chart excludes optics. The noise-free least-squares ColorChecker CCM of the RGBW recipe has a W coefficient of about 14, because $R+G+B\approx W$ makes the fit ill-conditioned. Its output edge and texture results therefore measure the unregularised matrix rather than the CFA itself; the sensor-domain sharpness isolates the CFA, and a regularised CCM or a separate luminance path is future work. The two green sites of the Bayer recipes differ by about 7\,\% on the white patch. Many recipes carry EMVA parameters inferred from public tables rather than measured reports, so the scorecard ranks the recipes as modelled, not the cameras they are named after.
+The limitations are explicit. P2020 and CPIQ implementations are uncertified. The synthetic skin tones are not measured population data. Colour correction uses each recipe's spectral ColorChecker matrix, so the skin result measures the sensor and its matrix, not a tuned ISP. pbrt's realistic camera traces no inter-reflections, so the veiling glare reported here excludes ghosts and coatings; open-cam models those separately~\cite{hullin2011flare} but the scorecard does not yet include them. The HDR chart excludes optics. The noise-free least-squares ColorChecker CCM of the RGBW recipe has a W coefficient of about 14, because $R+G+B\approx W$ makes the fit ill-conditioned. Its output edge and texture results therefore measure the unregularised matrix rather than the CFA itself; the sensor-domain sharpness isolates the CFA, and a regularised CCM or a separate luminance path is future work. At \scRes{} the slanted-edge ROI through the realistic lenses is only about 44\,px square, and its MTF ripples by about $\pm0.1$ between 0.2 and 0.4\,cy/px; where the curve hovers near 0.5, MTF50 can jump between neighbouring crossings (0.30 vs 0.40\,cy/px for two recipes behind the same lens), so edge acutance, which integrates the curve, is the more robust sharpness ranking. The two green sites of the Bayer recipes differ by about 7\,\% on the white patch. Many recipes carry EMVA parameters inferred from public tables rather than measured reports, so the scorecard ranks the recipes as modelled, not the cameras they are named after.
 
 \section{Conclusion}
 The open-cam IQ lab gives a reproducible path from spectral scenes to standard-style IQ numbers for any camera recipe, with every metric validated against closed-form ground truth before it is applied to renders. The scorecard, the validation suite and a lecture-oriented GUI share one code path, and all scripts behind this paper are at \url{https://github.com/briandeegan82/open-cam}.
