@@ -270,6 +270,35 @@ venv/bin/python tools/build_highway_scene.py --camera realistic
 third_party/pbrt-v4/build/pbrt scenes/generated/highway/highway.pbrt
 ```
 
+## Image-Quality Lab (Optional)
+
+Scene targets, runners and NumPy metrics (`tools/iqlab/`) for scoring open-cam outputs and real
+captures with the same code: SNR / dynamic range, IEEE P2020-style CDP and colour separation,
+CPIQ-style acutance / visual noise / chroma, dead-leaves texture MTF, distortion, flare and veiling
+glare, and skin-tone ΔE00 / ITA. Overview and metric definitions: [`docs/IQ_LAB.md`](docs/IQ_LAB.md).
+
+| Test | Scene builder | Runner / scorer | Docs |
+|---|---|---|---|
+| HDR dynamic range (120 dB emissive chart, SNR / DR / CDP) | `tools/build_hdr_dr_chart.py` | `tools/run_hdr_dr_test.py` | [`docs/IQ_LAB_HDR.md`](docs/IQ_LAB_HDR.md) |
+| Lens flare / veiling glare (ISO 18844-style black holes, point-source sweep) | `tools/build_flare_test_scene.py` | `tools/run_flare_test.py` | [`docs/IQ_LAB_FLARE.md`](docs/IQ_LAB_FLARE.md) |
+| Skin tones (melanin series, 4 illuminants) | `tools/build_skin_tone_chart.py` | `tools/run_skin_tone_test.py` | [`docs/IQ_LAB_SKIN.md`](docs/IQ_LAB_SKIN.md) |
+| Tabletop diorama (charts, dead leaves, star, edge, spheres, window + lamp) | `tools/build_iq_diorama.py` | `iqlab` on the `diorama.json` ROIs | [`docs/IQ_LAB_DIORAMA.md`](docs/IQ_LAB_DIORAMA.md) |
+
+```bash
+# HDR DR / CDP for every HDR recipe from the pixel model (no render needed)
+venv/bin/python tools/run_hdr_dr_test.py --out-dir out/iq_lab/hdr_dr --figure
+# Traced-ghost energy vs field angle and coating (no render needed)
+venv/bin/python tools/run_flare_test.py --ghost-sweep --out-dir out/iq_lab/flare
+# Skin-tone chart: build, render with pbrt, score
+venv/bin/python tools/build_skin_tone_chart.py --out-dir scenes/iq_lab/skin_tones --film rgb
+third_party/pbrt-v4/build/pbrt --outfile out/skin_D65.exr scenes/iq_lab/skin_tones/skin_tones_D65.pbrt
+venv/bin/python tools/run_skin_tone_test.py --chart scenes/iq_lab/skin_tones/chart.json \
+    --illuminant D65 --image out/skin_D65.exr
+```
+
+Every builder writes a JSON manifest with raster ROIs, so a render can be scored straight away. Tests:
+`tests/test_iqlab*.py`.
+
 ## Munsell Dataset Tools (Optional)
 
 Optional scripts for Joensuu Munsell matte data:
@@ -298,6 +327,7 @@ venv/bin/python tools/munsell_mat_to_sqlite.py --summary
 - `tools/sfr_analysis.py` uses an ISO 12233-style signed-derivative edge fit with robust outlier rejection; the old `|derivative|` centroid (kept as `row_edge_positions_legacy`) was biased toward 0 deg on noisy renders.
 - Real-camera validation (`tools/validate_against_capture.py`, [`docs/REAL_CAMERA_VALIDATION.md`](docs/REAL_CAMERA_VALIDATION.md)) is only round-trip tested on simulator data so far; no recipe has been validated against physical captures yet.
 - HDR pixel models (`noise.hdr`: DCG, split pixel, LOFIC, multi-exposure; opt-in) use deterministic-threshold SNR theory and omit row/column FPN, 1/f noise, blooming and ADC INL/DNL per capture; split-pixel SPD offset/crosstalk and LOFIC soft-knee effects are not modelled. Example HDR sensor models are illustrative, not datasheets. See [docs/HDR_PIXELS.md](docs/HDR_PIXELS.md).
+- IQ lab metrics (`tools/iqlab`) follow the published IEEE P2020 / CPIQ (IEEE 1858) papers and the ISO 12233 / 15739 / 18844 structure, not the paywalled standard texts. They are not certified, so use them for relative comparisons; see [docs/IQ_LAB.md](docs/IQ_LAB.md). The skin-tone melanin series is synthetic, not measured population data.
 - Pixel angular response (CRA / microlens shift, lens + colour shading, optional optical crosstalk) is opt-in (`sensor_forward.model.pixel_angular_response`) and uses a geometric-optics microlens with a Gaussian diffraction term; wave-optical effects at sub-2 µm pitch and real stack data are not modelled — see [`docs/PIXEL_ANGULAR_RESPONSE.md`](docs/PIXEL_ANGULAR_RESPONSE.md). Off by default.
 
 ## Troubleshooting

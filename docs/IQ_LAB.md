@@ -13,6 +13,15 @@ known analytic answer.
 | `iqlab.dead_leaves` | Dead-leaves target generator; texture MTF from the ideal-vs-captured PSD with the noise PSD subtracted; texture acutance | registered captured and ideal target |
 | `iqlab.geometry` | Dot-grid centroids; local geometric distortion (radial %, ideal grid fitted from the central dots); lateral chromatic displacement (R−G, B−G centroid offsets) | dot-grid chart image |
 
+## Scene tests built on these metrics
+
+| Doc | Test | Builder → runner |
+|---|---|---|
+| [IQ_LAB_HDR.md](IQ_LAB_HDR.md) | 120 dB emissive chart: SNR, SNR = 1 / 10 dynamic range, CDP vs luminance | `build_hdr_dr_chart.py` → `run_hdr_dr_test.py` |
+| [IQ_LAB_FLARE.md](IQ_LAB_FLARE.md) | Veiling glare (black holes), point-source stray light, traced-ghost sweep | `build_flare_test_scene.py` → `run_flare_test.py` |
+| [IQ_LAB_SKIN.md](IQ_LAB_SKIN.md) | Skin-tone ΔE00 / ΔL* / ΔC* / Δh / ITA under 4 illuminants | `build_skin_tone_chart.py` → `run_skin_tone_test.py` |
+| [IQ_LAB_DIORAMA.md](IQ_LAB_DIORAMA.md) | One-frame tabletop scene for every axis | `build_iq_diorama.py` → `iqlab` on `diorama.json` ROIs |
+
 ## Definitions and sources
 
 - **CDP** (Geese et al., IS&T EI 2018; the IEEE P2020 KPI). Sample random dark/bright pixel pairs and
