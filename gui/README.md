@@ -30,6 +30,7 @@ the whole chain on a real scene.
 | 5 | Exposure and sensor defects | `opencam-gui demo exposure` | [tutorials/05-exposure-defects.md](tutorials/05-exposure-defects.md) |
 | 6 | Colour and the ISP | `opencam-gui demo isp` | [tutorials/06-colour-isp.md](tutorials/06-colour-isp.md) |
 | 7 | Image generation (scene to image) | `opencam-gui demo image-generation` | [tutorials/07-image-generation.md](tutorials/07-image-generation.md) |
+| 8 | Image-quality lab (test scenes and metrics) | `opencam-gui demo iq-lab` | [tutorials/08-iq-lab.md](tutorials/08-iq-lab.md) |
 
 `opencam-gui topics` prints the same list from the code. Each tutorial ends
 with a bridge section explaining why the next one builds on it. A suggested
@@ -53,8 +54,8 @@ opencam-gui demo geometry --scenario phone_wide
 opencam-gui demo optics --list-scenarios
 ```
 
-Only Tutorial 07's "Physically accurate (PBRT render)" mode needs a PBRT
-binary from `../docs/BUILD_PBRT.txt`. Everything else, including Tutorial 03's
+Only Tutorial 07's "Physically accurate (PBRT render)" mode and Tutorial 08 (IQ lab)
+need a PBRT binary from `../docs/BUILD_PBRT.txt`. Everything else, including Tutorial 03's
 synthetic edge source and Tutorial 07's analytic ColorChecker path, runs on
 NumPy alone. A **Dry run** is always available in the image-generation demo.
 

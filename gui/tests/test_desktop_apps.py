@@ -10,17 +10,19 @@ without ever opening a window.
 from __future__ import annotations
 
 import dearpygui.dearpygui as dpg
+import numpy as np
 import pytest
 from opencam_gui.ui.desktop.base import CUSTOM_RECIPE
 from opencam_gui.ui.desktop.exposure_app import ExposureApp
 from opencam_gui.ui.desktop.geometry_app import GeometryApp
 from opencam_gui.ui.desktop.image_generation_app import ImageGenerationApp
+from opencam_gui.ui.desktop.iq_lab_app import IqLabApp
 from opencam_gui.ui.desktop.isp_app import IspApp
 from opencam_gui.ui.desktop.mtf_app import MtfApp
 from opencam_gui.ui.desktop.optics_app import OpticsApp
 from opencam_gui.ui.desktop.sensor_app import SensorApp
 
-ALL_APPS = [GeometryApp, OpticsApp, MtfApp, SensorApp, ExposureApp, IspApp, ImageGenerationApp]
+ALL_APPS = [GeometryApp, OpticsApp, MtfApp, SensorApp, ExposureApp, IspApp, ImageGenerationApp, IqLabApp]
 
 #: Apps with a "Custom" recipe entry that auto-loads a camera config on change.
 RECIPE_APPS = [GeometryApp, OpticsApp, MtfApp, SensorApp, ExposureApp, IspApp]
@@ -129,3 +131,30 @@ def test_isp_cfa_scenarios_load_the_named_qe_curves(dpg_context):
     assert app.qe_paths["green"].endswith("QE_magenta.csv")
     assert app.qe_paths["red"].endswith("QE_cyan.csv")
     assert app.qe_paths["blue"].endswith("QE_yellow.csv")
+
+
+def test_iq_lab_shows_result_metrics_and_rois(dpg_context):
+    """A finished run fills the metric table and draws one rectangle per ROI, without pbrt."""
+    app = _built(IqLabApp)
+    render = {
+        "shape": (240, 360),
+        "render_s": 1.0,
+        "rois": {"slanted_edge": [10, 10, 60, 60], "dead_leaves": [100, 10, 160, 60], "white": [200, 200, 210, 210]},
+        "meta": {},
+    }
+    row = {"recipe": "default", "cfa": "GBRG", "hdr": "linear", "edge_mtf50_cy_px": 0.3, "edge_acutance": 0.75}
+    app.show_result("ok", "diorama", render, row, np.full((240, 360, 3), 0.2))
+    assert len(dpg.get_item_children("iq_rois", 2)) == 3
+    rows = dpg.get_item_children("iq_table", 1)
+    assert len(rows) == 3
+    assert dpg.get_value(dpg.get_item_children(rows[0], 1)[1]) == "0.300"
+    assert "default" in dpg.get_value("iq_result")
+    app.show_result("error", "RuntimeError: boom")
+    assert dpg.get_value("iq_result").startswith("FAILED")
+
+
+def test_iq_lab_display_handles_hdr_maps():
+    from opencam_gui.ui.desktop.iq_lab_app import display_rgba
+
+    flat = display_rgba(np.logspace(-6, 0, 60 * 40).reshape(40, 60), 30, 20)
+    assert len(flat) == 30 * 20 * 4 and min(flat) >= 0.0 and max(flat) <= 1.0

@@ -32,6 +32,7 @@ def test_topics_are_registered_in_teaching_order():
         "exposure",
         "isp",
         "image_generation",
+        "iq_lab",
     ]
 
 
