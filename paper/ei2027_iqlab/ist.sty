@@ -1,0 +1,314 @@
+% % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % %
+% IS&T Conference Template Style File
+%
+% Original: Patrick Vandewalle, January 2006
+% v1.0b - February 2006:  corrected figure captions > 1 line
+% v1.0c - February 2006:  corrected page margins (A4 and letter)
+% v1.1  - July 2007:      improved margin/paper-size handling
+%                         (Michael Shell, IEEEtran)
+% v2.0  - June 2026:      columnsep corrected to 0.25 in (match Word template);
+%                         modernised PDF/paper-size detection (XeLaTeX/LuaLaTeX
+%                         safe); hyperref-compatibility hook added; removed
+%                         dead commented-out font-size code; general tidy-up.
+% v2.1  - June 2026:      \@startsection calls given correct name arguments and
+%                         level numbers (were empty / all level 1 — latent
+%                         cross-reference bug); font packages updated from
+%                         deprecated mathptmx to newtxtext/newtxmath; PDF
+%                         page-size block hardened for LuaLaTeX >= 1.0 (uses
+%                         \pagewidth/\pageheight via luatex85 fallback); list
+%                         environment end-hooks use \endorig@* for safety.
+% % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % %
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Required packages
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Times body text and matching math fonts.
+% newtxtext/newtxmath replace the deprecated mathptmx package and give
+% better math spacing.  helvet provides Helvetica (Arial-metric) for headings;
+% scaled=0.92 aligns its x-height with Times.
+\RequirePackage{newtxtext,newtxmath}
+\RequirePackage[scaled=0.92]{helvet}
+% Figures
+\RequirePackage{graphicx}
+
+\makeatletter
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Paper size and margin options
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Spec (from Word template):
+%   Left/right margin : 0.75 in  (1.90 cm)
+%   Top/bottom margin : 1.00 in  (2.54 cm)
+%   Column width      : 3.38 in  (8.57 cm)  x 2
+%   Column gutter     : 0.25 in  (0.635 cm)   <- corrected from 0.30 in in v1.x
+%   Total text width  : 3.38 + 0.25 + 3.38 = 7.01 in  ~ 6.75 in usable
+%   (textwidth = paperwidth - 2*sidemargin = 8.5 - 1.5 = 7.0 in)
+
+\DeclareOption{letterpaper}{%
+  \setlength{\paperheight}{11in}%
+  \setlength{\paperwidth}{8.5in}%
+  \setlength{\textheight}{9in}%
+  \setlength{\textwidth}{7.0in}%
+  % LaTeX adds a fixed 1-inch offset to \topmargin and \[odd/even]sidemargin;
+  % subtract it back so the *printed* margin equals the spec value.
+  \setlength{\topmargin}{1in}%
+  \addtolength{\topmargin}{-1in}%
+  \setlength{\oddsidemargin}{.75in}%
+  \addtolength{\oddsidemargin}{-1in}%
+  \setlength{\evensidemargin}{.75in}%
+  \addtolength{\evensidemargin}{-1in}%
+  \setlength{\columnsep}{.25in}%       % corrected: Word spec is 0.25 in
+  \setlength{\belowcaptionskip}{-10pt}%
+  \def\ISTOPTIONpaper{letter}%
+  \def\ISTINFOpaperwidth{8.5in}%
+  \def\ISTINFOpaperheight{11in}%
+}
+
+\DeclareOption{a4paper}{%
+  \setlength{\paperheight}{297mm}%
+  \setlength{\paperwidth}{210mm}%
+  \setlength{\evensidemargin}{20mm}%
+  \addtolength{\evensidemargin}{-1.05in}%
+  \setlength{\oddsidemargin}{20mm}%
+  \addtolength{\oddsidemargin}{-1.05in}%
+  \setlength{\topmargin}{25mm}%
+  \addtolength{\topmargin}{-1.07in}%
+  \setlength{\textwidth}{170mm}%
+  \setlength{\textheight}{247mm}%
+  \setlength{\columnsep}{6.35mm}%      % 0.25 in in mm
+  \setlength{\belowcaptionskip}{-20pt}%
+  \def\ISTOPTIONpaper{A4}%
+  \def\ISTINFOpaperwidth{210mm}%
+  \def\ISTINFOpaperheight{297mm}%
+}
+
+\ProcessOptions\relax
+
+% Common margin settings (both paper sizes)
+\setlength{\headheight}{0in}
+\setlength{\headsep}{0in}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% PDF / paper-size detection
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Strategy:
+%   pdflatex  : \pdfoutput > 0, \pdfpagewidth/\pdfpageheight available.
+%   LuaLaTeX  : \pdfoutput > 0, but \pdfpagewidth/\pdfpageheight are
+%               deprecated since LuaTeX 1.0.  The luatex85 compatibility
+%               package re-maps them; if it is absent we fall back to the
+%               native \pagewidth/\pageheight primitives introduced in
+%               LuaTeX 0.87.
+%   XeLaTeX   : \pdfoutput is undefined; paper size is handled by the
+%               driver automatically — no action needed here.
+%   latex+dvips: \pdfoutput undefined; emit a dvips papersize special.
+
+\newif\ifISTINFOpdf \ISTINFOpdffalse
+
+\@ifundefined{pdfoutput}{%
+  % XeLaTeX or classic latex+dvips — no \pdfoutput primitive.
+  \@ifundefined{XeTeXversion}{%
+    % Classic latex+dvips: emit papersize special for ps2pdf.
+    \AtBeginDvi{\special{papersize=\ISTINFOpaperwidth,\ISTINFOpaperheight}}%
+  }{%
+    % XeLaTeX: driver manages paper size; nothing to do.
+    \global\ISTINFOpdftrue
+  }%
+}{%
+  \ifnum\pdfoutput>0
+    \global\ISTINFOpdftrue
+    % LuaLaTeX >= 1.0 deprecates \pdfpagewidth in favour of \pagewidth.
+    % Try the legacy name first (works for pdflatex and luatex85); if it
+    % is undefined, use the native LuaTeX primitives.
+    \@ifundefined{pdfpagewidth}{%
+      \global\pagewidth\paperwidth
+      \global\pageheight\paperheight
+    }{%
+      \global\pdfpagewidth\paperwidth
+      \global\pdfpageheight\paperheight
+    }%
+  \else
+    % \pdfoutput exists but equals 0: DVI output from pdflatex (unusual).
+    \AtBeginDvi{\special{papersize=\ISTINFOpaperwidth,\ISTINFOpaperheight}}%
+  \fi
+}
+
+\typeout{-- Paper: \ISTINFOpaperwidth\space x \ISTINFOpaperheight\space (\ISTOPTIONpaper).}
+\ifISTINFOpdf
+  \typeout{-- Output: PDF.}
+\else
+  \typeout{-- Output: DVI/PS.}
+\fi
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Font sizes  (body = 9 pt, per Word template)
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\def\normalsize{\@setfontsize{\normalsize}{9}{11pt}}   % body text
+\def\small{\@setfontsize{\small}{8}{11pt}}             % table text, author line
+\def\footnotesize{\@setfontsize{\footnotesize}{8}{9pt}}
+\def\scriptsize{\@setfontsize{\scriptsize}{7}{11pt}}   % figure captions
+\def\tiny{\@setfontsize{\tiny}{5}{6pt}}
+\def\large{\@setfontsize{\large}{10}{11pt}}            % subsubsection
+\def\Large{\@setfontsize{\Large}{10}{11pt}}            % subsection
+\def\LARGE{\@setfontsize{\LARGE}{11}{11pt}}            % section
+\def\huge{\@setfontsize{\huge}{17}{20pt}}
+\def\Huge{\@setfontsize{\Huge}{18}{22pt}}              % title
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Indentation
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\setlength{\parindent}{0.25in}
+\setlength{\parsep}{11pt}
+\setlength{\mathindent}{0.25in}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Section headings  (unnumbered)
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% \@startsection{name}{level}{indent}{beforeskip}{afterskip}{style}
+%   name  : must match the command name for \label/\ref to work correctly.
+%   level : section=1, subsection=2, subsubsection=3  (was wrongly all 1).
+% secnumdepth=0 suppresses printed numbers while keeping internal counters.
+\setcounter{secnumdepth}{0}
+
+\renewcommand{\section}{\@startsection{section}{1}{0mm}%
+  {\baselineskip}{0.001mm}{\LARGE\bf\sffamily}}
+\renewcommand{\subsection}{\@startsection{subsection}{2}{0mm}%
+  {\baselineskip}{0.001mm}{\Large\bf\em\sffamily}}
+\renewcommand{\subsubsection}{\@startsection{subsubsection}{3}{0mm}%
+  {\baselineskip}{0.001mm}{\large\bf\em}}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Abstract environment
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\renewenvironment{abstract}%
+  {{\section{Abstract}}\begin{em}}%
+  {\end{em}\vskip\baselineskip}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Author Biography environment
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\newenvironment{biography}%
+  {{\section{Author Biography}}\begin{em}}%
+  {\end{em}}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Lists  (compact — no extra vertical space between items)
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% We save the original environments and restore them with tightened spacing.
+% The end-hook uses \endorig@* (not bare \endlist) so that any end-hooks
+% registered by the original environment (e.g. from amsthm) are still fired.
+% NOTE: this override is incompatible with the enumitem package, which
+% replaces these environments wholesale.  Do not load enumitem with ist.sty.
+\let\orig@Itemize\itemize
+\let\endorig@Itemize\enditemize
+\let\orig@Enumerate\enumerate
+\let\endorig@Enumerate\endenumerate
+\let\orig@Description\description
+\let\endorig@Description\enddescription
+\def\ISTNoSpacing{\itemsep=0pt\topsep=0pt\partopsep=0pt\parskip=0pt\parsep=0pt}
+\renewenvironment{itemize}  {\orig@Itemize\ISTNoSpacing}  {\endorig@Itemize}
+\renewenvironment{enumerate}{\orig@Enumerate\ISTNoSpacing}{\endorig@Enumerate}
+\renewenvironment{description}{\orig@Description\ISTNoSpacing}{\endorig@Description}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Tables  (sans-serif body text)
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\let\orig@tabular\tabular
+\let\endorig@tabular\endtabular
+\renewenvironment*{tabular}[1]%
+  {\sffamily\begin{orig@tabular}{#1}}%
+  {\end{orig@tabular}}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Captions
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\setlength{\abovecaptionskip}{0pt}
+% \belowcaptionskip is paper-size-dependent; set per option above.
+
+\def\@tablestring{table}
+\def\@figurecaptionsepspace{\vskip\abovecaptionskip\relax}
+\def\@tablecaptionsepspace{\vskip\belowcaptionskip\relax}
+
+\long\def\@makecaption#1#2{%
+  \ifx\@captype\@tablestring
+    % Table caption: bold sans-serif above the table
+    {\small\sffamily\bfseries #2}\@tablecaptionsepspace
+  \else
+    % Figure caption: "Figure N.  caption text" in small italic sans-serif
+    \@figurecaptionsepspace
+    \setbox\@tempboxa\hbox{\scriptsize\sffamily\itshape{\bfseries #1.}~~#2}%
+    \ifdim\wd\@tempboxa>\hsize
+      % Multi-line caption: wrap with hanging label
+      \setbox\@tempboxa\hbox{\scriptsize\sffamily\itshape{\bfseries #1.}~~}%
+      \parbox[t]{\hsize}{\scriptsize\sffamily\itshape\noindent\unhbox\@tempboxa#2}%
+    \else
+      % Single-line caption: flush left
+      \hbox to\hsize{\scriptsize\sffamily\itshape\box\@tempboxa\hfil}%
+    \fi
+  \fi
+}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Title and author
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\def\maketitle{\par
+  \twocolumn[\@maketitle]
+  \let\maketitle\relax
+  \let\@maketitle\relax
+  \gdef\@author{}\gdef\@title{}}
+
+\def\@maketitle{%
+  \null
+  {\Huge\bf\@title\par}%
+  \vskip 11pt
+  {\small\bf\em\sffamily\@author\par}%
+  \par\vskip 44pt}
+
+\def\title#1{\gdef\@title{\Huge #1}}
+\def\author#1{\gdef\@author{#1}}
+\gdef\@title{Title of Paper}
+\gdef\@author{{\em Name of Author}\\}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Bibliography  (compact — no inter-item spacing)
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\newdimen\bibindent
+\setlength\bibindent{1.5em}
+
+\renewenvironment{thebibliography}[1]{%
+  \section*{\refname
+    \@mkboth{\MakeUppercase\refname}{\MakeUppercase\refname}}%
+  \list{\@biblabel{\@arabic\c@enumiv}}{%
+    \settowidth\labelwidth{\@biblabel{#1}}%
+    \leftmargin\labelwidth
+    \advance\leftmargin\labelsep
+    \itemsep\z@skip
+    \parsep\z@skip
+    \@openbib@code
+    \usecounter{enumiv}%
+    \let\p@enumiv\@empty
+    \renewcommand\theenumiv{\@arabic\c@enumiv}}%
+  \sloppy\clubpenalty4000\widowpenalty4000%
+  \sfcode`\.\@m}
+  {\def\@noitemerr{\@latex@warning{Empty `thebibliography' environment}}%
+   \endlist}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% hyperref compatibility
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% If hyperref is loaded (recommended for camera-ready PDF), configure it to
+% produce clean, unobtrusive links.  This block is a no-op if hyperref is
+% absent, so it is safe to leave in place.
+\AtBeginDocument{%
+  \@ifpackageloaded{hyperref}{%
+    \hypersetup{%
+      colorlinks = true,%
+      linkcolor  = black,%
+      citecolor  = black,%
+      urlcolor   = black,%
+      pdfborder  = {0 0 0}%
+    }%
+  }{}%
+}
+
+\makeatother
+% end of ist.sty
