@@ -71,7 +71,7 @@ def _spd(path: Path, wl: np.ndarray, val: np.ndarray) -> None:
 
 
 class Projector:
-    """Pinhole projection matching the scene camera (LookAt along -z; world +x -> raster left)."""
+    """Pinhole projection matching the scene camera (looking along -z; world +x -> raster right)."""
 
     def __init__(self, args: argparse.Namespace):
         self.cx, self.cy = args.xres / 2.0, args.yres / 2.0
@@ -80,7 +80,7 @@ class Projector:
 
     def __call__(self, x, y, z):
         s = self.f / (self.d - z)
-        return self.cx - x * s, self.cy - (y - self.h) * s
+        return self.cx + x * s, self.cy - (y - self.h) * s
 
     def roi(self, x0, y0, x1, y1, z, margin=0.15) -> list[int]:
         (ax, ay), (bx, by) = self(x0, y0, z), self(x1, y1, z)
@@ -155,6 +155,7 @@ def write_diorama(args: argparse.Namespace) -> dict:
         f'Integrator "volpath" "integer maxdepth" [{int(args.maxdepth)}] "bool regularize" true',
         'PixelFilter "gaussian"',
         *iq._film_block(args, film),
+        "Scale -1 1 1",  # un-mirror pbrt's LookAt so world +x is raster right (charts read normally)
         f"LookAt 0 {h:.6g} {d:.6g}  0 {h:.6g} 0  0 1 0",
         *iq._camera_block(args, out, REPO),
         "WorldBegin",
