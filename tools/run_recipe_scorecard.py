@@ -42,6 +42,7 @@ import re
 import subprocess
 import sys
 import time
+import traceback
 from pathlib import Path
 
 import numpy as np
@@ -67,6 +68,7 @@ PBRT = REPO / "third_party" / "pbrt-v4" / "build" / "pbrt"
 FILM_DIAGONAL_MM = 35.0  # pbrt-v4 RealisticCamera default
 VIEW = "monitor_100pct"
 CC_WHITE = 18  # ColorChecker "white 9.5"
+HDR_MIN_XRES = 960  # HDR-chart patches are ~2 % of the width; 4x4 CFA tiles (quad Bayer) need >= 4 guide sites
 
 # builder, default fov, default cam_dist, target-plane z, exposure: white-patch fraction of full well
 # (spot metering) or (percentile, fraction) auto-exposure
@@ -215,6 +217,8 @@ def world_roi(P: np.ndarray, rect: list[float], z: float, margin: float = 0.15) 
 def render_scene(scene: str, optics: dict, out: Path, xres: int, yres: int, spp: int) -> dict:
     """Build + render ``scene`` for one optics group; returns EXR path, manifest and raster ROIs."""
     out.mkdir(parents=True, exist_ok=True)
+    if scene == "hdr" and xres < HDR_MIN_XRES:
+        xres, yres = HDR_MIN_XRES, round(yres * HDR_MIN_XRES / xres)
     builder = SCENES[scene][0]
     cmd = [sys.executable, str(TOOLS / builder), "--out-dir", str(out), *builder_args(scene, optics, xres, yres, spp)]
     subprocess.run(cmd, check=True, capture_output=True, text=True)
@@ -375,10 +379,19 @@ def _luma(rgb: np.ndarray) -> np.ndarray:
 # ------------------------------------------------------------------------------------------ scoring
 def score_hdr(e: np.ndarray, layout: cm.CfaLayout, chart: dict, saturation_e: float) -> dict:
     sites, th, tw = guide_sites(e, layout)
-    low = [[hdr._roi(sites, _scale_roi(p["low"]["roi_xyxy"], th, tw))] for p in chart["patches"]]
-    high = [[hdr._roi(sites, _scale_roi(p["high"]["roi_xyxy"], th, tw))] for p in chart["patches"]]
+
+    def big_enough(roi: list[int]) -> bool:
+        x0, y0, x1, y1 = _scale_roi(roi, th, tw)
+        return x1 - x0 >= 2 and y1 - y0 >= 2
+
+    kept = [p for p in chart["patches"] if big_enough(p["low"]["roi_xyxy"]) and big_enough(p["high"]["roi_xyxy"])]
+    if not kept:
+        return {"hdr_patches_used": 0}
+    chart = {**chart, "patches": kept}
+    low = [[hdr._roi(sites, _scale_roi(p["low"]["roi_xyxy"], th, tw))] for p in kept]
+    high = [[hdr._roi(sites, _scale_roi(p["high"]["roi_xyxy"], th, tw))] for p in kept]
     res = hdr.analyse(chart, low, high, saturation_e=0.98 * saturation_e)
-    out = {"cdp_min_level_db_at_0p9": res.get("cdp_min_level_db_at_0p9")}
+    out = {"cdp_min_level_db_at_0p9": res.get("cdp_min_level_db_at_0p9"), "hdr_patches_used": len(kept)}
     for thr in (1, 10):
         m = res.get(f"min_signal_snr{thr}_e")
         out[f"dr_snr{thr}_db"] = 20 * math.log10(saturation_e / m) if m and m > 0 else float("nan")
@@ -528,7 +541,7 @@ def write_report(rows: list[dict], groups: dict, args: argparse.Namespace, timin
     ]
     for r in rows:
         md.append(
-            f"| {r['recipe']} | {r['optics']} | {r['cfa']} | {r['hdr']} | "
+            f"| {r['recipe']} | {r.get('optics', '–')} | {r.get('cfa', '–')} | {r.get('hdr', '–')} | "
             + " | ".join(_fmt(r.get(k), f) for k, _, f in METRICS)
             + " |"
         )
@@ -539,6 +552,9 @@ def write_report(rows: list[dict], groups: dict, args: argparse.Namespace, timin
         if vals:
             v, name = (min if k in lower_better else max)(vals)
             md.append(f"- {h}: **{name}** ({_fmt(v, f)})")
+    errors = [r for r in rows if r.get("error")]
+    if errors:
+        md += ["", "## Failed recipes", ""] + [f"- {r['recipe']}: `{r['error']}`" for r in errors]
     (out / "scorecard.md").write_text("\n".join(md) + "\n")
 
 
@@ -582,9 +598,24 @@ def main(argv: list[str] | None = None) -> int:
     groups = group_recipes(recipes)
     work = args.out_dir / "work"
     rows, timing = [], {"render": 0.0, "sensor": 0.0}
+    settings = {"xres": args.xres, "yres": args.yres, "pixelsamples": args.pixelsamples, "seed": args.seed}
+    settings["scenes"] = sorted(args.scenes)
+    cache_dir = work / "rows"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    def cached(r: str) -> dict | None:
+        f = cache_dir / f"{r}.json"
+        if not f.is_file():
+            return None
+        d = json.loads(f.read_text())
+        return d["row"] if d.get("settings") == settings else None
+
     hdr_render = None
     for gi, (key, g) in enumerate(groups.items()):
         print(f"[{gi + 1}/{len(groups)}] {key}: {len(g['recipes'])} recipe(s)", file=sys.stderr)
+        if all(cached(r) is not None for r in g["recipes"]):
+            rows += [cached(r) for r in g["recipes"]]
+            continue
         t0 = time.time()
         renders = {}
         for scene in args.scenes:
@@ -598,8 +629,15 @@ def main(argv: list[str] | None = None) -> int:
         timing["render"] += time.time() - t0
         t0 = time.time()
         for r in g["recipes"]:
-            row = score_recipe(r, renders, work / "sensor" / r, args.seed)
-            rows.append({"optics": key, **row})
+            row = cached(r)
+            if row is None:
+                try:
+                    row = {"optics": key, **score_recipe(r, renders, work / "sensor" / r, args.seed)}
+                    (cache_dir / f"{r}.json").write_text(json.dumps({"settings": settings, "row": row}, default=float))
+                except Exception as exc:  # one broken recipe must not lose an 85-recipe sweep
+                    traceback.print_exc()
+                    row = {"recipe": r, "optics": key, "error": f"{type(exc).__name__}: {exc}"}
+            rows.append(row)
         timing["sensor"] += time.time() - t0
     rows.sort(key=lambda r: r["recipe"])
     write_report(rows, groups, args, timing)
