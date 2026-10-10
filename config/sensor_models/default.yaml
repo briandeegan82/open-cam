@@ -103,6 +103,9 @@ cfa:
     #   0.20 px  ~0.3 % leakage per nearest-neighbour  (low-crosstalk BSI)
     #   0.30 px  ~1.5 % leakage per nearest-neighbour  (typical BSI CMOS, e.g. Sony IMX)
     #   0.50 px  ~8 %  leakage per nearest-neighbour   (older FSI / large-pitch sensors)
+    # model: silicon_diffusion replaces the fixed Gaussian with per-channel kernels from
+    # silicon absorption depth (Green 2008) and the pixel stack (docs/CARRIER_DIFFUSION.md):
+    #   architecture: bsi | fsi, epi_thickness_um, depletion_depth_um (pitch = sensor.pixel_pitch_um).
     enabled: false
     sigma_pixels: 0.30
 sensor_forward:

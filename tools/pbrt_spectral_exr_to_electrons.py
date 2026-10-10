@@ -315,6 +315,11 @@ def spectral_radiance_to_electrons(
         "optics_transmittance_mean": float(np.mean(tau_lambda)),
         "optics_transmittance_spatial": spatial_meta,
         "pixel_angular_response": par_meta,
+        # [K, C] electrons per wavelength bucket and channel, image mean (carrier-diffusion mixture).
+        "channel_spectra": {
+            "wavelength_nm": np.asarray(lam, float).tolist(),
+            "electrons": (np.mean(L, axis=(0, 1))[:, None] * weights).tolist(),
+        },
     }
     return electrons, meta
 
