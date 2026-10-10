@@ -166,3 +166,23 @@ def test_guide_image_picks_brightest_channel():
     e = np.tile(np.where(t == "C", 20.0, 5.0), (8, 8))
     img = sc.guide_image(e, lay, [0, 0, e.shape[1], e.shape[0]])
     assert img.shape == e.shape and np.allclose(img, 20.0)
+
+
+def test_add_lens_stray_light_fills_black_hole(tmp_path):
+    from exr_multispectral import read_separate_exr_channels, write_separate_channels_exr
+
+    h, w, lams = 40, 60, (450.0, 550.0, 650.0)
+    field = np.ones((h, w), np.float32)
+    field[15:25, 25:35] = 0.0
+    exr = tmp_path / "flare_spectral.exr"
+    write_separate_channels_exr(exr, {f"S0.{lam:g}nm": field for lam in lams})
+    optics = {"camera": "realistic", "lensfile": "config/lenses/dgauss.50mm.dat", "aperture_diameter_mm": 12.34}
+    cfg = {"ghosts": {"cluster_px": 20, "pupil_samples": 8, "max_sources": 1000}, "scatter": {}}
+    out, rep = sc.add_lens_stray_light(exr, optics, 2.0, cfg)
+    ch = read_separate_exr_channels(str(out))
+    assert sorted(ch) == sorted(f"S0.{lam:g}nm" for lam in lams)
+    hole = [float(ch[f"S0.{lam:g}nm"][18:22, 28:32].mean()) for lam in lams]
+    assert all(v > 0 for v in hole)
+    assert hole[0] > hole[2]  # Rayleigh-Rice scatter is bluer
+    assert 0 < rep["ghost_to_source_energy"] < 0.05
+    assert 0 < rep["scatter_tis_reference"] < 0.01
