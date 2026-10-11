@@ -72,7 +72,7 @@ lamp luminances come out at about 1.0 x 10^5 cd/m^2 (threshold zone) and 2.4 x 1
 **Predicted vs rendered.** The predictions cover direct light only. In the render, light reflected
 by the lining and daylight coming in through the portal add to them. In the small RGB renders used
 by the pbrt test, the measured road luminances are about 1.3x the prediction in the interior zone
-and about 1.6x in the threshold zone near the entrance. The exterior road is about 1.15x the
+and about 1.5-1.6x in the threshold zone near the entrance. The exterior road is about 1.15x the
 prediction, because of light reflected from the headwall and hill. The test accepts 0.9x to 1.8x
 of the prediction and +-4.5 dB on the bright/dark ratio. For radiance cameras (pinhole/thinlens)
 the EXR luminance is in cd/m^2.
