@@ -386,6 +386,12 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         default=True,
         help="Glass dispersion for realistic lenses with a <lens>.glass.yaml sidecar (needs the patched pbrt).",
     )
+    ap.add_argument(
+        "--lens-dispersion-split",
+        action="store_true",
+        help="With --lens-dispersion, trace all 4 wavelengths of each pixel sample through the lens "
+        "(about 4x render time, far less colour noise) instead of the hero wavelength only.",
+    )
     ap.add_argument("--lensfile", default=DEFAULT_REALISTIC_LENSFILE)
     ap.add_argument("--aperture-diameter-mm", type=float, default=4.0)
     ap.add_argument("--focus-distance", type=float, default=25.0, help="Focus distance [m] (realistic/thinlens).")
@@ -567,7 +573,9 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
             f' "float aperturediameter" [{_f(args.aperture_diameter_mm)}]'
             f' "float focusdistance" [{_f(args.focus_distance)}]'
         )
-        L += pbrt_camera_lines(lens, getattr(args, "lens_dispersion", True))
+        L += pbrt_camera_lines(
+            lens, getattr(args, "lens_dispersion", True), getattr(args, "lens_dispersion_split", False)
+        )
     L[-1] += fx.shutter_params()
     if atm:
         L += atm["medium_lines"]
