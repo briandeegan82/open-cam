@@ -118,6 +118,14 @@ class TestRgbPath(_EmvaCase):
         self.assertFalse(stats["adc_clipping"])
         self.assertGreater(int(raw.max()), MAX_DN)
 
+    def test_preview_wb_caps_clipped_highlights_at_neutral(self) -> None:
+        gains = np.array([0.9, 1.0, 1.6], dtype=np.float32)
+        clipped = np.full((2, 2, 3), 64.0 + 959.0, dtype=np.float32)
+        tinted = apply_emva_noise.apply_preview_wb_dn(clipped, 64.0, gains)
+        self.assertLess(tinted[0, 0, 0], tinted[0, 0, 1])
+        white = apply_emva_noise.apply_preview_wb_dn(clipped, 64.0, gains, clip_dn=959.0)
+        np.testing.assert_allclose(white - 64.0, 0.9 * 959.0, rtol=1e-6)
+
     def test_invalid_clipping_value_is_rejected(self) -> None:
         self._config(adc={"clipping": "sometimes"})
         with self.assertRaisesRegex(ValueError, "adc.clipping"):

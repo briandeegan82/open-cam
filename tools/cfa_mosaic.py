@@ -525,6 +525,21 @@ def channel_wb_gains(img: np.ndarray, method: str = "white_patch", top_pct: floa
     return ref.mean() / ref
 
 
+def clip_highlights(img: np.ndarray, gains: np.ndarray, clip_level: float | None) -> np.ndarray:
+    """Cap every channel at ``clip_level * min(gains)``, the brightest neutral the sensor can record.
+
+    A raw-clipped pixel reads ``clip_level`` in every channel, so per-channel gains (white balance, or
+    a CCM's column sums) turn it into ``clip_level * gains``: a colour cast, magenta when green has the
+    smallest gain.  Capping at the smallest gained ceiling renders clipped areas white (dcraw ``-H 0``).
+    """
+    if clip_level is None:
+        return img
+    g = np.asarray(gains, dtype=np.float64)
+    if not np.all(np.isfinite(g)) or np.min(g) <= 0.0:
+        return img
+    return np.minimum(img, float(clip_level) * float(np.min(g))).astype(np.asarray(img).dtype, copy=False)
+
+
 def render_cfa_rgb(
     dn_images: Sequence[np.ndarray],
     black_dn: float,
@@ -535,13 +550,15 @@ def render_cfa_rgb(
     ircf_csv: str | None = None,
     wb_method: str | None = "white_patch",
     reference_rgb: np.ndarray | None = None,
+    clip_dn: float | None = None,
 ) -> tuple[list[np.ndarray], dict]:
     """Demosaic raw DN mosaics and convert channels -> linear sRGB (DN scale, black re-added).
 
     ``cfa.ccm``: ``colorchecker_spectral`` (default; :func:`colorchecker_spectral_ccm`),
     ``exr_reference`` (pixel-wise least squares against the EXR's RGB, needs an unbinned
     image) or an explicit ``C x 3`` matrix.  White balance gains (fitted on the first image)
-    are applied to the channels before the CCM.
+    are applied to the channels before the CCM.  ``clip_dn`` (raw clip level above black) caps clipped
+    highlights at the brightest neutral (:func:`clip_highlights`) after white balance and after the CCM.
     """
     method = str(cfa_cfg.get("demosaic", "gradient"))
     chans = [demosaic(np.asarray(d, dtype=np.float64) - black_dn, layout, method) for d in dn_images]
@@ -550,7 +567,7 @@ def render_cfa_rgb(
     gains = np.ones(len(layout.channels))
     if wb_method:
         gains = channel_wb_gains(np.clip(chans[0], 0.0, None), wb_method)
-    chans = [c * gains[None, None, :] for c in chans]
+    chans = [clip_highlights(c * gains[None, None, :], gains, clip_dn) for c in chans]
     if isinstance(spec, (list, tuple)):
         ccm = np.asarray(spec, dtype=np.float64)
         info["ccm_source"] = "config"
@@ -568,5 +585,9 @@ def render_cfa_rgb(
         raise ValueError(f"cfa.ccm must be {len(layout.channels)}x3 for channels {layout.channels}")
     info["ccm"] = ccm.tolist()
     info["wb_gains"] = gains.tolist()
-    rgb = [np.clip(apply_channel_ccm(c, ccm), 0.0, None) + black_dn for c in chans]
+    out_clip = None if clip_dn is None else clip_dn * float(np.min(gains))
+    rgb = [
+        clip_highlights(np.clip(apply_channel_ccm(c, ccm), 0.0, None), ccm.sum(axis=0), out_clip) + black_dn
+        for c in chans
+    ]
     return [r.astype(np.float32) for r in rgb], info

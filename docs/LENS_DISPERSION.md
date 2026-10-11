@@ -62,8 +62,12 @@ its lateral colour stays below 0.5 µm in both. The n_d-only column is flat, as 
 ## Caveats
 
 - **Hero wavelength.** A dispersive lens refracts the four wavelengths of a pbrt path
-  differently, so the camera keeps only the first (`TerminateSecondary`). This adds about 2×
-  colour noise per sample compared with dispersion-free renders. RGB film output stays unbiased.
+  differently, so the camera keeps only the first (`TerminateSecondary`). Each bucket then gets
+  a quarter of the samples, and with `zsobol` the samples landing in one bucket are no longer
+  stratified over the pixel and pupil. Measured on the ColorChecker through `wide_22mm` (256 spp,
+  8×8-pixel tiles, 490–590 nm band): 8.7 % vs 2.4 % without dispersion (3.6×; 2.4× with the
+  `independent` sampler), and 4.4 % at 1024 spp. Matching a dispersion-free render takes about
+  16× the samples. The mean stays unbiased.
 - **Fixed focus and pupil.** Focus (`TraceLensesFromScene`) and the exit-pupil bounds are
   computed at n_d. The diffraction PSF uses the same focus, so both paths agree.
 - **Bucket-centre wavelength.** The Python PSF uses each bucket's centre wavelength. pbrt samples
