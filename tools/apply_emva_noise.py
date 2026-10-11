@@ -20,6 +20,7 @@ from cfa_mosaic import (
     apply_site_crosstalk,
     bin_mosaic,
     channel_parameter,
+    clip_highlights,
     qe_stack_for_layout,
     render_cfa_rgb,
     resolve_layout,
@@ -116,11 +117,25 @@ def apply_rgb_gains(rgb: np.ndarray, gains: np.ndarray) -> np.ndarray:
     return (np.asarray(rgb[:, :, :3], dtype=np.float32) * g).astype(np.float32)
 
 
-def apply_preview_wb_dn(rgb_dn: np.ndarray, black_dn: float, gains: np.ndarray) -> np.ndarray:
-    """Apply WB gains in signal domain (DN above black), preserving black pedestal."""
+def apply_preview_wb_dn(
+    rgb_dn: np.ndarray, black_dn: float, gains: np.ndarray, clip_dn: float | None = None
+) -> np.ndarray:
+    """Apply WB gains in signal domain (DN above black), preserving black pedestal.
+
+    ``clip_dn`` (raw clip level above black) caps clipped highlights at the brightest neutral, so
+    they render white instead of taking the WB gains' tint (:func:`cfa_mosaic.clip_highlights`).
+    """
     sig = np.clip(np.asarray(rgb_dn, dtype=np.float32) - float(black_dn), 0.0, None)
-    sig_wb = apply_rgb_gains(sig, gains)
+    sig_wb = clip_highlights(apply_rgb_gains(sig, gains), gains, clip_dn)
     return np.clip(sig_wb + float(black_dn), 0.0, None).astype(np.float32)
+
+
+def clip_preview_ccm_highlights(
+    rgb_dn: np.ndarray, black_dn: float, ccm: np.ndarray, clip_dn: float | None
+) -> np.ndarray:
+    """After a CCM, cap at the brightest neutral (``clip_dn`` times the CCM's smallest column sum)."""
+    sig = clip_highlights(np.asarray(rgb_dn, dtype=np.float32) - float(black_dn), np.sum(ccm, axis=0), clip_dn)
+    return (sig + float(black_dn)).astype(np.float32)
 
 
 def fit_ccm_lstsq(
@@ -1677,6 +1692,13 @@ def main() -> None:
         )
         dn_clean, dn_noisy, total_e = hdr_run.dn_clean, hdr_run.dn_noisy, hdr_run.hdr_e
         bit_depth, black_dn = hdr_run.preview_bit_depth, 0.0
+    # Raw clip level (DN above black): every channel of a clipped pixel reads it, so the preview caps
+    # white-balanced highlights there (neutral) instead of letting per-channel gains tint them.
+    highlight_clip_dn = None
+    if adc_clipping:
+        highlight_clip_dn = float((1 << bit_depth) - 1) - black_dn
+        if hdr_run is None:
+            highlight_clip_dn = min(highlight_clip_dn, full_well_e / K_e_per_DN)
 
     if bayer_on or cfa_layout is not None:
         raw_u16 = np.rint(dn_noisy).astype(np.uint16)
@@ -1700,8 +1722,8 @@ def main() -> None:
     if wb_enabled and not bayer_on and cfa_layout is None:
         _wb_src = np.clip(dn_clean - black_dn, 0.0, None)
         wb_gains = white_patch_gains(_wb_src) if wb_method == "white_patch" else gray_world_gains(_wb_src)
-        dn_clean = apply_preview_wb_dn(dn_clean, black_dn, wb_gains)
-        dn_noisy = apply_preview_wb_dn(dn_noisy, black_dn, wb_gains)
+        dn_clean = apply_preview_wb_dn(dn_clean, black_dn, wb_gains, highlight_clip_dn)
+        dn_noisy = apply_preview_wb_dn(dn_noisy, black_dn, wb_gains, highlight_clip_dn)
     if (
         ccm_enabled
         and not bayer_on
@@ -1712,6 +1734,10 @@ def main() -> None:
         ccm = fit_preview_ccm(dn_clean, ref_linear, black_dn, ccm_method)
         dn_clean = apply_preview_ccm_dn(dn_clean, black_dn, ccm)
         dn_noisy = apply_preview_ccm_dn(dn_noisy, black_dn, ccm)
+        if highlight_clip_dn is not None:
+            _ccm_clip = highlight_clip_dn * float(np.min(wb_gains))
+            dn_clean = clip_preview_ccm_highlights(dn_clean, black_dn, ccm, _ccm_clip)
+            dn_noisy = clip_preview_ccm_highlights(dn_noisy, black_dn, ccm, _ccm_clip)
         ccm_source = ccm_method
 
     preview_no_normalize = bool(args.preview_no_normalize)
@@ -1740,12 +1766,16 @@ def main() -> None:
         if wb_enabled:
             _wb_src = np.clip(dn_clean_rgb - black_dn, 0.0, None)
             wb_gains = white_patch_gains(_wb_src) if wb_method == "white_patch" else gray_world_gains(_wb_src)
-            dn_clean_rgb = apply_preview_wb_dn(dn_clean_rgb, black_dn, wb_gains)
-            dn_noisy_rgb = apply_preview_wb_dn(dn_noisy_rgb, black_dn, wb_gains)
+        dn_clean_rgb = apply_preview_wb_dn(dn_clean_rgb, black_dn, wb_gains, highlight_clip_dn)
+        dn_noisy_rgb = apply_preview_wb_dn(dn_noisy_rgb, black_dn, wb_gains, highlight_clip_dn)
         if ccm_enabled and ref_linear is not None and ref_linear.shape == dn_clean_rgb.shape:
             ccm = fit_preview_ccm(dn_clean_rgb, ref_linear, black_dn, ccm_method)
             dn_clean_rgb = apply_preview_ccm_dn(dn_clean_rgb, black_dn, ccm)
             dn_noisy_rgb = apply_preview_ccm_dn(dn_noisy_rgb, black_dn, ccm)
+            if highlight_clip_dn is not None:
+                _ccm_clip = highlight_clip_dn * float(np.min(wb_gains))
+                dn_clean_rgb = clip_preview_ccm_highlights(dn_clean_rgb, black_dn, ccm, _ccm_clip)
+                dn_noisy_rgb = clip_preview_ccm_highlights(dn_noisy_rgb, black_dn, ccm, _ccm_clip)
             ccm_source = ccm_method
         pw_d_clean = None if preview_no_normalize else float(np.percentile(dn_clean_rgb, args.preview_percentile))
         pw_d_noisy = None if preview_no_normalize else float(np.percentile(dn_noisy_rgb, args.preview_percentile))
@@ -1791,6 +1821,7 @@ def main() -> None:
                 ircf_csv=_cfa_ircf,
                 wb_method=wb_method if wb_enabled else None,
                 reference_rgb=ref_linear if cfa_binning == "none" else None,
+                clip_dn=highlight_clip_dn,
             )
             cfa_stats.update(_cfa_info)
             for _name, _img in zip(("clean", "noisy"), _cfa_rgb, strict=True):

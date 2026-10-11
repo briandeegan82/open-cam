@@ -186,3 +186,14 @@ def test_add_lens_stray_light_fills_black_hole(tmp_path):
     assert hole[0] > hole[2]  # Rayleigh-Rice scatter is bluer
     assert 0 < rep["ghost_to_source_energy"] < 0.05
     assert 0 < rep["scatter_tis_reference"] < 0.01
+
+
+def test_to_srgb_linear_keeps_clipped_highlights_white():
+    lay = sc.cm.resolve_layout({"layout": "GBRG"})
+    e = np.tile(np.array([[500.0, 300.0], [250.0, 500.0]]), (8, 8))  # G brightest on the white patch
+    e[4:12, 4:12] = 9500.0  # raw-clipped highlight
+    ccm = np.eye(3)[[1, 2, 0]]  # channels (G, B, R) -> RGB
+    tinted = sc.to_srgb_linear(e, lay, ccm, [0, 0, 4, 4])[7, 7]
+    assert tinted[1] < tinted[0] and tinted[1] < tinted[2]  # magenta without a highlight stage
+    white = sc.to_srgb_linear(e, lay, ccm, [0, 0, 4, 4], clip_e=9500.0)[7, 7]
+    np.testing.assert_allclose(white, white[1])

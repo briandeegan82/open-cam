@@ -256,3 +256,28 @@ def test_spatial_transmission_map_supports_c_channels() -> None:
         4, 6, {"enabled": False}, repo=REPO, wavelength_nm=np.arange(3.0), qe_rgb=np.ones((5, 3))
     )
     assert m.shape == (4, 6, 5)
+
+
+def test_clip_highlights_renders_clipped_pixels_neutral() -> None:
+    gains = np.array([1.3, 0.8, 1.2])
+    clipped = np.full((2, 2, 3), 1000.0) * gains  # raw-clipped in every channel, then white-balanced
+    out = cm.clip_highlights(clipped, gains, 1000.0)
+    np.testing.assert_allclose(out, 800.0)
+    mid = np.array([[[100.0, 200.0, 300.0]]])
+    np.testing.assert_array_equal(cm.clip_highlights(mid, gains, 1000.0), mid)
+    np.testing.assert_array_equal(cm.clip_highlights(clipped, gains, None), clipped)
+
+
+def test_render_cfa_rgb_keeps_clipped_highlights_white() -> None:
+    lay = cm.resolve_layout({"layout": "RGGB"})
+    black, clip = 64.0, 959.0
+    raw = np.full((16, 16), black + 300.0)
+    raw[::2, ::2] = black + 200.0  # tinted scene: R and B below G
+    raw[1::2, 1::2] = black + 250.0
+    raw[4:12, 4:12] = black + clip  # clipped highlight: every site at the raw ceiling
+    for clip_dn, neutral in ((None, False), (clip, True)):
+        (rgb,), _ = cm.render_cfa_rgb(
+            [raw], black, lay, repo=REPO, cfa_cfg={"demosaic": "bilinear"}, wb_method="gray_world", clip_dn=clip_dn
+        )
+        hi = rgb[7, 7] - black
+        assert bool(np.ptp(hi) < 1e-6 * hi.max()) is neutral

@@ -420,14 +420,23 @@ def render_shape(render: dict) -> tuple[int, int]:
     return tuple(render["shape"])
 
 
-def to_srgb_linear(e: np.ndarray, layout: cm.CfaLayout, ccm: np.ndarray, white_roi: list[int] | None) -> np.ndarray:
-    """Demosaic, white-balance on ``white_roi`` (per-channel gains), then the recipe CCM."""
+def to_srgb_linear(
+    e: np.ndarray, layout: cm.CfaLayout, ccm: np.ndarray, white_roi: list[int] | None, clip_e: float | None = None
+) -> np.ndarray:
+    """Demosaic, white-balance on ``white_roi`` (per-channel gains), then the recipe CCM.
+
+    ``clip_e`` (the raw clip level) caps clipped highlights at the brightest neutral after white balance
+    and after the CCM, so they come out white rather than tinted by the gains (magenta)."""
     chans = cm.demosaic(np.clip(e, 0.0, None), layout, "gradient")
+    gains = np.ones(chans.shape[2])
     if white_roi is not None:
         x0, y0, x1, y1 = white_roi
         w = chans[y0:y1, x0:x1].reshape(-1, chans.shape[2]).mean(axis=0)
-        chans = chans * (w.mean() / np.maximum(w, 1e-12))
-    return cm.apply_channel_ccm(chans, ccm)
+        gains = w.mean() / np.maximum(w, 1e-12)
+        chans = chans * gains
+    chans = cm.clip_highlights(chans, gains, clip_e)
+    out_clip = None if clip_e is None else clip_e * float(np.min(gains))
+    return cm.clip_highlights(cm.apply_channel_ccm(chans, ccm), np.sum(ccm, axis=0), out_clip)
 
 
 def white_signal_e(e: np.ndarray, layout: cm.CfaLayout, roi: list[int]) -> float:
@@ -666,9 +675,11 @@ def score_recipe(recipe: str, renders: dict, tmp: Path, seed: int, images: dict 
                 sens = run_sensor(recipe, render, tmp / scene, seed=seed, exposure_scale=k * ratio)
         row[f"{scene}_white_e"] = white_e(sens["e"]) if white else None
 
-        def rgb_of(e: np.ndarray, white=white, shape=shape) -> np.ndarray:
+        clip_e = arch.max_reference_e if "hdr" in sens["stats"] else saturation_e(sens["stats"])
+
+        def rgb_of(e: np.ndarray, white=white, shape=shape, clip_e=clip_e) -> np.ndarray:
             lay_s, b = binned_layout(layout, e.shape, shape)
-            rgb = to_srgb_linear(e, lay_s, ccm, _scale_roi(white, b, b) if white else None)
+            rgb = to_srgb_linear(e, lay_s, ccm, _scale_roi(white, b, b) if white else None, clip_e)
             if rgb.shape[:2] != shape:
                 rgb = ndimage.zoom(rgb, (shape[0] / rgb.shape[0], shape[1] / rgb.shape[1], 1), order=1)
             return rgb
