@@ -421,19 +421,28 @@ def render_shape(render: dict) -> tuple[int, int]:
 
 
 def to_srgb_linear(
-    e: np.ndarray, layout: cm.CfaLayout, ccm: np.ndarray, white_roi: list[int] | None, clip_e: float | None = None
+    e: np.ndarray,
+    layout: cm.CfaLayout,
+    ccm: np.ndarray,
+    white_roi: list[int] | None,
+    clip_e: float | None = None,
+    gains: np.ndarray | None = None,
 ) -> np.ndarray:
-    """Demosaic, white-balance on ``white_roi`` (per-channel gains), then the recipe CCM.
+    """Demosaic, white-balance on ``white_roi`` (or fixed per-channel ``gains``), then the recipe CCM.
 
     ``clip_e`` (the raw clip level) caps clipped highlights at the brightest neutral after white balance
     and after the CCM, so they come out white rather than tinted by the gains (magenta)."""
     chans = cm.demosaic(np.clip(e, 0.0, None), layout, "gradient")
-    gains = np.ones(chans.shape[2])
-    if white_roi is not None:
+    if gains is not None:
+        gains = np.asarray(gains, dtype=np.float64)
+        chans = chans * gains
+    elif white_roi is not None:
         x0, y0, x1, y1 = white_roi
         w = chans[y0:y1, x0:x1].reshape(-1, chans.shape[2]).mean(axis=0)
         gains = w.mean() / np.maximum(w, 1e-12)
         chans = chans * gains
+    else:
+        gains = np.ones(chans.shape[2])
     chans = cm.clip_highlights(chans, gains, clip_e)
     out_clip = None if clip_e is None else clip_e * float(np.min(gains))
     return cm.clip_highlights(cm.apply_channel_ccm(chans, ccm), np.sum(ccm, axis=0), out_clip)

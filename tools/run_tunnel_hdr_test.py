@@ -180,8 +180,7 @@ def run_recipe(recipe: str, renders: dict, tmp: Path, seed: int, previews: Path 
         }
         if previews is not None:
             lay, _ = sc.binned_layout(layout, sens["e"].shape, render["shape"])
-            chans = sc.cm.demosaic(np.clip(sens["e"], 0, None), lay, "gradient")
-            rgb = sc.cm.apply_channel_ccm(sc.cm.clip_highlights(chans * gains, gains, sat), ccm)
+            rgb = np.clip(sc.to_srgb_linear(sens["e"], lay, ccm, None, sat, gains=gains), 0.0, None)
             white = sat * float(np.min(gains))
             img = tonemap(rgb, white) if is_hdr else np.clip(rgb / white, 0, 1)
             save_png(img, previews / f"{view}_{label.replace('@', '_')}.png")

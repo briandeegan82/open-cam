@@ -323,10 +323,13 @@ def demosaic_gradient(raw: np.ndarray, layout: CfaLayout, guide: int | None = No
        direction (interpolate *along* edges, Adams & Hamilton 1997); isotropic bilinear is used
        where a directional estimate has no support.
     2. Other channels: interpolate ``c - g`` on the sites of ``c`` (constant colour difference,
-       Cok 1987) and add the full-resolution guide back.
+       Cok 1987) and add the full-resolution guide back.  At hard edges the colour difference
+       taken on the bright side can push ``c`` far outside its neighbours (negative next to a
+       bright lamp, which a CCM turns into saturated green), so each interpolated ``c`` is clamped
+       to the range of the measured ``c`` samples under the interpolation tent.
     Measured samples are preserved exactly.
     """
-    from scipy.ndimage import convolve1d  # noqa: PLC0415
+    from scipy.ndimage import convolve1d, maximum_filter, minimum_filter  # noqa: PLC0415
 
     x = np.asarray(raw, dtype=np.float64)
     idx = layout.site_index(*x.shape)
@@ -359,8 +362,20 @@ def demosaic_gradient(raw: np.ndarray, layout: CfaLayout, guide: int | None = No
             out[:, :, i] = g
             continue
         mask = idx == i
-        num, den = _normconv(x - g, mask, _tent(*_coverage_radius(layout, i)))
+        ry_c, rx_c = _coverage_radius(layout, i)
+        num, den = _normconv(x - g, mask, _tent(ry_c, rx_c))
         plane = g + num / np.maximum(den, 1e-12)
+        lo = np.full(x.shape, np.inf)
+        hi = np.full(x.shape, -np.inf)
+        for grow in range(8):  # widen where a pixel has no own sample, as _normconv does
+            size = (2 * ry_c - 1 + 2 * grow, 2 * rx_c - 1 + 2 * grow)
+            todo = ~np.isfinite(lo)
+            lo[todo] = minimum_filter(np.where(mask, x, np.inf), size=size, mode="constant", cval=np.inf)[todo]
+            hi[todo] = maximum_filter(np.where(mask, x, -np.inf), size=size, mode="constant", cval=-np.inf)[todo]
+            if np.isfinite(lo).all():
+                break
+        has = np.isfinite(lo)
+        plane[has] = np.clip(plane[has], lo[has], hi[has])
         plane[mask] = x[mask]
         out[:, :, i] = plane
     return out.astype(np.float32)

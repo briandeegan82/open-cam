@@ -192,6 +192,21 @@ def test_gradient_demosaic_beats_bilinear_on_edges() -> None:
     assert e_grad < 0.5 * e_bil
 
 
+@pytest.mark.parametrize("layout", LAYOUTS, ids=str)
+def test_gradient_demosaic_does_not_overshoot_hard_edges(layout) -> None:
+    """A 2-px lamp line at 100x its background must not drive a channel below its neighbours
+    (the colour difference from the bright side used to go negative -> saturated green after a CCM)."""
+    lay = cm.resolve_layout({"layout": layout})
+    img = np.full((32, 32, len(lay.channels)), 100.0)
+    img[:, 15:17] = 1.0e4
+    img[20:, :] = 1.0e4
+    raw = cm.mosaic(img, lay)
+    out = cm.demosaic_gradient(raw, lay)
+    assert np.allclose(cm.mosaic(out, lay), raw)
+    assert out.min() >= 100.0 - 1e-3
+    assert out.max() <= 1.0e4 + 1e-3
+
+
 def test_site_crosstalk_conserves_charge_and_routes_by_source() -> None:
     lay = cm.resolve_layout({"layout": "RCCB"})
     raw = np.zeros((20, 20), dtype=np.float32)
