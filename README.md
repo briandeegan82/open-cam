@@ -263,6 +263,8 @@ venv/bin/python tools/validate_emva_model.py \
 Spectral highway scene for ADAS-style renders: road with markings, CC0 cars, barriers, signs,
 vegetation, and an absolutely calibrated sun + sky. Large assets are fetched on demand
 (pinned URLs + checksums, gitignored cache); see `docs/HIGHWAY_SCENES.md`.
+A road-tunnel HDR test (camera outside looking in, and inside looking out) reuses the same road,
+sun/sky and materials without downloaded assets; see `docs/TUNNEL_SCENES.md`.
 
 ```bash
 venv/bin/python tools/fetch_highway_assets.py
@@ -280,6 +282,7 @@ glare, and skin-tone ΔE00 / ITA. Overview and metric definitions: [`docs/IQ_LAB
 | Test | Scene builder | Runner / scorer | Docs |
 |---|---|---|---|
 | HDR dynamic range (120 dB emissive chart, SNR / DR / CDP) | `tools/build_hdr_dr_chart.py` | `tools/run_hdr_dr_test.py` | [`docs/IQ_LAB_HDR.md`](docs/IQ_LAB_HDR.md) |
+| Road-tunnel HDR (black hole / white hole, per-ROI SNR / clipping / contrast) | `tools/build_tunnel_scene.py` | `tools/run_tunnel_hdr_test.py` | [`docs/TUNNEL_SCENES.md`](docs/TUNNEL_SCENES.md) |
 | Lens flare / veiling glare (ISO 18844-style black holes, point-source sweep) | `tools/build_flare_test_scene.py` | `tools/run_flare_test.py` | [`docs/IQ_LAB_FLARE.md`](docs/IQ_LAB_FLARE.md) |
 | Skin tones (melanin series, 4 illuminants) | `tools/build_skin_tone_chart.py` | `tools/run_skin_tone_test.py` | [`docs/IQ_LAB_SKIN.md`](docs/IQ_LAB_SKIN.md) |
 | Tabletop diorama (charts, dead leaves, star, edge, spheres, window + lamp) | `tools/build_iq_diorama.py` | `iqlab` on the `diorama.json` ROIs | [`docs/IQ_LAB_DIORAMA.md`](docs/IQ_LAB_DIORAMA.md) |
@@ -323,6 +326,7 @@ venv/bin/python tools/munsell_mat_to_sqlite.py --summary
 - `cfa.demosaic` implements bilinear and Malvar-He-Cutler reconstruction for the legacy 2x2 Bayer path (`cfa.pattern`). The opt-in generic CFA path (`cfa.layout`: RGBW, RCCB, RYYCy, RCCG, Quad Bayer, custom NxM, per-channel spectral QE) uses per-channel normalised-convolution bilinear or guide-channel gradient demosaicing, not a learned/edge-directed state-of-the-art demosaic; Quad Bayer remosaic is a nearest-site rearrangement. See [docs/CFA_NIR.md](docs/CFA_NIR.md).
 - NIR / no-IRCF: stock pbrt-v4 renders 360-830 nm; 850/940 nm needs the opt-in NIR pbrt build (`PBRT_LAMBDA_MAX_NM=1100`, patch 0002). NIR QE curves beyond the measured ~700 nm are a Si absorption model (Green 2008) with an assumed IR-transparent colour filter; ColorChecker and most material reflectances are measured only to 730 nm and held constant beyond (pbrt extrapolation). See [docs/CFA_NIR.md](docs/CFA_NIR.md).
 - Highway wet road (`--road-wetness`, `--puddles`, `--spray`): flat puddles, no raindrops/ripples on the road, spray density scaling partly assumed; see `docs/HIGHWAY_SCENES.md`.
+- Tunnel HDR scene: Lambertian asphalt, a step from the threshold to the interior zone (no transition or exit-zone lighting), luminaires solved for direct road luminance only and box proxy cars; luminance levels follow cited summaries of the CIE 88 zone definitions, not the standard itself (see docs/TUNNEL_SCENES.md).
 - Post-PSF modes `gaussian`/`chromatic_gaussian`/`airy_disk` are simple approximations, not derived from a lens. The opt-in `lens_diffraction` mode (`tools/lens_diffraction_psf.py`) computes field- and wavelength-dependent diffraction PSFs from a traced prescription (FFT of the traced, vignetted pupil; Goodman, *Introduction to Fourier Optics*), glass dispersion (chromatic aberration) is modelled only for lenses with a glass sidecar (`dgauss.50mm`, `wide_22mm`; the wide-angle glasses are inferred from n_d) and costs hero-wavelength colour noise in pbrt (see [`docs/LENS_DISPERSION.md`](docs/LENS_DISPERSION.md)), even-asphere surfaces are traced from a `.asphere.yaml` sidecar (the US 8,390,940 B2 phone lens `phone_6p_2.97mm`; see [`docs/LENS_ASPHERE.md`](docs/LENS_ASPHERE.md)), diffraction is added to pbrt's geometric blur as a product of MTFs (exact only in the diffraction- and geometric-limited regimes), and polarisation, coatings, scatter and ghosts are not modelled. See `docs/LENS_MODELS.txt` (Diffraction).
 - PBRT spectral sampling remains Monte Carlo based; use validation and repeated runs for sensitive comparisons.
 - Per-wavelength-bucket images share pbrt's 4 hero wavelengths (stride (λmax−λmin)/4), so per-bucket metrics carry periodic Monte Carlo noise, and in our tests changing only `pbrt --seed` left the output unchanged, for reasons not yet understood (set the in-scene `"integer seed"` to vary it); see [`docs/SFR_SPECTRAL_RIPPLE.md`](docs/SFR_SPECTRAL_RIPPLE.md).

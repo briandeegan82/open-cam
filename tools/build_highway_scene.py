@@ -344,6 +344,90 @@ def vegetation_object(name: str, info: dict, raw_dir: Path, out_dir: Path) -> li
     return out
 
 
+def add_camera_args(ap: argparse.ArgumentParser, fov: float = 31.0, focus_distance: float = 25.0) -> None:
+    """Camera / lens options shared with the other road-scene builders (tools/build_tunnel_scene.py)."""
+    ap.add_argument("--camera", choices=("perspective", "pinhole", "thinlens", "realistic"), default="pinhole")
+    ap.add_argument(
+        "--lens-dispersion",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Glass dispersion for realistic lenses with a <lens>.glass.yaml sidecar (needs the patched pbrt).",
+    )
+    ap.add_argument(
+        "--lens-dispersion-split",
+        action="store_true",
+        help="With --lens-dispersion, trace all 4 wavelengths of each pixel sample through the lens "
+        "(about 4x render time, far less colour noise) instead of the hero wavelength only.",
+    )
+    ap.add_argument("--lensfile", default=DEFAULT_REALISTIC_LENSFILE)
+    ap.add_argument("--aperture-diameter-mm", type=float, default=4.0)
+    ap.add_argument(
+        "--focus-distance", type=float, default=focus_distance, help="Focus distance [m] (realistic/thinlens)."
+    )
+    ap.add_argument("--film-diagonal-mm", type=float, default=25.0, help="Realistic camera film diagonal.")
+    ap.add_argument("--fov", type=float, default=fov, help="Pinhole/thinlens fov [deg] (shorter image axis).")
+    ap.add_argument("--thinlens-lens-radius", type=float, default=0.0)
+
+
+def add_film_args(ap: argparse.ArgumentParser, *, xres: int, yres: int, pixelsamples: int) -> None:
+    ap.add_argument("--xres", type=int, default=xres)
+    ap.add_argument("--yres", type=int, default=yres)
+    ap.add_argument("--pixelsamples", type=int, default=pixelsamples)
+    ap.add_argument("--film", choices=("spectral", "rgb"), default="spectral")
+    ap.add_argument("--spectral-nbuckets", type=int, default=16)
+    ap.add_argument("--spectral-lambda-min", type=float, default=360.0)
+    ap.add_argument("--spectral-lambda-max", type=float, default=830.0)
+    ap.add_argument("--step-nm", type=float, default=5.0)
+
+
+def film_lines(args: argparse.Namespace, film_out: str) -> list[str]:
+    film = [
+        f'Film "{args.film}"',
+        f'    "string filename" ["{film_out}"]',
+        f'    "integer xresolution" [{args.xres}]',
+        f'    "integer yresolution" [{args.yres}]',
+        '    "bool savefp16" false',
+    ]
+    if args.film == "spectral":
+        film += [
+            f'    "integer nbuckets" [{args.spectral_nbuckets}]',
+            f'    "float lambdamin" [{_f(args.spectral_lambda_min)}]',
+            f'    "float lambdamax" [{_f(args.spectral_lambda_max)}]',
+        ]
+    if args.camera == "realistic":
+        film.append(f'    "float diagonal" [{_f(args.film_diagonal_mm)}]')
+    return film
+
+
+def camera_lines(args: argparse.Namespace, repo: Path, out_dir: Path) -> list[str]:
+    """The pbrt ``Camera`` statement (plus lens-glass dispersion lines for ``realistic``)."""
+    camera_kind = "pinhole" if args.camera == "perspective" else args.camera
+    if camera_kind == "pinhole":
+        return [f'Camera "perspective" "float fov" [{_f(args.fov)}]']
+    if camera_kind == "thinlens":
+        return [
+            f'Camera "perspective" "float fov" [{_f(args.fov)}] "float lensradius" [{_f(args.thinlens_lens_radius)}]'
+            f' "float focaldistance" [{_f(args.focus_distance)}]'
+        ]
+    lens = (repo / args.lensfile).resolve()
+    if not lens.is_file():
+        raise FileNotFoundError(f"realistic camera: lens file not found: {lens}")
+    return [
+        f'Camera "realistic" "string lensfile" ["{os.path.relpath(lens, out_dir)}"]'
+        f' "float aperturediameter" [{_f(args.aperture_diameter_mm)}]'
+        f' "float focusdistance" [{_f(args.focus_distance)}]',
+        *pbrt_camera_lines(lens, getattr(args, "lens_dispersion", True), getattr(args, "lens_dispersion_split", False)),
+    ]
+
+
+def sun_world(sun_l: np.ndarray, sun_azimuth: float) -> tuple[float, np.ndarray]:
+    """Sky-map rotation [deg] about +y and world sun direction for a sky-map sun direction ``sun_l``."""
+    s0 = rot_x(-90.0) @ sun_l
+    az0 = math.degrees(math.atan2(s0[0], s0[2]))
+    sky_rot = sun_azimuth - az0
+    return sky_rot, rot_y(sky_rot) @ s0
+
+
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     root = Path(__file__).resolve().parents[1]
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -379,38 +463,13 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     ap.add_argument(
         "--seed", type=int, default=None, help="Scene-variety seed (tools/highway_variety.py); default: fixed scene."
     )
-    ap.add_argument("--camera", choices=("perspective", "pinhole", "thinlens", "realistic"), default="pinhole")
-    ap.add_argument(
-        "--lens-dispersion",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Glass dispersion for realistic lenses with a <lens>.glass.yaml sidecar (needs the patched pbrt).",
-    )
-    ap.add_argument(
-        "--lens-dispersion-split",
-        action="store_true",
-        help="With --lens-dispersion, trace all 4 wavelengths of each pixel sample through the lens "
-        "(about 4x render time, far less colour noise) instead of the hero wavelength only.",
-    )
-    ap.add_argument("--lensfile", default=DEFAULT_REALISTIC_LENSFILE)
-    ap.add_argument("--aperture-diameter-mm", type=float, default=4.0)
-    ap.add_argument("--focus-distance", type=float, default=25.0, help="Focus distance [m] (realistic/thinlens).")
-    ap.add_argument("--film-diagonal-mm", type=float, default=25.0, help="Realistic camera film diagonal.")
-    ap.add_argument("--fov", type=float, default=31.0, help="Pinhole/thinlens fov [deg] (shorter image axis).")
-    ap.add_argument("--thinlens-lens-radius", type=float, default=0.0)
+    add_camera_args(ap)
     ap.add_argument("--cam-height", type=float, default=1.35, help="Camera height above the road [m].")
     ap.add_argument("--cam-lane", type=int, default=1, help="Ego lane (0 = leftmost).")
     ap.add_argument("--cam-pitch", type=float, default=-1.5, help="Camera pitch [deg], negative = down.")
-    ap.add_argument("--xres", type=int, default=1280)
-    ap.add_argument("--yres", type=int, default=720)
-    ap.add_argument("--pixelsamples", type=int, default=256)
+    add_film_args(ap, xres=1280, yres=720, pixelsamples=256)
     ap.add_argument("--maxdepth", type=int, default=8)
-    ap.add_argument("--film", choices=("spectral", "rgb"), default="spectral")
     ap.add_argument("--film-output", default=None, help="default: out/highway_spectral.exr (or out/highway.exr)")
-    ap.add_argument("--spectral-nbuckets", type=int, default=16)
-    ap.add_argument("--spectral-lambda-min", type=float, default=360.0)
-    ap.add_argument("--spectral-lambda-max", type=float, default=830.0)
-    ap.add_argument("--step-nm", type=float, default=5.0)
     night.add_night_args(ap)
     atmosphere.add_cli_args(ap)
     backdrop.add_cli_args(ap)
@@ -485,11 +544,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
     sky_light = spectral_sky_light(args, sky_file, elev, out_dir, spd)
     if sky_light is not None:
         sky_file, sky_desc = sky_light["file"], sky_light["description"]
-    to_world = rot_x(-90.0)
-    s0 = to_world @ sun_l
-    az0 = math.degrees(math.atan2(s0[0], s0[2]))
-    sky_rot = args.sun_azimuth - az0
-    sun_w = rot_y(sky_rot) @ s0
+    sky_rot, sun_w = sun_world(sun_l, args.sun_azimuth)
     e_dn, e_diffuse = clear_sky_illuminance_lux(elev)
     sin_el = max(math.sin(math.radians(elev)), 1e-3)
     e_sky_h = sky_ratio * e_dn * sin_el if sky_ratio is not None else e_diffuse
@@ -520,22 +575,8 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
 
     # ---- film & camera
     film_out = args.film_output or ("out/highway_spectral.exr" if args.film == "spectral" else "out/highway.exr")
-    film = [
-        f'Film "{args.film}"',
-        f'    "string filename" ["{film_out}"]',
-        f'    "integer xresolution" [{args.xres}]',
-        f'    "integer yresolution" [{args.yres}]',
-        '    "bool savefp16" false',
-    ]
-    if args.film == "spectral":
-        film += [
-            f'    "integer nbuckets" [{args.spectral_nbuckets}]',
-            f'    "float lambdamin" [{_f(args.spectral_lambda_min)}]',
-            f'    "float lambdamax" [{_f(args.spectral_lambda_max)}]',
-        ]
+    film = film_lines(args, film_out)
     camera_kind = "pinhole" if args.camera == "perspective" else args.camera
-    if camera_kind == "realistic":
-        film.append(f'    "float diagonal" [{_f(args.film_diagonal_mm)}]')
     cam_x = Layout.lane_center(args.cam_lane)
     eye = np.array([cam_x, args.cam_height, 0.0])
     target = eye + 100.0 * np.array([0.0, math.tan(math.radians(args.cam_pitch)), 1.0])
@@ -557,25 +598,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         *fx.camera_transform_lines(eye, target),
         *(atm["camera_lines"] if atm else []),
     ]
-    if camera_kind == "pinhole":
-        L.append(f'Camera "perspective" "float fov" [{_f(args.fov)}]')
-    elif camera_kind == "thinlens":
-        L.append(
-            f'Camera "perspective" "float fov" [{_f(args.fov)}] "float lensradius" [{_f(args.thinlens_lens_radius)}]'
-            f' "float focaldistance" [{_f(args.focus_distance)}]'
-        )
-    else:
-        lens = (repo / args.lensfile).resolve()
-        if not lens.is_file():
-            raise FileNotFoundError(f"realistic camera: lens file not found: {lens}")
-        L.append(
-            f'Camera "realistic" "string lensfile" ["{os.path.relpath(lens, out_dir)}"]'
-            f' "float aperturediameter" [{_f(args.aperture_diameter_mm)}]'
-            f' "float focusdistance" [{_f(args.focus_distance)}]'
-        )
-        L += pbrt_camera_lines(
-            lens, getattr(args, "lens_dispersion", True), getattr(args, "lens_dispersion_split", False)
-        )
+    L += camera_lines(args, repo, out_dir)
     L[-1] += fx.shutter_params()
     if atm:
         L += atm["medium_lines"]
