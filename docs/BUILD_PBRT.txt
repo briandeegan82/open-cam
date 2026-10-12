@@ -20,6 +20,12 @@ Patches:
   entrance), "float lobewidth" [deg] (exponential fall-off with observation angle) and
   "float entranceexponent" (q: R_A ~ (cos b_i cos b_o)^(q/2)). Used by the night/dusk
   highway scenes (tools/highway_night.py, docs/HIGHWAY_SCENES.md).
+- 0006-spectral-film-jittered-wavelengths.patch: the spectral film draws its 4 hero
+  wavelengths one per stratum of (lambdamax - lambdamin)/4, each jittered independently
+  (SampledWavelengths::SampleUniformJittered). Stock pbrt shifts all four by the same
+  offset, so buckets one stratum apart got identical paths and per-bucket metrics showed a
+  periodic ripple (docs/SFR_SPECTRAL_RIPPLE.md). Same cost and expectation; Film "spectral"
+  "bool jitterwavelengths" false restores stock sampling.
 - pbrt-v4-spectral-basis-infinite-light.patch: an "infinite" light may give both
   "filename" and n "L" spectra; the equal-area image then has channels B0..B{n-1}, each
   a per-pixel luminance weight of the corresponding (unit-luminance-normalised) spectrum,

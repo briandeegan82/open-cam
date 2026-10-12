@@ -316,7 +316,7 @@ def render_scene(scene: str, optics: dict, out: Path, xres: int, yres: int, spp:
     if scene == "diorama":
         # Second render with another sampler seed: the twin capture then differs in MC noise too,
         # so the texture metric's noise PSD removes render noise as well as sensor noise.
-        # pbrt's --seed leaves the image unchanged (README), so set the sampler's in-scene seed.
+        # Second, independent render: an in-scene sampler seed (equivalent to pbrt --seed 1).
         twin = out / f"{Path(film).stem}_seed1{Path(film).suffix}"
         seeded = scene_file.with_name(scene_file.stem + "_seed1.pbrt")
         text, n = re.subn(r'(Sampler "\w+")', r'\1 "integer seed" [1]', scene_file.read_text(), count=1)

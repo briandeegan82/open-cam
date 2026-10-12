@@ -312,7 +312,6 @@ def emit_hue_scene(
         f"# Hue group: {group.label}",
         f"# Film: {film_type} -> {film_filename}",
         'Option "disablepixeljitter" false',
-        'Option "seed" 0',
         "",
         'ColorSpace "srgb"',
         "",
