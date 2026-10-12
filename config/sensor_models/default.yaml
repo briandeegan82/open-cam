@@ -9,6 +9,12 @@ sensor:
   integration_time_s: 0.01
   f_number: 2.0
   fill_factor: 0.95
+  # Optical low-pass (birefringent anti-aliasing) filter, opt-in (tools/olpf.py, docs/OLPF.md).
+  # Four-spot split: give split_pixels (both axes), split_x_um / split_y_um, or quartz plate
+  # thickness_x_um / thickness_y_um (dispersive walk-off, ~5.9 um split per mm of 45-deg quartz).
+  olpf:
+    enabled: false
+    split_pixels: 1.0
 noise:
   emva:
     overall_system_gain_K_e_per_DN: 4.77

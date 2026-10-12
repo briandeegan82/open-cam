@@ -24,6 +24,7 @@ from camera_model import (
     sensor_forward_config_from_camera_model,
 )
 from exr_multispectral import spectral_buckets_from_exr, trapezoid_weights_nm
+from olpf import apply_cube as apply_olpf_cube
 from pixel_angular_response import apply_pixel_angular_response, pixel_angular_response_cfg
 from qe_curves import load_qe_curves_rgb, read_csv_curve
 from sensor_radiometry import integrate_spectral_planes, spectral_electron_weights
@@ -189,6 +190,8 @@ def spectral_radiance_to_electrons(
     irradiance) the π/(4N²(1+m)²) factor is not applied again.
     """
     scene = scene or {}
+    # Optical low-pass filter in front of the sensor (sensor.olpf, opt-in): spatial, per wavelength.
+    L, olpf_meta = apply_olpf_cube(L, lambdas_nm, sensor)
     exr_is_irradiance = scene.get("exr_quantity") == "irradiance"
     cal = model.get("calibration", {}) or {}
     pbrt_cfg = model.get("pbrt_spectral_exr", {}) or {}
@@ -315,6 +318,7 @@ def spectral_radiance_to_electrons(
         "optics_transmittance_mean": float(np.mean(tau_lambda)),
         "optics_transmittance_spatial": spatial_meta,
         "pixel_angular_response": par_meta,
+        "olpf": olpf_meta,
         # [K, C] electrons per wavelength bucket and channel, image mean (carrier-diffusion mixture).
         "channel_spectra": {
             "wavelength_nm": np.asarray(lam, float).tolist(),
