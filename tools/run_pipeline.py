@@ -262,6 +262,8 @@ def main() -> None:
         )
         if lens_cfg.get("dispersion") is False:
             build_cmd.append("--no-lens-dispersion")
+        elif lens_cfg.get("dispersion_split"):
+            build_cmd.append("--lens-dispersion-split")
         focus_dist = pick_override(
             lens_overrides,
             "realistic_focus_distance",

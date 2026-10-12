@@ -525,6 +525,7 @@ def build(args: argparse.Namespace) -> dict:  # noqa: C901 (linear scene assembl
                         "focus_distance": args.focus_distance,
                         "film_diagonal_mm": args.film_diagonal_mm,
                         "lens_dispersion": bool(args.lens_dispersion),
+                        "lens_dispersion_split": bool(args.lens_dispersion_split),
                     }
                     if args.camera == "realistic"
                     else {}
