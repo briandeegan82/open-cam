@@ -341,7 +341,9 @@ def emit_hue_scene(
                 f'    "string lensfile" ["{lens_for_scene}"]',
                 f'    "float aperturediameter" [{float(args.aperture_diameter_mm):.6g}]',
                 f'    "float focusdistance" [{focus_d:.6g}]',
-                *pbrt_camera_lines(lens_repo, getattr(args, "lens_dispersion", True)),
+                *pbrt_camera_lines(
+                    lens_repo, getattr(args, "lens_dispersion", True), getattr(args, "lens_dispersion_split", False)
+                ),
             ]
         )
 
@@ -498,6 +500,12 @@ def main() -> None:
         action=argparse.BooleanOptionalAction,
         default=True,
         help="Glass dispersion for realistic lenses with a <lens>.glass.yaml sidecar (needs the patched pbrt).",
+    )
+    ap.add_argument(
+        "--lens-dispersion-split",
+        action="store_true",
+        help="With --lens-dispersion, trace all 4 wavelengths of each pixel sample through the lens "
+        "(about 4x render time, far less colour noise) instead of the hero wavelength only.",
     )
     ap.add_argument("--lensfile", type=str, default=DEFAULT_REALISTIC_LENSFILE)
     ap.add_argument("--aperture-diameter-mm", type=float, default=4.0)

@@ -121,7 +121,11 @@ def test_scene_builder_emits_dispersion_line(tmp_path):
     )
     block = iq._camera_block(args, tmp_path, REPO)
     assert any('"float dispersion"' in line for line in block)
+    assert not any("dispersionsplit" in line for line in block)
+    args.lens_dispersion_split = True
+    assert '    "bool dispersionsplit" true' in iq._camera_block(args, tmp_path, REPO)
     args.lens_dispersion = False
+    assert not any("dispersion" in line for line in iq._camera_block(args, tmp_path, REPO))
     assert not any('"float dispersion"' in line for line in iq._camera_block(args, tmp_path, REPO))
     args.lensfile = "config/lenses/telephoto.250mm.dat"
     args.lens_dispersion = True

@@ -38,6 +38,13 @@ Sidecars shipped:
 - To turn it off, set `lens.dispersion: false` in the camera config, or pass
   `--no-lens-dispersion` to the builder.
 - `lens.post_psf.lens_diffraction.dispersion: false` turns it off in the diffraction PSF only.
+- Optional all-wavelength tracing: `lens.dispersion_split: true`, or `--lens-dispersion-split` on
+  the builder, writes `"bool dispersionsplit" true`. pbrt then traces each pixel sample once per
+  wavelength, with the same film, lens and path samples and a different hero wavelength
+  (`SampledWavelengths::RotateHero`), instead of only the hero wavelength. Colour noise drops to
+  about the dispersion-free level at about 4× the render time (`third_party/patches/
+  0005-realistic-camera-dispersion-split.patch`; CPU `path`/`volpath`-family integrators and the
+  wavefront/GPU integrator; `bdpt`, `lightpath`, `mlt` and `sppm` stay hero-only).
 - The pbrt binary must be rebuilt with the patch: `tools/build_pbrt.sh`. An unpatched pbrt fails
   with an unused-parameter error on `"dispersion"`.
 

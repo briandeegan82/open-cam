@@ -126,12 +126,17 @@ def optics_of(model: dict) -> dict:
     if cam == "realistic":
         lensfile = str(lens["realistic_lensfile"])
         efl, _ = lp.paraxial_focal_lengths_mm(lp.load_lens_file(REPO / lensfile))
-        return {
+        optics = {
             "camera": "realistic",
             "lensfile": lensfile,
             "aperture_diameter_mm": float(lens["realistic_aperture_diameter_mm"]),
             "efl_mm": round(float(efl), 4),
         }
+        if lens.get("dispersion") is False:
+            optics["dispersion"] = False
+        elif lens.get("dispersion_split"):
+            optics["dispersion_split"] = True
+        return optics
     if cam == "thinlens":
         return {
             "camera": "thinlens",
@@ -182,6 +187,10 @@ def builder_args(scene: str, optics: dict, xres: int, yres: int, spp: int) -> li
     args += ["--camera", cam]
     if cam == "realistic":
         args += ["--lensfile", optics["lensfile"], "--aperture-diameter-mm", f"{optics['aperture_diameter_mm']:g}"]
+        if optics.get("dispersion") is False:
+            args.append("--no-lens-dispersion")
+        elif optics.get("dispersion_split"):
+            args.append("--lens-dispersion-split")
     elif cam == "thinlens":
         args += ["--thinlens-lens-radius", f"{optics['lens_radius']:g}", "--thinlens-focal-distance", f"{focus:.6g}"]
     if scene == "skin":

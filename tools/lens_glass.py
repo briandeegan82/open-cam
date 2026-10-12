@@ -135,16 +135,20 @@ def pbrt_dispersion_values(lens_path: str | Path) -> list[float] | None:
     return vals
 
 
-def pbrt_camera_lines(lens_path: str | Path, enabled: bool = True) -> list[str]:
+def pbrt_camera_lines(lens_path: str | Path, enabled: bool = True, split: bool = False) -> list[str]:
     """Lens sidecar lines for a ``Camera "realistic"`` block.
 
     ``"float dispersion"`` when ``enabled`` and a glass sidecar exists, plus ``"float asphere"``
-    whenever an asphere sidecar exists (surface shape is geometry, not an option).
+    whenever an asphere sidecar exists (surface shape is geometry, not an option).  ``split`` adds
+    ``"bool dispersionsplit" true``: pbrt traces every wavelength of a pixel sample as its own camera
+    ray instead of the hero wavelength only (about 4x the render time, far less colour noise).
     """
     from lens_asphere import pbrt_camera_lines as asphere_lines
 
     vals = pbrt_dispersion_values(lens_path) if enabled else None
     lines = [f'    "float dispersion" [{" ".join(f"{v:.9g}" for v in vals)}]'] if vals else []
+    if vals and split:
+        lines.append('    "bool dispersionsplit" true')
     return lines + asphere_lines(lens_path)
 
 

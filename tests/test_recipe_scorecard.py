@@ -197,3 +197,19 @@ def test_to_srgb_linear_keeps_clipped_highlights_white():
     assert tinted[1] < tinted[0] and tinted[1] < tinted[2]  # magenta without a highlight stage
     white = sc.to_srgb_linear(e, lay, ccm, [0, 0, 4, 4], clip_e=9500.0)[7, 7]
     np.testing.assert_allclose(white, white[1])
+
+
+@pytest.mark.parametrize(
+    ("lens_extra", "flag"),
+    [
+        ({}, None),
+        ({"dispersion": False}, "--no-lens-dispersion"),
+        ({"dispersion_split": True}, "--lens-dispersion-split"),
+    ],
+)
+def test_recipe_lens_dispersion_options_reach_builder(lens_extra, flag):
+    lens = {"camera": "realistic", "realistic_lensfile": "config/lenses/dgauss.50mm.dat"}
+    optics = sc.optics_of({"lens": {**lens, "realistic_aperture_diameter_mm": 6.0, **lens_extra}})
+    args = sc.builder_args("diorama", optics, 360, 240, 4)
+    dispersion_flags = [a for a in args if "lens-dispersion" in a]
+    assert dispersion_flags == ([flag] if flag else [])

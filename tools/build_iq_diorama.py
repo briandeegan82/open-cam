@@ -129,6 +129,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=True,
         help="Glass dispersion for realistic lenses with a <lens>.glass.yaml sidecar (needs the patched pbrt).",
     )
+    ap.add_argument(
+        "--lens-dispersion-split",
+        action="store_true",
+        help="With --lens-dispersion, trace all 4 wavelengths of each pixel sample through the lens "
+        "(about 4x render time, far less colour noise) instead of the hero wavelength only.",
+    )
     ap.add_argument("--lensfile", default=iq.DEFAULT_REALISTIC_LENSFILE)
     ap.add_argument("--aperture-diameter-mm", type=float, default=4.0)
     ap.add_argument("--focus-distance", type=float, default=None, help="default: card plane")
