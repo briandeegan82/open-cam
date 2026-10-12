@@ -14,6 +14,7 @@ sys.path.insert(0, str(REPO / "tools"))
 
 import lens_coatings as lc  # noqa: E402
 import lens_ghosts as lg  # noqa: E402
+import lens_glass  # noqa: E402
 
 WIDE = REPO / "config" / "lenses" / "wide_22mm.dat"
 LAMS = np.array([400.0, 450.0, 500.0, 550.0, 600.0, 650.0, 700.0])
@@ -342,7 +343,10 @@ def _point_source_cube(h=96, w=128, x=40, y=30, n=7):
 
 
 def test_render_ghosts_energy_matches_traced_fractions():
-    lens = lg.load_lens(WIDE, aperture_diameter_mm=8.0, focus_distance_m=4.0, coating="uncoated")
+    # Without absorption every channel has the same in-frame fraction, so per-channel energies compare.
+    lens = lg.load_lens(
+        WIDE, aperture_diameter_mm=8.0, focus_distance_m=4.0, coating="uncoated", glass_absorption=False
+    )
     cfg = lg.resolve_config({"enabled": True, "pupil_samples": 48, "film_diagonal_mm": 35.0}, {"camera": "realistic"})
     cube = _point_source_cube()
     mask = np.ones(LAMS.size, bool)
@@ -469,3 +473,108 @@ def test_parametric_stray_light_unchanged():
     out = asp.apply_stray_light(img.copy(), cfg)
     blended = 0.99 * img + 0.01 * float(img.mean())
     np.testing.assert_allclose(out, blended + 0.02 * np.rot90(blended, k=2), rtol=1e-5, atol=1e-6)
+
+
+# ---------------------------------------------------------------- glass absorption and dispersion
+
+
+def _absorbing_plate(glass="N-SF6", t_mm=5.0):
+    lens = _plate("uncoated", t_mm=t_mm)
+    _nd, vd, coeffs = lens_glass.SCHOTT_SELLMEIER[glass]
+    lens.dispersion = [None, lens_glass.GlassDispersion(glass, 1.5, vd, coeffs), None]
+    lens.glass_absorption = True
+    return lens
+
+
+def test_plate_absorption_lambert_beer():
+    """Normal incidence: the primary crosses the plate once, the (1, 2) ghost three times."""
+    t_mm = 5.0
+    lens = _absorbing_plate(t_mm=t_mm)
+    res = lg.ghost_energy_fractions(lens, [0, 0, 1], LAMS, n_grid=64)
+    c = lens.surfaces[1].coating
+    r_in, t_in = lc.interface_rt(LAMS, 0.0, 1.0, 1.5, c)
+    r_out, t_out = lc.interface_rt(LAMS, 0.0, 1.5, 1.0, c)
+    tau = lens_glass.internal_transmittance("N-SF6", LAMS, t_mm)
+    assert tau[0] < 0.95 < tau[-1]
+    np.testing.assert_allclose(res["primary_transmittance"], t_in * t_out * tau, rtol=1e-6)
+    np.testing.assert_allclose(res["ghosts"][(1, 2)]["energy"], t_in * r_out * r_out * t_out * tau**3, rtol=1e-6)
+
+
+def test_absorption_dims_blue_in_sidecar_lens_only():
+    d = lg.direction_from_angles(math.radians(10.0))
+    t = {}
+    for absorb in (False, True):
+        lens = lg.load_lens(WIDE, aperture_diameter_mm=8.0, glass_absorption=absorb)
+        assert lens.glass_absorption == absorb
+        t[absorb] = lg.ghost_energy_fractions(lens, d, LAMS, n_grid=32)["primary_transmittance"]
+    ratio = t[True] / t[False]
+    assert np.all(ratio <= 1.0)
+    assert ratio[0] < 0.97 and ratio[3] > 0.99  # 400 nm vs 550 nm (flint glasses absorb in the blue)
+    tele = lg.load_lens(REPO / "config/lenses/telephoto.250mm.dat")
+    assert not tele.dispersion and not tele.glass_absorption
+
+
+def test_lens_at_design_wavelength_matches_nd_and_ghosts_disperse():
+    lens = lg.load_lens(WIDE, aperture_diameter_mm=8.0, focus_distance_m=4.0)
+    o, d, _c, _s = lg.collimated_beam(lens, lg.direction_from_angles(math.radians(8.0)), 24)
+    pairs = [(1, 4), (0, 2), (3, 9)]
+    l_d = lg.lens_at_wavelength(lens, lens_glass.LAMBDA_D_NM)
+    assert l_d.z_film == lens.z_film and l_d.wavelength_nm == pytest.approx(lens_glass.LAMBDA_D_NM)
+    for pair in pairs:
+        a = lg.trace(lens, lg.ghost_path(lens, *pair), o, d)
+        b = lg.trace(l_d, lg.ghost_path(l_d, *pair), o, d)
+        np.testing.assert_allclose(b.film_xy[b.alive], a.film_xy[a.alive], atol=1e-6)
+    shift = []
+    for pair in pairs:
+        rs = [
+            lg.trace(lw, lg.ghost_path(lw, *pair), o, d) for lw in (lg.lens_at_wavelength(lens, x) for x in (450, 650))
+        ]
+        both = rs[0].alive & rs[1].alive
+        if both.any():
+            shift.append(float(np.hypot(*(rs[0].film_xy[both] - rs[1].film_xy[both]).mean(0))))
+    assert shift and max(shift) > 0.01  # mm: blue and red ghost images separate
+
+
+def test_dispersion_groups_cover_channels():
+    lens = lg.load_lens(WIDE, aperture_diameter_mm=8.0)
+    assert lg.dispersion_groups(lens, LAMS, {"dispersion": False})[0][0] is lens
+    groups = lg.dispersion_groups(lens, LAMS, {"dispersion": True, "dispersion_groups": 3})
+    assert len(groups) == 3
+    np.testing.assert_array_equal(np.concatenate([i for _l, i in groups]), np.arange(LAMS.size))
+    assert len(lg.dispersion_groups(lens, LAMS, {"dispersion": True})) == LAMS.size
+    plain = lg.load_lens(None, rows=_singlet_rows())
+    assert lg.dispersion_groups(plain, LAMS, {"dispersion": True})[0][0] is plain
+
+
+def test_render_ghosts_dispersion():
+    lens = lg.load_lens(WIDE, aperture_diameter_mm=8.0, focus_distance_m=4.0, coating="uncoated")
+    base = {"enabled": True, "pupil_samples": 32, "film_diagonal_mm": 35.0}
+    lam_d = [lens_glass.LAMBDA_D_NM]
+    cube1 = _point_source_cube(n=1)
+    g0, _t, _r = lg.render_ghosts(cube1, lam_d, np.ones(1, bool), lens, lg.resolve_config(base, {}))
+    cfg = lg.resolve_config({**base, "dispersion": True}, {})
+    g1, _t, rep = lg.render_ghosts(cube1, lam_d, np.ones(1, bool), lens, cfg)
+    np.testing.assert_allclose(g1, g0, rtol=1e-9, atol=1e-12)
+    assert rep["dispersion_wavelengths_nm"] == pytest.approx(lam_d)
+    cube = _point_source_cube()
+    mask = np.ones(LAMS.size, bool)
+    gn, _t, rep_n = lg.render_ghosts(cube, list(LAMS), mask, lens, lg.resolve_config(base, {}))
+    cfg = lg.resolve_config({**base, "dispersion": True, "dispersion_groups": 3}, {})
+    gd, _t, rep_d = lg.render_ghosts(cube, list(LAMS), mask, lens, cfg)
+    assert rep_n["dispersion_wavelengths_nm"] is None and len(rep_d["dispersion_wavelengths_nm"]) == 3
+    assert np.all(gd >= 0)
+    assert rep_d["ghost_to_source_energy"] == pytest.approx(rep_n["ghost_to_source_energy"], rel=0.1)
+    assert np.abs(gd[:, :, 0] - gn[:, :, 0]).sum() > 0.05 * gn[:, :, 0].sum()
+
+
+def test_ghost_paths_off_gives_transmittance_only():
+    lens = lg.load_lens(WIDE, aperture_diameter_mm=8.0, focus_distance_m=4.0)
+    cfg = lg.resolve_config(
+        {"enabled": True, "ghost_paths": False, "apply_primary_transmittance": True, "film_diagonal_mm": 35.0},
+        {"camera": "realistic"},
+    )
+    ghost, trans, rep = lg.render_ghosts(_point_source_cube(), list(LAMS), np.ones(LAMS.size, bool), lens, cfg)
+    assert not ghost.any() and rep["glass_absorption"]
+    axis = lg.ghost_energy_fractions(lens, [0.0, 0.0, 1.0], LAMS, n_grid=48)["primary_transmittance"]
+    np.testing.assert_allclose(trans[48, 64], axis, rtol=0.02)
+    assert trans[48, 64, 0] < trans[48, 64, 3]

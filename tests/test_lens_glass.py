@@ -141,3 +141,18 @@ def test_psf_model_traces_pupil_per_wavelength():
     assert model.lens_at(450.0).n_after[0] > model.lens_at(650.0).n_after[0]
     off = ldp.model_from_config({**cfg, "dispersion": False}, {}, {}, repo=REPO, film_res=(2000, 2000))
     assert off.dispersive_lens is None and off.lens_at(450.0) is off.lens
+
+
+@pytest.mark.parametrize("name", sorted(lg.SCHOTT_TAUI10))
+def test_internal_transmittance_catalogue_and_lambert_beer(name):
+    tab = lg.SCHOTT_TAUI10[name]
+    wl = np.array(sorted(tab), float)
+    tau = np.array([tab[k] for k in sorted(tab)])
+    np.testing.assert_allclose(lg.internal_transmittance(name, wl, 10.0), tau, atol=1e-12)
+    np.testing.assert_allclose(lg.internal_transmittance(name, wl, 20.0), tau**2, atol=1e-12)
+    np.testing.assert_allclose(lg.internal_transmittance(name, wl, 0.0), 1.0)
+    assert np.all(np.diff(lg.internal_transmittance(name, [360.0, 450.0, 550.0], 10.0)) >= 0)
+
+
+def test_every_sidecar_glass_has_transmittance_data():
+    assert set(lg.SCHOTT_TAUI10) >= set(lg.SCHOTT_SELLMEIER)

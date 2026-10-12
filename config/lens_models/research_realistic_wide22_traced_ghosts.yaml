@@ -20,4 +20,7 @@ lens:
     pupil_samples: 64          # rays per side of the collimated beam grid
     source_threshold_relative: 0.01
     cluster_px: 8
+    glass_absorption: true     # SCHOTT bulk internal transmittance of the sidecar glasses
+    dispersion: false          # true: trace ghosts per wavelength group (cost x groups)
+    dispersion_groups: 0       # with dispersion: 0 = one group per spectral bucket
     max_sources: 256
