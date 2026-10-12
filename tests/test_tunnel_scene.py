@@ -43,11 +43,48 @@ def test_luminaire_count(built):
     m = built["outside_in"]["meta"]
     lum = m["luminaires"]
     txt = built["outside_in"]["scene"].read_text()
-    assert txt.count('AreaLightSource "diffuse"') == lum["count"] == lum["count_threshold"] + lum["count_interior"]
+    assert txt.count('AreaLightSource "diffuse"') == lum["count"] == sum(lum["count_by_zone"].values())
     th = m["photometry"]["threshold_length_m"]
-    # two rows; threshold spacing over the threshold zone, interior spacing for the rest
-    assert lum["count_threshold"] == 2 * math.ceil((th - 1.25) / lum["spacing_m"]["threshold"])
-    assert lum["luminance_cd_m2"]["threshold"] > lum["luminance_cd_m2"]["interior"] > 0
+    # two rows; threshold spacing over both threshold halves
+    n_th = lum["count_by_zone"]["threshold_1"] + lum["count_by_zone"]["threshold_2"]
+    assert n_th == 2 * math.ceil((th - 1.25) / lum["spacing_m"]["threshold_1"])
+    assert all(n > 0 for n in lum["count_by_zone"].values())
+    assert min(lum["luminance_cd_m2"].values()) > 0
+
+
+def test_stepped_zone_profile(built):
+    ph = built["outside_in"]["meta"]["photometry"]
+    zones, l_th, l_in = ph["zones"], ph["threshold_road_luminance_cd_m2"], ph["interior_road_luminance_cd_m2"]
+    assert ph["zone_profile"] == "stepped"
+    # default L_th = 75: 0.05 / 0.02 L_th fall below L_in = 6, so one transition step remains
+    assert [z["zone"] for z in zones] == ["threshold_1", "threshold_2", "transition_1", "interior", "exit_1", "exit_2"]
+    lum = [z["road_luminance_cd_m2"] for z in zones]
+    assert lum == pytest.approx([l_th, 0.5 * l_th, 0.15 * l_th, l_in, 3 * l_in, 5 * l_in])
+    tun = built["outside_in"]["meta"]["tunnel"]
+    assert zones[0]["z_start_m"] == tun["portal_entrance_z"] and zones[-1]["z_end_m"] == tun["portal_exit_z"]
+    for a, b in zip(zones, zones[1:]):
+        assert a["z_end_m"] == b["z_start_m"]
+    assert built["inside_out"]["meta"]["target"]["zone"].startswith("exit_2")
+
+
+def test_zone_profile_transition_steps_and_two_step():
+    sp = {"threshold": 3.0, "transition": 4.5, "interior": 9.0, "exit": 4.5}
+    zones = bts.zone_profile(40.0, 840.0, 250.0, 6.0, 80.0, (72.0, 89.0, 133.0), (30.0, 30.0), sp)
+    # 0.15 / 0.05 L_th = 37.5 / 12.5 > L_in; 0.02 L_th = 5 <= L_in becomes interior
+    assert [z["zone"] for z in zones][2:5] == ["transition_1", "transition_2", "interior"]
+    assert zones[3]["road_luminance"] == pytest.approx(12.5) and zones[3]["spacing"] == 4.5
+    two = bts.zone_profile(40.0, 440.0, 75.0, 6.0, 80.0, (72.0,), (30.0,), sp, "two-step")
+    assert [(z["zone"], z["z0"], z["z1"]) for z in two] == [("threshold", 40.0, 120.0), ("interior", 120.0, 440.0)]
+    with pytest.raises(SystemExit):
+        bts.zone_profile(40.0, 240.0, 75.0, 6.0, 80.0, (72.0, 89.0), (30.0, 30.0), sp)
+
+
+def test_two_step_profile_keeps_legacy_scene(tmp_path):
+    b = _build(tmp_path, "--zone-profile", "two-step")
+    m = b["inside_out"]["meta"]
+    assert [z["zone"] for z in m["photometry"]["zones"]] == ["threshold", "interior"]
+    assert m["dynamic_range"]["dark_roi"] == "interior_road"
+    assert any("no transition or exit-zone lighting" in a for a in m["approximations"])
 
 
 def test_headwall_hole_matches_tube_profile():
@@ -82,20 +119,25 @@ def test_photometry_and_dynamic_range(built):
 
 
 def test_lamp_solve_hits_design_luminance(built):
+    """Direct road luminance at every zone centre, summed over all zones' lamps, equals the design value."""
     m = built["outside_in"]["meta"]
-    lamps = bts.luminaire_positions(
-        m["tunnel"]["portal_entrance_z"], m["tunnel"]["portal_exit_z"], m["photometry"]["threshold_length_m"], 3.0, 9.0
-    )
-    zc = m["tunnel"]["portal_entrance_z"] + 0.5 * m["photometry"]["threshold_length_m"]
-    pts = np.array([(x, 0.0, zc + dz) for x in np.linspace(0.5, bts.ROAD_W - 0.5, 7) for dz in np.linspace(-6, 6, 13)])
-    e = bts.direct_road_illuminance(pts, lamps, "threshold").mean() * m["luminaires"]["luminance_cd_m2"]["threshold"]
+    zones = [
+        {"zone": z["zone"], "z0": z["z_start_m"], "z1": z["z_end_m"], "spacing": z["luminaire_spacing_m"]}
+        for z in m["photometry"]["zones"]
+    ]
+    lamps = bts.luminaire_positions(zones)
+    assert len(lamps) == m["luminaires"]["count"]
+    lamp_l = m["luminaires"]["luminance_cd_m2"]
     rho = m["photometry"]["road_luminous_reflectance"]["lamp"]
-    assert rho * e / math.pi == pytest.approx(m["photometry"]["threshold_road_luminance_cd_m2"], rel=1e-9)
+    for zn, design in zip(zones, m["photometry"]["zones"]):
+        pts = bts.zone_road_points(zn)
+        e = sum(bts.direct_road_illuminance(pts, lamps, j).mean() * lamp_l[j] for j in lamp_l)
+        assert rho * e / math.pi == pytest.approx(design["road_luminance_cd_m2"], rel=1e-9), zn["zone"]
 
 
 def test_rois_inside_frame_and_nondegenerate(built):
     need = {"outside_in": {"exterior_road", "threshold_road", "threshold_wall", "target", "headwall"},
-            "inside_out": {"interior_road", "interior_wall", "exit_opening", "exit_road", "target"}}  # fmt: skip
+            "inside_out": {"exit_zone_road", "interior_wall", "exit_opening", "exit_road", "target"}}  # fmt: skip
     for view, b in built.items():
         m = b["meta"]
         W, H = m["film"]["xres"], m["film"]["yres"]
@@ -106,6 +148,20 @@ def test_rois_inside_frame_and_nondegenerate(built):
                 x0, y0, x1, y1 = r["roi_xyxy"]
                 assert 0 <= x0 < x1 <= W and 0 <= y0 < y1 <= H
         assert m["target"]["roi"] == "target"
+
+
+def test_inside_out_dark_roi_follows_zone(built, tmp_path):
+    """Default camera (60 m) looks over the exit zone; from 100 m out it sees interior road too."""
+    io = built["inside_out"]["meta"]
+    assert io["dynamic_range"]["dark_roi"] == "exit_zone_road"
+    assert io["rois"]["exit_zone_road"]["predicted_luminance_cd_m2"] == pytest.approx(
+        3 * io["photometry"]["interior_road_luminance_cd_m2"]
+    )
+    far = _build(tmp_path, "--view", "inside_out", "--exit-distance", "100")["inside_out"]["meta"]
+    assert far["dynamic_range"]["dark_roi"] == "interior_road" and "exit_zone_road" in far["rois"]
+    assert far["dynamic_range"]["db"] == pytest.approx(io["dynamic_range"]["db"] + 20 * math.log10(3))
+    with pytest.raises(SystemExit):
+        _build(tmp_path, "--view", "inside_out", "--exit-distance", "85")
 
 
 def test_projector_mirror_convention():
