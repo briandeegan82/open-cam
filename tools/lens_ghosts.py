@@ -17,11 +17,15 @@ flare rendering", ACM Trans. Graph. 30(4), 108 (SIGGRAPH 2011), doi:10.1145/2010
   beam at the source's field direction is sampled on a regular grid over the front element and traced
   in 3-D through each path with exact sphere intersections, vector Snell refraction/reflection,
   every element's clear aperture and the aperture stop (circular, or an ``iris_blades``-gon).
-  Geometry is wavelength independent (pbrt lens files have one index per glass, as in pbrt).
+  By default the geometry uses the lens file's n_d.  With ``dispersion: true`` (opt-in, cost x the
+  number of wavelength groups) each group of spectral buckets is traced with its own glass indices
+  from the ``<lens>.glass.yaml`` sidecar (:mod:`lens_glass`); the film stays at the n_d focus.
 * Each ray carries the product of the interface reflectances/transmittances along its path, from
   the thin-film model in :mod:`lens_coatings` evaluated at the ray's own incidence angle for every
   spectral bucket (Fresnel, single-layer MgF2, quarter-half-quarter multilayer; cemented glass-glass
-  interfaces are uncoated Fresnel).
+  interfaces are uncoated Fresnel), times the bulk internal transmittance of every glass traversed,
+  tau_10(lambda) ** (path length / 10 mm) from the SCHOTT catalogue (``glass_absorption``, on by
+  default for lenses with a glass sidecar).
 * Energy normalisation: the rendered source flux (sum of its pixels per bucket) is what pbrt passed
   through the primary path with unit transmission, i.e. ``N_primary`` grid rays.  A ghost ray adds
   ``flux * weight / N_primary`` - so a ghost's total energy relative to the primary image is exactly
@@ -41,8 +45,8 @@ the paraxial ghost matrices of S. Lee and E. Eisemann, "Practical real-time lens
 Comput. Graph. Forum 32(4), 1-6 (EGSR 2013) and an independent scalar ray trace; per-ghost energies
 against a Monte-Carlo non-sequential trace; energy conservation of the splat.
 
-Not modelled: diffraction and interference between ghosts (geometric optics only), glass and coating
-dispersion, glass absorption, ghosts with four or more reflections, barrel/mount scatter, sensor
+Not modelled: diffraction and interference between ghosts (geometric optics only), coating-layer
+dispersion (layer indices are constant), ghosts with four or more reflections, barrel/mount scatter, sensor
 cover glass / IR filter (unless approximated by ``sensor_reflectance``), polarisation state (the
 average of s and p is used at each interface), sources at finite distance (beams are collimated),
 and the ghosts of pixels below the source threshold (use the parametric veiling glare in
@@ -57,7 +61,8 @@ import json
 import math
 import sys
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
@@ -68,6 +73,7 @@ from lens_coatings import (
     lookup_reflectance,
     reflectance_table,
 )
+from lens_glass import internal_transmittance, load_dispersion
 from lens_prescription import load_lens_file
 
 _RGB_CENTER_NM = {"R": 620.0, "G": 540.0, "B": 460.0}
@@ -104,6 +110,9 @@ class Lens:
     lens_file: str = ""
     efl_mm: float = float("nan")
     listed_film_z: float = 0.0  # film position implied by the lens file's last thickness
+    dispersion: list = field(default_factory=list)  # per lens-file row: lens_glass.GlassDispersion | None
+    glass_absorption: bool = False  # weight rays by the bulk transmittance of the glass they cross
+    wavelength_nm: float | None = None  # glass indices at this wavelength (None: the file's n_d)
 
     @property
     def refracting(self) -> list[int]:
@@ -129,6 +138,7 @@ def load_lens(
     iris_blades: int = 0,
     iris_rotation_deg: float = 0.0,
     sensor_reflectance: float = 0.0,
+    glass_absorption: bool = True,
     rows=None,
 ) -> Lens:
     """Build a :class:`Lens` from a pbrt lens file (or explicit ``rows``), focused like pbrt.
@@ -136,7 +146,8 @@ def load_lens(
     Air-glass interfaces get ``coating`` (``surface_coatings`` maps row index -> coating to override);
     glass-glass (cemented) interfaces are always uncoated.  ``aperture_diameter_mm`` is clamped to the
     stop's listed diameter as pbrt does; ``focus_distance_m`` (from the film, pbrt's ``focusdistance``)
-    ``None``/inf focuses at infinity.
+    ``None``/inf focuses at infinity.  A ``<lens>.glass.yaml`` sidecar supplies the glass of each row:
+    its bulk absorption (``glass_absorption``) and the dispersion used by :func:`lens_at_wavelength`.
     """
     rows = rows if rows is not None else load_lens_file(Path(lens_file))
     surface_coatings = {int(k): v for k, v in (surface_coatings or {}).items()}
@@ -173,7 +184,26 @@ def load_lens(
     )
     lens.listed_film_z = z
     lens.z_film, lens.efl_mm = _focus_film_z(lens, focus_distance_m)
+    if lens_file is not None:
+        lens.dispersion = load_dispersion(lens_file) or []
+    lens.glass_absorption = bool(glass_absorption) and any(g is not None for g in lens.dispersion)
     return lens
+
+
+def lens_at_wavelength(lens: Lens, lam_nm: float) -> Lens:
+    """Copy of ``lens`` with every glass index at ``lam_nm`` (sidecar dispersion).
+
+    Surfaces, apertures, coatings and the film position are unchanged: the film stays at the n_d focus,
+    as in the dispersive pbrt camera.  Lenses without a glass sidecar are returned as they are.
+    """
+    if not any(g is not None for g in lens.dispersion):
+        return lens
+    surfs, n_prev = [], 1.0
+    for s, g in zip(lens.surfaces, lens.dispersion):
+        n_after = float(g.n(lam_nm)) if g is not None else s.n_after
+        surfs.append(replace(s, n_before=n_prev, n_after=n_after))
+        n_prev = n_after
+    return replace(lens, surfaces=surfs, wavelength_nm=float(lam_nm))
 
 
 def _parallel_ray_cardinal(lens: Lens, h: float, from_film: bool) -> tuple[float, float]:
@@ -231,6 +261,7 @@ class TraceResult:
     dir3: np.ndarray  # (N, 3) final directions
     alive: np.ndarray  # (N,) bool
     events: list = field(default_factory=list)  # (surface, kind 'R'|'T', n1, n2, beta (N,))
+    glass_mm: np.ndarray | None = None  # (N, rows) path length [mm] in the medium after each lens-file row
 
     @property
     def film_xy(self) -> np.ndarray:
@@ -286,6 +317,7 @@ class _State:
     alive: np.ndarray
     events: list
     forward: bool
+    glass_mm: np.ndarray | None = None
 
     @classmethod
     def new(cls, o, d, forward: bool = True) -> _State:
@@ -299,6 +331,15 @@ class _State:
         t = (z - self.p[:, 2]) / vz
         return self.p + t[:, None] * self.v, t > 0
 
+    def _path(self, lens: Lens, k: int, p: np.ndarray) -> np.ndarray:
+        """Path lengths after travelling to ``p`` on surface ``k``: the medium is row k-1 going forward, row k back."""
+        g = np.zeros((self.p.shape[0], len(lens.surfaces))) if self.glass_mm is None else self.glass_mm.copy()
+        row = k - 1 if self.forward else k
+        if 0 <= row < g.shape[1]:
+            seg = np.linalg.norm(p - self.p, axis=1)
+            g[:, row] += np.where(np.isfinite(seg), seg, 0.0)
+        return g
+
     def step(self, lens: Lens, k: int, kind: str) -> _State:
         """Intersect surface ``k`` and transmit ('T') or reflect ('R'); returns a new state."""
         nsurf = len(lens.surfaces)
@@ -309,14 +350,14 @@ class _State:
             beta = np.sqrt(np.clip(1.0 - cos_i**2, 0.0, None))
             events.append((k, "R", 1.0, 1.0, beta))
             v = self.v * np.array([1.0, 1.0, -1.0])
-            return _State(p, v, self.alive & ok, events, not self.forward)
+            return _State(p, v, self.alive & ok, events, not self.forward, self._path(lens, k, p))
         s = lens.surfaces[k]
         if s.is_stop:
             if kind == "R":
                 raise ValueError("the aperture stop cannot be a reflecting surface")
             p, ok = self._to_plane(s.z)
             ok &= _iris_ok(lens, p[:, 0], p[:, 1], s.ap_r)
-            return _State(p, self.v, self.alive & ok, events, self.forward)
+            return _State(p, self.v, self.alive & ok, events, self.forward, self._path(lens, k, p))
         p0, v = self.p, self.v
         cz = s.z + s.radius
         oc = p0 - np.array([0.0, 0.0, cz])
@@ -341,22 +382,24 @@ class _State:
         n1, n2 = (s.n_before, s.n_after) if self.forward else (s.n_after, s.n_before)
         beta = n1 * np.sqrt(np.clip(1.0 - cos_i**2, 0.0, None))
         events.append((k, kind, n1, n2, beta))
+        g = self._path(lens, k, p)
         if kind == "R":
-            return _State(p, v + 2.0 * cos_i[:, None] * nrm, alive, events, not self.forward)
+            return _State(p, v + 2.0 * cos_i[:, None] * nrm, alive, events, not self.forward, g)
         eta = n1 / n2
         k2 = 1.0 - eta * eta * (1.0 - cos_i**2)
         alive &= k2 >= 0  # total internal reflection removes the ray from a transmitting step
         vt = eta * v + (eta * cos_i - np.sqrt(np.clip(k2, 0.0, None)))[:, None] * nrm
         vt /= np.linalg.norm(vt, axis=1, keepdims=True)
-        return _State(p, vt, alive, events, self.forward)
+        return _State(p, vt, alive, events, self.forward, g)
 
     def finish(self, lens: Lens, to_film: bool = True) -> TraceResult:
-        p, alive = self.p, self.alive
+        p, alive, g = self.p, self.alive, self.glass_mm
         if to_film:
             p, ok = self._to_plane(lens.z_film)
             alive = alive & ok & (self.v[:, 2] > 0)
+            g = self._path(lens, len(lens.surfaces), p)
         p = np.where(alive[:, None], p, np.nan)
-        return TraceResult(p, self.v, alive, self.events)
+        return TraceResult(p, self.v, alive, self.events, g)
 
 
 def trace(lens: Lens, steps, o, d, *, to_film: bool = True, start_forward: bool = True) -> TraceResult:
@@ -397,6 +440,24 @@ def iter_ghost_traces(lens: Lens, o, d):
             back = back.step(lens, i, "T")
 
 
+@lru_cache(maxsize=256)
+def _tau10(glass: str, lams: tuple[float, ...]) -> np.ndarray:
+    return internal_transmittance(glass, np.asarray(lams), 10.0)
+
+
+def absorption_weights(lens: Lens, res: TraceResult, lams_nm) -> np.ndarray:
+    """Per-ray bulk transmittance (N, n_lambda) of the glass traversed (ones if absorption is off)."""
+    lams = tuple(float(x) for x in np.atleast_1d(lams_nm))
+    a = np.ones((res.alive.size, len(lams)))
+    if not lens.glass_absorption or res.glass_mm is None:
+        return a
+    for row, g in enumerate(lens.dispersion):
+        if g is None or not res.glass_mm[:, row].any():
+            continue
+        a *= _tau10(g.glass, lams)[None, :] ** (res.glass_mm[:, row, None] / 10.0)
+    return a
+
+
 def path_weights(lens: Lens, res: TraceResult, lams_nm) -> np.ndarray:
     """Per-ray spectral throughput (N, n_lambda): product of R or T over all interface events."""
     lams = tuple(float(x) for x in np.atleast_1d(lams_nm))
@@ -407,6 +468,7 @@ def path_weights(lens: Lens, res: TraceResult, lams_nm) -> np.ndarray:
             continue
         r = lookup_reflectance(reflectance_table(n1, n2, lens.surfaces[k].coating, lams), beta)
         w *= r if kind == "R" else (1.0 - r)
+    w *= absorption_weights(lens, res, lams)
     w[~res.alive] = 0.0
     return w
 
@@ -421,6 +483,7 @@ def path_weights_exact(lens: Lens, res: TraceResult, lams_nm) -> np.ndarray:
             continue
         r, t = interface_rt(lams[None, :], beta[:, None], n1, n2, lens.surfaces[k].coating)
         w *= r if kind == "R" else t
+    w *= absorption_weights(lens, res, lams)
     w[~res.alive] = 0.0
     return w
 
@@ -832,6 +895,10 @@ DEFAULTS = {
     "max_sources": 256,
     "min_ghost_fraction": 1e-7,
     "apply_primary_transmittance": False,
+    "ghost_paths": True,
+    "glass_absorption": True,
+    "dispersion": False,
+    "dispersion_groups": 0,
 }
 
 
@@ -872,7 +939,27 @@ def lens_from_config(cfg: dict, repo: Path) -> Lens:
         iris_blades=int(cfg.get("iris_blades", 0)),
         iris_rotation_deg=float(cfg.get("iris_rotation_deg", 0.0)),
         sensor_reflectance=float(cfg.get("sensor_reflectance", 0.0)),
+        glass_absorption=bool(cfg.get("glass_absorption", True)),
     )
+
+
+def dispersion_groups(lens: Lens, lams, cfg: dict) -> list[tuple[Lens, np.ndarray]]:
+    """(lens, channel indices) to trace: one n_d lens for all channels, or one per wavelength group.
+
+    With ``dispersion`` the distinct channel wavelengths are split into ``dispersion_groups`` contiguous
+    groups (0: one per wavelength), each traced at its mean wavelength.
+    """
+    lams = np.asarray(lams, float)
+    if not bool(cfg.get("dispersion", False)) or not any(g is not None for g in lens.dispersion):
+        return [(lens, np.arange(lams.size))]
+    uniq = np.unique(lams)
+    n = int(cfg.get("dispersion_groups") or 0)
+    n = uniq.size if n <= 0 else min(n, uniq.size)
+    out = []
+    for chunk in np.array_split(uniq, n):
+        idx = np.flatnonzero((lams >= chunk[0]) & (lams <= chunk[-1]))
+        out.append((lens_at_wavelength(lens, float(chunk.mean())), idx))
+    return out
 
 
 def _channel_wavelengths(names) -> list[float]:
@@ -936,8 +1023,8 @@ def _gauss_blur_local(maps: np.ndarray, sigma: float) -> np.ndarray:
     return np.stack([gaussian_filter(m, sigma, mode="constant", truncate=3.0) for m in maps])
 
 
-def _splat_ghost(ghost: np.ndarray, gx, gy, alive, wsp: np.ndarray, n_grid: int) -> None:
-    """Rasterise one ghost's ray grid into ``ghost`` (H, W, L) in place.
+def _splat_ghost(ghost: np.ndarray, gx, gy, alive, wsp: np.ndarray, n_grid: int, chan=None) -> None:
+    """Rasterise one ghost's ray grid into ``ghost`` (H, W, L) in place (into channels ``chan``, default all).
 
     The per-ray spectra are factored once, ``wsp ~ coeff @ spectra`` (rank <= 4, since they vary only
     through the angle dependence of the coatings); rasterisation is linear, so only the rank-r
@@ -966,7 +1053,7 @@ def _splat_ghost(ghost: np.ndarray, gx, gy, alive, wsp: np.ndarray, n_grid: int)
         by_sigma[key] = by_sigma[key] + m if key in by_sigma else m
     maps = sum(_gauss_blur_local(m, k) if k > 0 else m for k, m in by_sigma.items())
     flat = maps.reshape(maps.shape[0], -1).T @ spectra
-    ghost[y0:y1, x0:x1, :] += flat.reshape(y1 - y0, x1 - x0, -1)
+    ghost[y0:y1, x0:x1, slice(None) if chan is None else chan] += flat.reshape(y1 - y0, x1 - x0, -1)
 
 
 def render_ghosts(cube: np.ndarray, lams: list[float], spectral_mask: np.ndarray, lens: Lens, cfg: dict):
@@ -979,12 +1066,12 @@ def render_ghosts(cube: np.ndarray, lams: list[float], spectral_mask: np.ndarray
     pairs = ghost_pairs(lens)
     n_grid = int(cfg["pupil_samples"])
     min_frac = float(cfg["min_ghost_fraction"])
-    lam_t = tuple(lams)
+    groups = dispersion_groups(lens, lams, cfg)
     ghost_energy = np.zeros(nl)
     src_energy = np.zeros(nl)
     skipped = 0
     per_pair = {p: 0.0 for p in pairs}
-    for src in sources:
+    for src in sources if bool(cfg.get("ghost_paths", True)) else []:
         fx, fy = mapping.pixel_to_film(src["x"], src["y"])
         d = mapping.direction_for_film(float(fx), float(fy))
         if d is None:
@@ -992,28 +1079,34 @@ def render_ghosts(cube: np.ndarray, lams: list[float], spectral_mask: np.ndarray
             continue
         o, dirs, _cell, _shape = collimated_beam(lens, d, n_grid)
         prim = trace(lens, primary_path(lens), o, dirs)
-        n_p = int(prim.alive.sum())
-        if n_p == 0:
+        if not prim.alive.any():
             skipped += 1
             continue
-        scale = src["flux"] / n_p
         src_energy += src["flux"]
-        for pair, res in iter_ghost_traces(lens, o, dirs):
-            if not res.alive.any():
+        for lens_g, idx in groups:
+            prim_g = prim if lens_g is lens else trace(lens_g, primary_path(lens_g), o, dirs)
+            n_p = int(prim_g.alive.sum())
+            if n_p == 0:
                 continue
-            wsp = path_weights(lens, res, lam_t)
-            frac = float(wsp.sum(0).max()) / n_p
-            if frac < min_frac:
-                continue
-            wsp = wsp * scale[None, :]
-            gx, gy = mapping.film_to_pixel(res.film_xy[:, 0], res.film_xy[:, 1])
-            alive = res.alive & np.isfinite(gx) & np.isfinite(gy)
-            gx, gy = np.where(alive, gx, 0.0), np.where(alive, gy, 0.0)
-            wsp[~alive] = 0.0
-            _splat_ghost(ghost, gx, gy, alive, wsp, n_grid)
-            e = wsp.sum(0)
-            ghost_energy += e
-            per_pair[pair] += float(e[spectral_mask].sum() if spectral_mask.any() else e.sum())
+            lam_g = tuple(lams[i] for i in idx)
+            scale = src["flux"][idx] / n_p
+            mask_g = spectral_mask[idx]
+            for pair, res in iter_ghost_traces(lens_g, o, dirs):
+                if not res.alive.any():
+                    continue
+                wsp = path_weights(lens_g, res, lam_g)
+                frac = float(wsp.sum(0).max()) / n_p
+                if frac < min_frac:
+                    continue
+                wsp = wsp * scale[None, :]
+                gx, gy = mapping.film_to_pixel(res.film_xy[:, 0], res.film_xy[:, 1])
+                alive = res.alive & np.isfinite(gx) & np.isfinite(gy)
+                gx, gy = np.where(alive, gx, 0.0), np.where(alive, gy, 0.0)
+                wsp[~alive] = 0.0
+                _splat_ghost(ghost, gx, gy, alive, wsp, n_grid, idx)
+                e = wsp.sum(0)
+                ghost_energy[idx] += e
+                per_pair[pair] += float(e[mask_g].sum() if spectral_mask.any() else e.sum())
     trans_map = None
     if bool(cfg.get("apply_primary_transmittance", False)):
         trans_map = primary_transmittance_map(lens, mapping, lams)
@@ -1032,6 +1125,8 @@ def render_ghosts(cube: np.ndarray, lams: list[float], spectral_mask: np.ndarray
         ],
         "film_z_mm": lens.z_film,
         "efl_mm": lens.efl_mm,
+        "glass_absorption": lens.glass_absorption,
+        "dispersion_wavelengths_nm": [g.wavelength_nm for g, _i in groups] if groups[0][0] is not lens else None,
         "runtime_s": time.time() - t0,
     }
     return ghost.astype(np.float32), trans_map, report
@@ -1104,6 +1199,15 @@ def main() -> None:
     ap.add_argument("--sensor-reflectance", type=float, default=None)
     ap.add_argument("--source-threshold-relative", type=float, default=None)
     ap.add_argument("--pupil-samples", type=int, default=None)
+    ap.add_argument("--dispersion", action="store_true", default=None, help="trace ghosts per wavelength group")
+    ap.add_argument("--dispersion-groups", type=int, default=None, help="wavelength groups (0: every bucket)")
+    ap.add_argument(
+        "--no-glass-absorption",
+        dest="glass_absorption",
+        action="store_false",
+        default=None,
+        help="ignore bulk absorption",
+    )
     ap.add_argument("--report-json", type=Path, default=None)
     args = ap.parse_args()
     repo = args.repo_root.resolve()
@@ -1149,6 +1253,9 @@ def main() -> None:
         "sensor_reflectance": args.sensor_reflectance,
         "source_threshold_relative": args.source_threshold_relative,
         "pupil_samples": args.pupil_samples,
+        "dispersion": args.dispersion,
+        "dispersion_groups": args.dispersion_groups,
+        "glass_absorption": args.glass_absorption,
     }
     ghost_cfg.update({k: v for k, v in overrides.items() if v is not None})
     if args.enable:

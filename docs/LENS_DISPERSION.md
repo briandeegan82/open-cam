@@ -79,6 +79,6 @@ its lateral colour stays below 0.5 µm in both. The n_d-only column is flat, as 
   computed at n_d. The diffraction PSF uses the same focus, so both paths agree.
 - **Bucket-centre wavelength.** The Python PSF uses each bucket's centre wavelength. pbrt samples
   wavelengths continuously within each bucket.
-- **Ghosts.** `tools/traced_ghosts.py` still uses n_d (see `LENS_GHOSTS.md`).
+- **Ghosts.** `tools/lens_ghosts.py` uses n_d unless `traced_ghosts.dispersion: true` (see `LENS_GHOSTS.md`).
 - **Glass choices are assumptions** wherever the source gives no glass. They are labelled in each
   sidecar.

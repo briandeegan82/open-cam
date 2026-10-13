@@ -23,6 +23,18 @@ outputs are byte-identical (regression tests in `tests/test_lens_ghosts.py`).
    along every path. Each ray carries the product of the interface R/T factors at its actual angle
    of incidence, per wavelength bucket. Its film position gives the ghost footprint, shape and
    position vs field angle.
+4a. **Glass absorption** (`glass_absorption`, default on). Lenses with a `<lens>.glass.yaml`
+   sidecar (`tools/lens_glass.py`) also weight each ray by the bulk transmittance of every glass it
+   crosses, using its traced path length L in that glass: `tau_10(lambda) ** (L / 10 mm)`.
+   `tau_10` is the SCHOTT catalogue internal transmittance of a 10 mm sample (TAUI10 columns,
+   300-1060 nm, catalogue of 2025-11-13). Absorption applies to the ghosts and to the primary
+   transmittance alike. A ghost crosses some elements three times, so ghosts lose more blue
+   than the primary image.
+4b. **Dispersion** (`dispersion`, opt-in). Each group of spectral buckets is traced with its own
+   glass indices. The film position stays at the n_d focus, as in the dispersive pbrt camera.
+   Blue and red ghost images then separate, giving the coloured ghost fringes of real lenses.
+   `dispersion_groups: 0` traces every bucket (cost x the bucket count). `N` traces N contiguous
+   groups at their mean wavelength.
 5. **Splatting.** Each grid cell's energy is spread over the quad spanned by its four traced corners
    (Hullin et al. 2011), so footprint density (defocus, caustics) is energy-conserving.
 6. **Sources.** Pixels of the spectral EXR above `source_threshold_relative x max` (or
@@ -54,7 +66,18 @@ lens:
     sensor_reflectance: 0.0  # e.g. 0.02 to include sensor <-> lens ghosts
     pupil_samples: 64        # 128 for publication figures (sharper vignetting edges, ~3x slower)
     source_threshold_relative: 0.01
+    glass_absorption: true   # bulk absorption of the sidecar glasses (no effect without a sidecar)
+    dispersion: false        # true: per-wavelength ghost geometry (cost x groups)
+    dispersion_groups: 0     # 0 = every bucket, N = N wavelength groups
+    apply_primary_transmittance: false  # true: scale the image by the traced lens transmittance
+    ghost_paths: true        # false (with apply_primary_transmittance): lens transmittance only, no ghosts
 ```
+
+pbrt's `RealisticCamera` passes the primary image with unit transmission: no coating loss and
+no absorption. `apply_primary_transmittance: true` applies the traced, field-dependent spectral
+transmittance (coatings and absorption) as a per-pixel map. With `ghost_paths: false` the stage
+applies only that map. The CLI flags are `--dispersion`, `--dispersion-groups N` and
+`--no-glass-absorption`.
 
 Standalone CLI on any pbrt spectral EXR:
 
@@ -117,8 +140,11 @@ QHQ coatings.
 
 - Geometric optics only. No diffraction from the iris on the ghosts, and no coherent interference
   between ghosts (interference *inside* coatings is modelled).
-- Constant glass index per element, i.e. no dispersion. pbrt's `RealisticCamera` is also
-  non-dispersive. No bulk absorption.
+- Dispersion is opt-in (`dispersion: true`). By default every wavelength is traced at the lens
+  file's n_d. With it on, each wavelength group gets its own glass indices from the
+  `<lens>.glass.yaml` sidecar while the film stays at the n_d focus. The source direction and the
+  pixel mapping still use n_d. Coating layer indices are constant.
+- Bulk absorption needs a glass sidecar. Without one, glass is treated as clear.
 - Two reflections only. Four-reflection paths are about R^2 weaker (<1e-3 of two-reflection paths
   with AR coatings).
 - No barrel/mount scatter, no sensor cover glass / IR filter (approximate with `sensor_reflectance`),
