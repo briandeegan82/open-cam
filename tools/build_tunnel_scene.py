@@ -5,16 +5,19 @@ A two-lane, one-way road tunnel bored through a hillside: concrete headwall port
 ends, a lined tube (vertical walls, elliptical vault, Lambertian asphalt with lane markings)
 and two rows of LED line luminaires. Daylight outside is the highway scene's absolute
 clear-sky model (spectral sun + analytic CIE clear sky). Inside, the luminaires are solved
-so that the *direct* road luminance hits the design levels of a threshold zone
-(``L_th = k * L20``) and an interior zone, following the CIE 88 zone definitions as
-summarised in the sources listed in docs/TUNNEL_SCENES.md.
+so that the *direct* road luminance follows a stepped zone profile: threshold
+(``L_th = k * L20``, then 0.5 L_th), transition (0.15 / 0.05 / 0.02 L_th, never below the
+interior level), interior, and exit (3x then 5x the interior level). The zones follow the CIE 88
+definitions and the step ratios follow the Chinese 2014 highway-tunnel guideline, both as
+summarised in the sources listed in docs/TUNNEL_SCENES.md (``--zone-profile two-step`` gives
+the earlier threshold -> interior step).
 
 Two views (``--view``), each written as its own pbrt file and manifest:
 
 * ``outside_in``: camera on the approach road in daylight looking into the entrance portal
   (black-hole effect: bright exterior vs dark tube, a car in the threshold zone);
-* ``inside_out``: camera in the interior zone looking at the exit portal (white-hole effect:
-  lit interior vs bright exit, a car silhouetted against the exit).
+* ``inside_out``: camera in the interior zone looking at the exit portal through the exit zone
+  (white-hole effect: lit interior vs bright exit, a car silhouetted against the exit).
 
 World units are metres, y up, the road runs along +z. Each manifest holds raster ROIs (pinhole
 projection; realistic-lens runs re-derive them from the ``world_box`` with a gbuffer render),
@@ -183,15 +186,99 @@ def marking_rects(z0: float, z1: float) -> list[tuple[float, float, float, float
     return rects
 
 
-def luminaire_positions(z_in: float, z_out: float, threshold_len: float, spacing_th: float, spacing_in: float):
-    """(x, z_centre, zone) for both rows; threshold zone from the entrance portal, then interior."""
+# Stepped zone profile (ratios of L_th for threshold/transition, of L_in for exit), as
+# summarised from the Chinese 2014 highway-tunnel lighting guideline in [S23] (docs/TUNNEL_SCENES.md).
+THRESHOLD_STEPS = (1.0, 0.5)
+TRANSITION_STEPS = (0.15, 0.05, 0.02)
+EXIT_STEPS = (3.0, 5.0)
+
+
+def zone_profile(
+    z_in: float,
+    z_out: float,
+    l_th: float,
+    l_in: float,
+    threshold_len: float,
+    transition_lens: tuple[float, ...],
+    exit_lens: tuple[float, ...],
+    spacing: dict[str, float],
+    profile: str = "stepped",
+) -> list[dict]:
+    """Lighting zones along the tube, entrance to exit: name, [z0, z1), design road luminance, lamp spacing.
+
+    ``stepped``: two threshold halves (L_th, 0.5 L_th), transition steps at 0.15 / 0.05 / 0.02 L_th
+    (a step at or below the interior level L_in is interior, so the transition ends there),
+    interior, then the exit zone at 3 L_in and 5 L_in. ``two-step``: threshold L_th, then interior.
+    """
+    if profile == "two-step":
+        steps = [("threshold", threshold_len, l_th, spacing["threshold"])]
+        exits: list[tuple[str, float, float, float]] = []
+    else:
+        steps = [
+            (f"threshold_{i + 1}", 0.5 * threshold_len, r * l_th, spacing["threshold"])
+            for i, r in enumerate(THRESHOLD_STEPS)
+        ]
+        for i, (r, ln) in enumerate(zip(TRANSITION_STEPS, transition_lens)):
+            if r * l_th <= l_in:
+                break
+            steps.append((f"transition_{i + 1}", ln, r * l_th, spacing["transition"]))
+        exits = [
+            (f"exit_{i + 1}", ln, r * l_in, spacing["exit"]) for i, (r, ln) in enumerate(zip(EXIT_STEPS, exit_lens))
+        ]
+    zones, z = [], z_in
+    for name, ln, lum, sp in steps:
+        zones.append({"zone": name, "z0": z, "z1": z + ln, "road_luminance": lum, "spacing": sp})
+        z += ln
+    z_exit = z_out - sum(e[1] for e in exits)
+    if z_exit <= z:
+        raise SystemExit("entrance + exit zones are longer than the tunnel: shorten them or use --tunnel-length")
+    zones.append({"zone": "interior", "z0": z, "z1": z_exit, "road_luminance": l_in, "spacing": spacing["interior"]})
+    z = z_exit
+    for name, ln, lum, sp in exits:
+        zones.append({"zone": name, "z0": z, "z1": z + ln, "road_luminance": lum, "spacing": sp})
+        z += ln
+    return zones
+
+
+def zone_at(zones: list[dict], z: float) -> str:
+    for zn in zones:
+        if zn["z0"] <= z < zn["z1"]:
+            return zn["zone"]
+    return zones[-1]["zone"] if z >= zones[-1]["z1"] else zones[0]["zone"]
+
+
+def luminaire_positions(zones: list[dict]):
+    """(x, z_centre, zone) for both rows, from the entrance portal; spacing follows the zone of each lamp."""
     out = []
-    z = z_in + 0.5 * LAMP_SIZE[1] + 0.5
-    while z < z_out - 0.5 * LAMP_SIZE[1]:
-        zone = "threshold" if z < z_in + threshold_len else "interior"
+    z = zones[0]["z0"] + 0.5 * LAMP_SIZE[1] + 0.5
+    z_end = zones[-1]["z1"] - 0.5 * LAMP_SIZE[1]
+    by_name = {zn["zone"]: zn for zn in zones}
+    while z < z_end:
+        zone = zone_at(zones, z)
         out += [(x, z, zone) for x in LAMP_X]
-        z += spacing_th if zone == "threshold" else spacing_in
+        z += by_name[zone]["spacing"]
     return out
+
+
+def zone_road_points(zn: dict) -> np.ndarray:
+    """7 x 13 road grid at the zone centre (+-6 m, or +-0.4 of a shorter zone) where the lamps are solved."""
+    zc, h = 0.5 * (zn["z0"] + zn["z1"]), min(6.0, 0.4 * (zn["z1"] - zn["z0"]))
+    return np.array([(x, 0.0, zc + dz) for x in np.linspace(0.5, ROAD_W - 0.5, 7) for dz in np.linspace(-h, h, 13)])
+
+
+def solve_lamp_luminance(zones: list[dict], lamps: list[tuple[float, float, str]], rho: float) -> dict[str, float]:
+    """Lamp luminance per zone so the direct road luminance (all zones' lamps) hits each zone's design value.
+
+    Solves ``rho / pi * sum_j E_ij L_j = L_road,i`` where E_ij is the mean horizontal illuminance at
+    zone i's centre grid from unit-luminance lamps of zone j (spill across zone boundaries included).
+    """
+    names = [zn["zone"] for zn in zones]
+    a = np.array([[direct_road_illuminance(zone_road_points(zi), lamps, j).mean() for j in names] for zi in zones])
+    b = np.array([math.pi * zn["road_luminance"] / rho for zn in zones])
+    lum = np.linalg.solve(a, b)
+    if np.any(lum <= 0):
+        raise SystemExit(f"no non-negative lamp solution for zones {names}: lengthen the short zones")
+    return {n: float(v) for n, v in zip(names, lum)}
 
 
 def direct_road_illuminance(points: np.ndarray, lamps: list[tuple[float, float, str]], zone: str) -> np.ndarray:
@@ -247,6 +334,13 @@ class Projector:
         return r if r[2] - r[0] >= 2 and r[3] - r[1] >= 2 else None
 
 
+def _lengths(text: str) -> tuple[float, ...]:
+    vals = tuple(float(v) for v in text.split(",") if v.strip())
+    if not vals or min(vals) <= 0:
+        raise argparse.ArgumentTypeError("expected positive comma-separated lengths [m]")
+    return vals
+
+
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     root = Path(__file__).resolve().parents[1]
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -264,9 +358,26 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     ap.add_argument("--l20", type=float, default=3000.0, help="Design access-zone luminance L20 [cd/m^2].")
     ap.add_argument("--k", type=float, default=0.025, help="Threshold-zone ratio k = L_th / L20.")
     ap.add_argument("--interior-luminance", type=float, default=6.0, help="Interior-zone road luminance [cd/m^2].")
-    ap.add_argument("--threshold-length", type=float, default=80.0, help="Threshold-zone length [m].")
+    ap.add_argument(
+        "--zone-profile",
+        choices=("stepped", "two-step"),
+        default="stepped",
+        help="stepped: threshold, transition, interior and exit zones; two-step: threshold then interior only.",
+    )
+    ap.add_argument("--threshold-length", type=float, default=80.0, help="Threshold-zone length (both halves) [m].")
+    ap.add_argument(
+        "--transition-lengths",
+        type=_lengths,
+        default=(72.0, 89.0, 133.0),
+        help="Transition step lengths [m], comma-separated (0.15 / 0.05 / 0.02 L_th).",
+    )
+    ap.add_argument(
+        "--exit-lengths", type=_lengths, default=(30.0, 30.0), help="Exit step lengths [m] (3x / 5x interior)."
+    )
     ap.add_argument("--spacing-threshold", type=float, default=3.0, help="Luminaire spacing, threshold zone [m].")
+    ap.add_argument("--spacing-transition", type=float, default=4.5, help="Luminaire spacing, transition zone [m].")
     ap.add_argument("--spacing-interior", type=float, default=9.0, help="Luminaire spacing, interior zone [m].")
+    ap.add_argument("--spacing-exit", type=float, default=4.5, help="Luminaire spacing, exit zone [m].")
     ap.add_argument("--lamp", choices=("led_4000k", "hps"), default="led_4000k")
     ap.add_argument("--target", action=argparse.BooleanOptionalAction, default=True, help="Place the target cars.")
     add_camera_args(ap, fov=30.0)
@@ -286,8 +397,6 @@ def build(args: argparse.Namespace) -> dict:  # noqa: C901 (linear scene assembl
     spd.mkdir(parents=True, exist_ok=True)
     z_in = float(args.portal_distance)
     z_out = z_in + float(args.tunnel_length)
-    if args.threshold_length >= args.tunnel_length - args.exit_distance:
-        raise SystemExit("--threshold-length must end before the inside_out camera")
 
     # ---- spectra
     wl = np.arange(args.spectral_lambda_min, args.spectral_lambda_max + 1e-9, args.step_nm)
@@ -318,16 +427,25 @@ def build(args: argparse.Namespace) -> dict:  # noqa: C901 (linear scene assembl
     rho_lamp = luminous_reflectance(rho_road, np.interp(wl, LIGHT_WL, lamp_spd), wl)
     l_th = float(args.k) * float(args.l20)
     l_in = float(args.interior_luminance)
-    lamps = luminaire_positions(z_in, z_out, args.threshold_length, args.spacing_threshold, args.spacing_interior)
-    xs_road = np.linspace(0.5, ROAD_W - 0.5, 7)
-    lamp_l = {}
-    for zone, l_road, zc in (
-        ("threshold", l_th, z_in + 0.5 * args.threshold_length),
-        ("interior", l_in, 0.5 * (z_in + args.threshold_length + z_out)),
-    ):
-        pts = np.array([(x, 0.0, zc + dz) for x in xs_road for dz in np.linspace(-6.0, 6.0, 13)])
-        e1 = float(direct_road_illuminance(pts, lamps, zone).mean())
-        lamp_l[zone] = math.pi * l_road / rho_lamp / e1
+    spacing = {
+        "threshold": args.spacing_threshold,
+        "transition": args.spacing_transition,
+        "interior": args.spacing_interior,
+        "exit": args.spacing_exit,
+    }
+    zones = zone_profile(
+        z_in,
+        z_out,
+        l_th,
+        l_in,
+        float(args.threshold_length),
+        tuple(args.transition_lengths),
+        tuple(args.exit_lengths),
+        spacing,
+        args.zone_profile,
+    )
+    lamps = luminaire_positions(zones)
+    lamp_l = solve_lamp_luminance(zones, lamps, rho_lamp)
     l_ext = rho_sun * e_ref / math.pi
 
     # ---- shared world
@@ -388,8 +506,12 @@ def build(args: argparse.Namespace) -> dict:  # noqa: C901 (linear scene assembl
             lamp_l[zone],
         )
     targets = {
-        "outside_in": {"x": 0.5 * LANE_W, "z": z_in + 25.0, "zone": "threshold"},
-        "inside_out": {"x": 0.5 * LANE_W, "z": z_out - 15.0, "zone": "interior (silhouetted against the exit)"},
+        "outside_in": {"x": 0.5 * LANE_W, "z": z_in + 25.0, "zone": zone_at(zones, z_in + 25.0)},
+        "inside_out": {
+            "x": 0.5 * LANE_W,
+            "z": z_out - 15.0,
+            "zone": f"{zone_at(zones, z_out - 15.0)} (silhouetted against the exit)",
+        },
     }
 
     common = {
@@ -408,13 +530,12 @@ def build(args: argparse.Namespace) -> dict:  # noqa: C901 (linear scene assembl
         },
         "luminaires": {
             "count": len(lamps),
-            "count_threshold": sum(1 for lp in lamps if lp[2] == "threshold"),
-            "count_interior": sum(1 for lp in lamps if lp[2] == "interior"),
+            "count_by_zone": {zn["zone"]: sum(1 for lp in lamps if lp[2] == zn["zone"]) for zn in zones},
             "lamp_spectrum": args.lamp,
             "size_m": list(LAMP_SIZE),
             "mount_height_m": LAMP_Y,
             "rows_x_m": list(LAMP_X),
-            "spacing_m": {"threshold": args.spacing_threshold, "interior": args.spacing_interior},
+            "spacing_m": {zn["zone"]: zn["spacing"] for zn in zones},
             "luminance_cd_m2": lamp_l,
         },
         "photometry": {
@@ -423,6 +544,18 @@ def build(args: argparse.Namespace) -> dict:  # noqa: C901 (linear scene assembl
             "threshold_road_luminance_cd_m2": l_th,
             "interior_road_luminance_cd_m2": l_in,
             "threshold_length_m": float(args.threshold_length),
+            "zone_profile": args.zone_profile,
+            "zones": [
+                {
+                    "zone": zn["zone"],
+                    "z_start_m": zn["z0"],
+                    "z_end_m": zn["z1"],
+                    "length_m": zn["z1"] - zn["z0"],
+                    "road_luminance_cd_m2": zn["road_luminance"],
+                    "luminaire_spacing_m": zn["spacing"],
+                }
+                for zn in zones
+            ],
             "exterior_road_luminance_cd_m2": l_ext,
             "road_luminous_reflectance": {"daylight": rho_sun, "lamp": rho_lamp},
             "note": "tunnel road luminances are design values for the direct lamp light (interreflections add to them)",
@@ -436,7 +569,12 @@ def build(args: argparse.Namespace) -> dict:  # noqa: C901 (linear scene assembl
         },
         "approximations": [
             "Lambertian asphalt (no road-surface r-table / specular lobe)",
-            "step from threshold to interior luminance: no transition or exit-zone lighting",
+            (
+                "step from threshold to interior luminance: no transition or exit-zone lighting"
+                if args.zone_profile == "two-step"
+                else "stepped zone luminances (constant per step), not a continuous adaptation curve"
+            ),
+            "zone lengths are fixed in metres, not derived from design speed / stopping distance",
             "lamp output solved for direct road luminance only; walls and daylight spill add to it",
             "box proxy cars as targets",
         ],
@@ -485,13 +623,36 @@ def build(args: argparse.Namespace) -> dict:  # noqa: C901 (linear scene assembl
             }
             dark, bright = "threshold_road", "exterior_road"
         else:
+            # Dark reference: the road 12-30 m ahead, in whichever zone the camera looks at
+            # (interior, or the exit zone with the default stepped profile and --exit-distance).
+            rz = (cam_z + 12.0, cam_z + 30.0)
+            kind = zone_at(zones, 0.5 * (rz[0] + rz[1]))
+            if zone_at(zones, rz[0]) != kind or zone_at(zones, rz[1] - 1e-6) != kind:
+                raise SystemExit(
+                    f"inside_out: road 12-30 m ahead straddles a zone boundary ({kind}); change --exit-distance"
+                )
+            dark = (
+                "interior_road"
+                if kind == "interior"
+                else "exit_zone_road"
+                if kind.startswith("exit")
+                else f"{kind}_road"
+            )
+            l_dark = next(zn["road_luminance"] for zn in zones if zn["zone"] == kind)
             boxes = {
-                "interior_road": ([LANE_W + 0.4, ROAD_W - 0.4, 0.0, 0.0, cam_z + 12.0, cam_z + 30.0], "dark", l_in),
+                dark: ([LANE_W + 0.4, ROAD_W - 0.4, 0.0, 0.0, *rz], "dark", l_dark),
                 "interior_wall": ([WALL_X[1], WALL_X[1], 0.8, 3.5, cam_z + 8.0, cam_z + 30.0], "dark", None),
                 "exit_opening": ([LANE_W + 0.3, ROAD_W, 2.6, 6.0, z_out, z_out], "exterior", None),
                 "exit_road": ([0.4, ROAD_W - 0.4, 0.0, 0.0, z_out + 3.0, z_out + 40.0], "exterior", l_ext),
             }
-            dark, bright = "interior_road", "exit_road"
+            last = zones[-1]
+            if dark == "interior_road" and last["zone"].startswith("exit") and last["z1"] - last["z0"] > 8.0:
+                boxes["exit_zone_road"] = (
+                    [LANE_W + 0.4, ROAD_W - 0.4, 0.0, 0.0, last["z0"] + 2.0, last["z1"] - 3.0],
+                    "dark",
+                    last["road_luminance"],
+                )
+            bright = "exit_road"
         boxes["target"] = ([tg["x"] - 0.75, tg["x"] + 0.75, 0.45, 1.2, rear, rear], "target", None)
         proj = Projector(eye, target, args.fov, args.xres, args.yres)
         rois = {}
