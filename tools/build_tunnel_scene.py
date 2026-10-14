@@ -40,6 +40,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import road_rtable as rt  # noqa: E402
 from build_highway_scene import (  # noqa: E402
     DASH,
     GAP,
@@ -266,15 +267,29 @@ def zone_road_points(zn: dict) -> np.ndarray:
     return np.array([(x, 0.0, zc + dz) for x in np.linspace(0.5, ROAD_W - 0.5, 7) for dz in np.linspace(-h, h, 13)])
 
 
-def solve_lamp_luminance(zones: list[dict], lamps: list[tuple[float, float, str]], rho: float) -> dict[str, float]:
+def solve_lamp_luminance(
+    zones: list[dict],
+    lamps: list[tuple[float, float, str]],
+    rho: float,
+    table: rt.RTable | None = None,
+    k_tint: float = 1.0,
+) -> dict[str, float]:
     """Lamp luminance per zone so the direct road luminance (all zones' lamps) hits each zone's design value.
 
-    Solves ``rho / pi * sum_j E_ij L_j = L_road,i`` where E_ij is the mean horizontal illuminance at
-    zone i's centre grid from unit-luminance lamps of zone j (spill across zone boundaries included).
+    Lambertian road: solves ``rho / pi * sum_j E_ij L_j = L_road,i`` where E_ij is the mean horizontal
+    illuminance at zone i's centre grid from unit-luminance lamps of zone j (spill across zone boundaries
+    included). r-table road: E_ij is replaced by the r-table luminance (``direct_road_luminance``) times
+    ``k_tint``, the luminous factor of the road tint under the lamp.
     """
     names = [zn["zone"] for zn in zones]
-    a = np.array([[direct_road_illuminance(zone_road_points(zi), lamps, j).mean() for j in names] for zi in zones])
-    b = np.array([math.pi * zn["road_luminance"] / rho for zn in zones])
+    if table is None:
+        a = np.array([[direct_road_illuminance(zone_road_points(zi), lamps, j).mean() for j in names] for zi in zones])
+        b = np.array([math.pi * zn["road_luminance"] / rho for zn in zones])
+    else:
+        a = k_tint * np.array(
+            [[direct_road_luminance(zone_road_points(zi), lamps, j, table).mean() for j in names] for zi in zones]
+        )
+        b = np.array([zn["road_luminance"] for zn in zones])
     lum = np.linalg.solve(a, b)
     if np.any(lum <= 0):
         raise SystemExit(f"no non-negative lamp solution for zones {names}: lengthen the short zones")
@@ -296,6 +311,31 @@ def direct_road_illuminance(points: np.ndarray, lamps: list[tuple[float, float, 
             cos = v[:, 1] / np.sqrt(d2)  # same angle at lamp (normal -y) and road (normal +y)
             e += da * cos * cos / d2
     return e
+
+
+def direct_road_luminance(
+    points: np.ndarray, lamps: list[tuple[float, float, str]], zone: str, table: rt.RTable
+) -> np.ndarray:
+    """r-table road luminance [cd/m^2] at ``points`` from unit-luminance lamps of ``zone`` (neutral tint).
+
+    CIE observer convention: 1 deg above the road looking along +z (the driving direction), so beta = 0
+    for a lamp further down the road than the point.
+    """
+    w, ln = LAMP_SIZE
+    sub = np.linspace(-0.5 + 1 / 12, 0.5 - 1 / 12, 6) * ln
+    out = np.zeros(len(points))
+    da = w * ln / len(sub)
+    for x, z, zz in lamps:
+        if zz != zone:
+            continue
+        for dz in sub:
+            v = np.array([x, LAMP_Y, z + dz]) - points
+            d2 = np.einsum("ij,ij->i", v, v)
+            cos = v[:, 1] / np.sqrt(d2)
+            h = np.hypot(v[:, 0], v[:, 2])
+            beta = np.degrees(np.arccos(np.clip(v[:, 2] / np.maximum(h, 1e-12), -1, 1)))
+            out += da * cos * cos / d2 * table.q(h / v[:, 1], beta)
+    return out
 
 
 def luminous_reflectance(rho: np.ndarray, spd: np.ndarray, wl: np.ndarray) -> float:
@@ -386,6 +426,17 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     ap.add_argument("--cam-pitch", type=float, default=0.0, help="Camera pitch [deg], negative = down.")
     add_film_args(ap, xres=960, yres=640, pixelsamples=256)
     ap.add_argument("--maxdepth", type=int, default=5)
+    ap.add_argument(
+        "--road-reflection",
+        choices=("lambertian", "rtable"),
+        default="lambertian",
+        help="Road surface: Lambertian asphalt (default) or a road r-table (pbrt roadrtable material).",
+    )
+    ap.add_argument(
+        "--road-rtable",
+        default="placeholder_dry_model",
+        help="r-table CSV or name in config/road_rtables (default: placeholder, not CIE data).",
+    )
     ap.add_argument("--sampler-seed", type=int, default=0, help="In-scene sampler seed (overrides pbrt --seed).")
     return ap.parse_args(argv)
 
@@ -425,6 +476,24 @@ def build(args: argparse.Namespace) -> dict:  # noqa: C901 (linear scene assembl
     rho_road = reflectance("asphalt_aged", wl)
     rho_sun = luminous_reflectance(rho_road, sun_spd, wl)
     rho_lamp = luminous_reflectance(rho_road, np.interp(wl, LIGHT_WL, lamp_spd), wl)
+    table, road_refl = None, {"model": "lambertian"}
+    if args.road_reflection == "rtable":
+        table = rt.load(rt.resolve(args.road_rtable))
+        rt.warn_if_placeholder(table)
+        tint = rt.tint_spectrum(rho_road, wl)
+        write_spd(spd / "asphalt_aged_rtint.spd", wl, tint)
+        k_sun = luminous_reflectance(tint, sun_spd, wl)
+        k_lamp = luminous_reflectance(tint, np.interp(wl, LIGHT_WL, lamp_spd), wl)
+        road_refl = {
+            "model": "rtable",
+            "table": table.summary(),
+            "table_file": str(rt.resolve(args.road_rtable)),
+            "tint_spd": "spd/asphalt_aged_rtint.spd (asphalt_aged shape, luminous reflectance 1)",
+            "tint_luminous_factor": {"daylight": k_sun, "lamp": k_lamp},
+            "observation_blend_deg": [rt.OBSERVATION_MIN_DEG, rt.OBSERVATION_MAX_DEG],
+            "design_observer": "1 deg above the road looking along +z (CIE r-table geometry)",
+            "exterior_sky_term": "Q0 x horizontal sky illuminance (sky treated as uniform)",
+        }
     l_th = float(args.k) * float(args.l20)
     l_in = float(args.interior_luminance)
     spacing = {
@@ -445,8 +514,16 @@ def build(args: argparse.Namespace) -> dict:  # noqa: C901 (linear scene assembl
         args.zone_profile,
     )
     lamps = luminaire_positions(zones)
-    lamp_l = solve_lamp_luminance(zones, lamps, rho_lamp)
-    l_ext = rho_sun * e_ref / math.pi
+    if table is None:
+        lamp_l = solve_lamp_luminance(zones, lamps, rho_lamp)
+        l_ext = rho_sun * e_ref / math.pi
+    else:
+        lamp_l = solve_lamp_luminance(zones, lamps, rho_lamp, table, k_lamp)
+        hs = math.hypot(sun_w[0], sun_w[2])
+        beta_sun = math.degrees(math.acos(max(-1.0, min(1.0, sun_w[2] / max(hs, 1e-12)))))
+        q_sun = float(table.q(1.0 / math.tan(math.radians(max(elev, 1e-3))), beta_sun))
+        l_ext = k_sun * (q_sun * e_dn * sin_el + table.q0() * e_sky_h)
+        road_refl["sun_q"] = q_sun
 
     # ---- shared world
     W = [
@@ -465,8 +542,14 @@ def build(args: argparse.Namespace) -> dict:  # noqa: C901 (linear scene assembl
         f'        "float illuminance" [{_f(e_sky_h)}]',
         "AttributeEnd",
         "",
-        # Lambertian asphalt (no CIE r-table specular lobe) so road luminance = rho * E / pi exactly.
-        'MakeNamedMaterial "asphalt" "string type" "diffuse" "spectrum reflectance" "spd/asphalt_aged.spd"',
+        *(
+            [
+                # Lambertian asphalt (no CIE r-table specular lobe) so road luminance = rho * E / pi exactly.
+                'MakeNamedMaterial "asphalt" "string type" "diffuse" "spectrum reflectance" "spd/asphalt_aged.spd"',
+            ]
+            if table is None
+            else rt.material_lines("asphalt", table, '"spectrum tint" "spd/asphalt_aged_rtint.spd"')
+        ),
         'MakeNamedMaterial "paint_white" "string type" "coateddiffuse"'
         ' "spectrum reflectance" "spd/paint_road_white.spd" "float roughness" [0.3]',
         'MakeNamedMaterial "concrete" "string type" "diffuse" "spectrum reflectance" "spd/concrete.spd"',
@@ -558,6 +641,7 @@ def build(args: argparse.Namespace) -> dict:  # noqa: C901 (linear scene assembl
             ],
             "exterior_road_luminance_cd_m2": l_ext,
             "road_luminous_reflectance": {"daylight": rho_sun, "lamp": rho_lamp},
+            "road_reflection": road_refl,
             "note": "tunnel road luminances are design values for the direct lamp light (interreflections add to them)",
         },
         "lighting": {
@@ -568,7 +652,12 @@ def build(args: argparse.Namespace) -> dict:  # noqa: C901 (linear scene assembl
             "reference": "horizontal illuminance (sun + sky) at road level, unoccluded",
         },
         "approximations": [
-            "Lambertian asphalt (no road-surface r-table / specular lobe)",
+            (
+                "Lambertian asphalt (no road-surface r-table / specular lobe)"
+                if table is None
+                else f"r-table asphalt ({table.name}{', PLACEHOLDER not CIE data' if table.placeholder else ''}):"
+                " design luminances for a 1 deg observer; steeper views blend to Q0"
+            ),
             (
                 "step from threshold to interior luminance: no transition or exit-zone lighting"
                 if args.zone_profile == "two-step"

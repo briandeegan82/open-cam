@@ -1,0 +1,395 @@
+diff --git a/src/pbrt/base/bxdf.h b/src/pbrt/base/bxdf.h
+index bc7e5e7..575ddc4 100644
+--- a/src/pbrt/base/bxdf.h
++++ b/src/pbrt/base/bxdf.h
+@@ -162,13 +162,14 @@ class NormalizedFresnelBxDF;
+ class CoatedDiffuseBxDF;
+ class CoatedConductorBxDF;
+ class RetroreflectiveBxDF;
++class RoadRTableBxDF;
+ 
+ // BxDF Definition
+ class BxDF
+     : public TaggedPointer<DiffuseTransmissionBxDF, DiffuseBxDF, CoatedDiffuseBxDF,
+                            CoatedConductorBxDF, DielectricBxDF, ThinDielectricBxDF,
+                            HairBxDF, MeasuredBxDF, ConductorBxDF, NormalizedFresnelBxDF,
+-                           RetroreflectiveBxDF> {
++                           RetroreflectiveBxDF, RoadRTableBxDF> {
+   public:
+     // BxDF Interface
+     PBRT_CPU_GPU inline BxDFFlags Flags() const;
+diff --git a/src/pbrt/base/material.h b/src/pbrt/base/material.h
+index f274696..4bec85d 100644
+--- a/src/pbrt/base/material.h
++++ b/src/pbrt/base/material.h
+@@ -32,6 +32,7 @@ class ThinDielectricMaterial;
+ class MixMaterial;
+ class RetroreflectiveMaterial;
+ class FluorescentMaterial;
++class RoadRTableMaterial;
+ 
+ // Material Definition
+ class Material
+@@ -39,7 +40,7 @@ class Material
+           CoatedDiffuseMaterial, CoatedConductorMaterial, ConductorMaterial,
+           DielectricMaterial, DiffuseMaterial, DiffuseTransmissionMaterial, HairMaterial,
+           MeasuredMaterial, SubsurfaceMaterial, ThinDielectricMaterial, MixMaterial,
+-          RetroreflectiveMaterial, FluorescentMaterial
++          RetroreflectiveMaterial, FluorescentMaterial, RoadRTableMaterial
+ 
+           > {
+   public:
+diff --git a/src/pbrt/bxdfs.cpp b/src/pbrt/bxdfs.cpp
+index 61508b0..4594557 100644
+--- a/src/pbrt/bxdfs.cpp
++++ b/src/pbrt/bxdfs.cpp
+@@ -59,6 +59,11 @@ std::string ToString(TransportMode mode) {
+ }
+ 
+ // BxDF Method Definitions
++std::string RoadRTableBxDF::ToString() const {
++    return StringPrintf("[ RoadRTableBxDF tint: %s alpha0: %f alpha1: %f q0: %f ]", tint,
++                        alpha0, alpha1, table ? table->q0 : Float(0));
++}
++
+ std::string RetroreflectiveBxDF::ToString() const {
+     return StringPrintf("[ RetroreflectiveBxDF R: %s ra: %s alpha0: %f width: %f q: %f ]", R,
+                         ra, alpha0, width, q);
+diff --git a/src/pbrt/bxdfs.h b/src/pbrt/bxdfs.h
+index 0d3957a..3cb0cb9 100644
+--- a/src/pbrt/bxdfs.h
++++ b/src/pbrt/bxdfs.h
+@@ -14,6 +14,7 @@
+ #include <pbrt/util/math.h>
+ #include <pbrt/util/memory.h>
+ #include <pbrt/util/pstd.h>
++#include <pbrt/util/sampling.h>
+ #include <pbrt/util/scattering.h>
+ #include <pbrt/util/spectrum.h>
+ #include <pbrt/util/taggedptr.h>
+@@ -81,6 +82,159 @@ class DiffuseBxDF {
+     SampledSpectrum R;
+ };
+ 
++// RoadRTableBxDF Definition
++// Road-surface reflection from a reduced luminance coefficient table r(tan gamma, beta)
++// (CIE 30.2 / CIE 144 r-tables). q = L / E_h = r / cos^3(gamma) is the BRDF for an observer
++// about 1 deg above the surface; gamma is the incidence angle from the normal and
++// beta = pi - |phi_i - phi_o| (beta = 0: light beyond the point, facing the observer).
++// r-tables are only defined for that grazing observation angle, so for observer elevations
++// above alpha0 the BRDF blends (smoothstep to alpha1) into a Lambertian lobe with the
++// table's average luminance coefficient Q0. tan gamma beyond the table is clamped.
++// Sampling: tabulated q cos(gamma) over (gamma, beta) (the lobe peaks at grazing incidence,
++// beyond the point), mixed with cosine sampling for the Q0 lobe and as a floor.
++struct RoadRTable {
++    int nTan = 0, nBeta = 0;
++    const Float *tanGamma = nullptr, *beta = nullptr, *r = nullptr;  // beta [rad]; r [tan][beta]
++    Float q0 = 0;
++    const PiecewiseConstant2D *distrib = nullptr;  // q cos sin over [0, pi/2] x [0, pi]
++    Float albedo = 0;                              // integral of q cos over the hemisphere
++
++    PBRT_CPU_GPU
++    Float Q(Float t, Float b) const {
++        t = Clamp(t, tanGamma[0], tanGamma[nTan - 1]);
++        b = Clamp(b, beta[0], beta[nBeta - 1]);
++        size_t i = FindInterval(nTan, [&](size_t k) { return tanGamma[k] <= t; });
++        size_t j = FindInterval(nBeta, [&](size_t k) { return beta[k] <= b; });
++        Float ft = Clamp((t - tanGamma[i]) / (tanGamma[i + 1] - tanGamma[i]), 0, 1);
++        Float fb = Clamp((b - beta[j]) / (beta[j + 1] - beta[j]), 0, 1);
++        const Float *r0 = r + i * nBeta, *r1 = r0 + nBeta;
++        Float rv = Lerp(ft, Lerp(fb, r0[j], r0[j + 1]), Lerp(fb, r1[j], r1[j + 1]));
++        Float c2 = 1 + t * t;
++        return rv * c2 * std::sqrt(c2);
++    }
++};
++
++class RoadRTableBxDF {
++  public:
++    // RoadRTableBxDF Public Methods
++    RoadRTableBxDF() = default;
++    PBRT_CPU_GPU
++    RoadRTableBxDF(const RoadRTable *table, SampledSpectrum tint, Float alpha0, Float alpha1)
++        : table(table), tint(tint), alpha0(alpha0), alpha1(alpha1) {}
++
++    PBRT_CPU_GPU
++    static Float Beta(Vector3f wo, Vector3f wi) {
++        Float li = std::sqrt(Sqr(wi.x) + Sqr(wi.y)), lo = std::sqrt(Sqr(wo.x) + Sqr(wo.y));
++        Float cosPhi = (li > 0 && lo > 0) ? (wi.x * wo.x + wi.y * wo.y) / (li * lo) : -1;
++        return Pi - SafeACos(cosPhi);
++    }
++
++    PBRT_CPU_GPU
++    Float Blend(Vector3f wo) const { return SmoothStep(SafeASin(CosTheta(wo)), alpha0, alpha1); }
++
++    PBRT_CPU_GPU
++    Float Q(Vector3f wo, Vector3f wi) const {
++        Float ci = CosTheta(wi), so = CosTheta(wo);
++        if (ci <= 0 || so <= 0 || !table)
++            return 0;
++        Float w = Blend(wo);
++        Float qt = 0;
++        if (w < 1)
++            qt = table->Q(SafeSqrt(1 - ci * ci) / ci, Beta(wo, wi));
++        return (1 - w) * qt + w * table->q0;
++    }
++
++    // Probability of sampling the tabulated lobe (wo in the upper hemisphere).
++    PBRT_CPU_GPU
++    Float TableProb(Vector3f wo) const {
++        if (!table || !table->distrib)
++            return 0;
++        Float w = Blend(wo), at = (1 - w) * table->albedo, al = w * table->q0 * Pi;
++        return (at + al > 0) ? 0.9f * at / (at + al) : 0;
++    }
++
++    PBRT_CPU_GPU
++    Float TablePDF(Vector3f wo, Vector3f wi) const {
++        Float ci = CosTheta(wi), si = SinTheta(wi);
++        if (ci <= 0 || si < 1e-6f)
++            return 0;
++        return table->distrib->PDF(Point2f(SafeACos(ci), Beta(wo, wi))) / (2 * si);
++    }
++
++    PBRT_CPU_GPU
++    Float MixPDF(Vector3f wo, Vector3f wi) const {
++        Float pt = TableProb(wo);
++        return pt * (pt > 0 ? TablePDF(wo, wi) : 0) +
++               (1 - pt) * CosineHemispherePDF(AbsCosTheta(wi));
++    }
++
++    PBRT_CPU_GPU
++    SampledSpectrum f(Vector3f wo, Vector3f wi, TransportMode mode) const {
++        if (!SameHemisphere(wo, wi))
++            return SampledSpectrum(0.f);
++        if (wo.z < 0) {
++            wo = -wo;
++            wi = -wi;
++        }
++        return tint * Q(wo, wi);
++    }
++
++    PBRT_CPU_GPU
++    pstd::optional<BSDFSample> Sample_f(
++        Vector3f wo, Float uc, Point2f u, TransportMode mode,
++        BxDFReflTransFlags sampleFlags = BxDFReflTransFlags::All) const {
++        if (!(sampleFlags & BxDFReflTransFlags::Reflection))
++            return {};
++        bool flip = wo.z < 0;
++        Vector3f wou = flip ? -wo : wo, wi;
++        Float pt = TableProb(wou);
++        if (uc < pt) {
++            Point2f gb = table->distrib->Sample(u);
++            Float sgn = (uc / pt < 0.5f) ? 1 : -1;
++            Float phi = std::atan2(wou.y, wou.x) + sgn * (Pi - gb[1]);
++            Float st = std::sin(gb[0]);
++            wi = Vector3f(st * std::cos(phi), st * std::sin(phi), std::cos(gb[0]));
++        } else
++            wi = SampleCosineHemisphere(u);
++        Float pdf = MixPDF(wou, wi);
++        if (pdf <= 0 || wi.z <= 0)
++            return {};
++        if (flip)
++            wi = -wi;
++        return BSDFSample(f(wo, wi, mode), wi, pdf, BxDFFlags::DiffuseReflection);
++    }
++
++    PBRT_CPU_GPU
++    Float PDF(Vector3f wo, Vector3f wi, TransportMode mode,
++              BxDFReflTransFlags sampleFlags = BxDFReflTransFlags::All) const {
++        if (!(sampleFlags & BxDFReflTransFlags::Reflection) || !SameHemisphere(wo, wi))
++            return 0;
++        if (wo.z < 0) {
++            wo = -wo;
++            wi = -wi;
++        }
++        return MixPDF(wo, wi);
++    }
++
++    PBRT_CPU_GPU
++    static constexpr const char *Name() { return "RoadRTableBxDF"; }
++
++    std::string ToString() const;
++
++    PBRT_CPU_GPU
++    void Regularize() {}
++
++    PBRT_CPU_GPU
++    BxDFFlags Flags() const {
++        return (tint && table) ? BxDFFlags::DiffuseReflection : BxDFFlags::Unset;
++    }
++
++  private:
++    const RoadRTable *table = nullptr;
++    SampledSpectrum tint;
++    Float alpha0 = 0, alpha1 = 0;
++};
++
+ // RetroreflectiveBxDF Definition
+ // Lambertian base plus a retroreflective lobe centred on the incident direction,
+ // parameterised by the coefficient of retroreflection R_A [cd lx^-1 m^-2]
+diff --git a/src/pbrt/materials.cpp b/src/pbrt/materials.cpp
+index 07f42fa..30094f8 100644
+--- a/src/pbrt/materials.cpp
++++ b/src/pbrt/materials.cpp
+@@ -183,6 +183,86 @@ HairMaterial *HairMaterial::Create(const TextureParameterDictionary &parameters,
+                                           beta_m, beta_n, alpha);
+ }
+ 
++// RoadRTableMaterial Method Definitions
++std::string RoadRTableMaterial::ToString() const {
++    return StringPrintf("[ RoadRTableMaterial tint: %s nTan: %d nBeta: %d q0: %f alpha0: %f "
++                        "alpha1: %f ]",
++                        tint, table->nTan, table->nBeta, table->q0, alpha0, alpha1);
++}
++
++RoadRTableMaterial *RoadRTableMaterial::Create(const TextureParameterDictionary &parameters,
++                                               Image *normalMap, const FileLoc *loc,
++                                               Allocator alloc) {
++    // Reduced luminance coefficients r [cd m^-2 lx^-1] = value * rscale (tables: 1e-4).
++    std::vector<Float> tg = parameters.GetFloatArray("tangamma");
++    std::vector<Float> bd = parameters.GetFloatArray("beta");
++    std::vector<Float> rv = parameters.GetFloatArray("r");
++    Float scale = parameters.GetOneFloat("rscale", 1e-4f);
++    if (tg.size() < 2 || bd.size() < 2)
++        ErrorExit(loc, "\"tangamma\" and \"beta\" need at least two values each.");
++    if (rv.size() != tg.size() * bd.size())
++        ErrorExit(loc, "\"r\" needs %d values (tangamma x beta, row-major), got %d.",
++                  int(tg.size() * bd.size()), int(rv.size()));
++    if (tg[0] < 0 || bd[0] < 0 || bd.back() > 180)
++        ErrorExit(loc, "need tangamma >= 0 and 0 <= beta <= 180 degrees.");
++    for (size_t k = 1; k < tg.size(); ++k)
++        if (!(tg[k] > tg[k - 1]))
++            ErrorExit(loc, "\"tangamma\" must be strictly increasing.");
++    for (size_t k = 1; k < bd.size(); ++k)
++        if (!(bd[k] > bd[k - 1]))
++            ErrorExit(loc, "\"beta\" must be strictly increasing.");
++    for (Float v : rv)
++        if (v < 0)
++            ErrorExit(loc, "\"r\" values must be non-negative.");
++    Float *t = alloc.allocate_object<Float>(tg.size());
++    Float *b = alloc.allocate_object<Float>(bd.size());
++    Float *r = alloc.allocate_object<Float>(rv.size());
++    for (size_t k = 0; k < tg.size(); ++k)
++        t[k] = tg[k];
++    for (size_t k = 0; k < bd.size(); ++k)
++        b[k] = Radians(bd[k]);
++    for (size_t k = 0; k < rv.size(); ++k)
++        r[k] = rv[k] * scale;
++    RoadRTable *table = alloc.new_object<RoadRTable>();
++    table->nTan = int(tg.size());
++    table->nBeta = int(bd.size());
++    table->tanGamma = t;
++    table->beta = b;
++    table->r = r;
++    // Q0: mean q over the table's incidence solid angle (all beta), midpoint rule.
++    const int ng = 512, nb = 180;
++    Float gmax = std::atan(tg.back()), num = 0, den = 0;
++    for (int i = 0; i < ng; ++i) {
++        Float g = (i + 0.5f) / ng * gmax, w = std::sin(g);
++        for (int j = 0; j < nb; ++j)
++            num += w * table->Q(std::tan(g), (j + 0.5f) / nb * Pi);
++        den += w * nb;
++    }
++    table->q0 = num / den;
++    // Importance-sampling table: q cos(gamma) sin(gamma) on a (gamma, beta) grid.
++    const int nsg = 256, nsb = 90;
++    std::vector<Float> func(nsg * nsb);
++    for (int j = 0; j < nsb; ++j)
++        for (int i = 0; i < nsg; ++i) {
++            Float g = (i + 0.5f) / nsg * (Pi / 2);
++            func[j * nsg + i] =
++                table->Q(std::tan(g), (j + 0.5f) / nsb * Pi) * std::cos(g) * std::sin(g);
++        }
++    table->distrib = alloc.new_object<PiecewiseConstant2D>(
++        pstd::span<const Float>(func.data(), func.size()), nsg, nsb,
++        Bounds2f(Point2f(0, 0), Point2f(Pi / 2, Pi)), alloc);
++    table->albedo = 2 * table->distrib->Integral();
++    Float alpha0 = Radians(parameters.GetOneFloat("observationmin", 1.5f));
++    Float alpha1 = Radians(parameters.GetOneFloat("observationmax", 15.f));
++    SpectrumTexture tint =
++        parameters.GetSpectrumTexture("tint", nullptr, SpectrumType::Unbounded, alloc);
++    if (!tint)
++        tint = alloc.new_object<SpectrumConstantTexture>(alloc.new_object<ConstantSpectrum>(1.f));
++    FloatTexture displacement = parameters.GetFloatTextureOrNull("displacement", alloc);
++    return alloc.new_object<RoadRTableMaterial>(tint, table, alpha0, alpha1, displacement,
++                                                normalMap);
++}
++
+ // RetroreflectiveMaterial Method Definitions
+ std::string RetroreflectiveMaterial::ToString() const {
+     return StringPrintf("[ RetroreflectiveMaterial displacement: %s normalMap: %s "
+@@ -736,6 +816,8 @@ Material Material::Create(const std::string &name,
+         material = MeasuredMaterial::Create(parameters, normalMap, loc, alloc);
+     else if (name == "fluorescent")
+         material = FluorescentMaterial::Create(parameters, normalMap, loc, alloc);
++    else if (name == "roadrtable")
++        material = RoadRTableMaterial::Create(parameters, normalMap, loc, alloc);
+     else if (name == "retroreflective")
+         material = RetroreflectiveMaterial::Create(parameters, normalMap, loc, alloc);
+     else if (name == "subsurface")
+diff --git a/src/pbrt/materials.h b/src/pbrt/materials.h
+index 7f3f43e..46a71b6 100644
+--- a/src/pbrt/materials.h
++++ b/src/pbrt/materials.h
+@@ -475,6 +475,61 @@ class DiffuseMaterial {
+     SpectrumTexture reflectance;
+ };
+ 
++// RoadRTableMaterial Definition
++class RoadRTableMaterial {
++  public:
++    // RoadRTableMaterial Type Definitions
++    using BxDF = RoadRTableBxDF;
++    using BSSRDF = void;
++
++    // RoadRTableMaterial Public Methods
++    static const char *Name() { return "RoadRTableMaterial"; }
++
++    PBRT_CPU_GPU
++    FloatTexture GetDisplacement() const { return displacement; }
++    PBRT_CPU_GPU
++    const Image *GetNormalMap() const { return normalMap; }
++
++    static RoadRTableMaterial *Create(const TextureParameterDictionary &parameters,
++                                      Image *normalMap, const FileLoc *loc, Allocator alloc);
++
++    template <typename TextureEvaluator>
++    PBRT_CPU_GPU void GetBSSRDF(TextureEvaluator texEval, MaterialEvalContext ctx,
++                                SampledWavelengths &lambda, void *) const {}
++
++    PBRT_CPU_GPU static constexpr bool HasSubsurfaceScattering() { return false; }
++
++    std::string ToString() const;
++
++    RoadRTableMaterial(SpectrumTexture tint, const RoadRTable *table, Float alpha0,
++                       Float alpha1, FloatTexture displacement, Image *normalMap)
++        : normalMap(normalMap),
++          displacement(displacement),
++          tint(tint),
++          table(table),
++          alpha0(alpha0),
++          alpha1(alpha1) {}
++
++    template <typename TextureEvaluator>
++    PBRT_CPU_GPU bool CanEvaluateTextures(TextureEvaluator texEval) const {
++        return texEval.CanEvaluate({}, {tint});
++    }
++
++    template <typename TextureEvaluator>
++    PBRT_CPU_GPU RoadRTableBxDF GetBxDF(TextureEvaluator texEval, MaterialEvalContext ctx,
++                                        SampledWavelengths &lambda) const {
++        return RoadRTableBxDF(table, ClampZero(texEval(tint, ctx, lambda)), alpha0, alpha1);
++    }
++
++  private:
++    // RoadRTableMaterial Private Members
++    Image *normalMap;
++    FloatTexture displacement;
++    SpectrumTexture tint;
++    const RoadRTable *table;
++    Float alpha0, alpha1;
++};
++
+ // RetroreflectiveMaterial Definition
+ class RetroreflectiveMaterial {
+   public:

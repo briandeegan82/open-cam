@@ -202,3 +202,100 @@ def test_pbrt_radiance_ratio_matches_manifest(tmp_path):
         db = 20 * math.log10(lum[m["dynamic_range"]["bright_roi"]] / lum[m["dynamic_range"]["dark_roi"]])
         assert db == pytest.approx(m["dynamic_range"]["db"], abs=4.5), view
     shutil.rmtree(tmp_path / "out")
+
+
+@pytest.fixture(scope="module")
+def built_rtable(tmp_path_factory) -> dict:
+    return _build(tmp_path_factory.mktemp("tunnel_rt"), "--road-reflection", "rtable")
+
+
+def test_rtable_scene_and_manifest(built_rtable):
+    for b in built_rtable.values():
+        text = b["scene"].read_text()
+        assert '"string type" "roadrtable"' in text and "PLACEHOLDER, not CIE data" in text
+        rr = b["meta"]["photometry"]["road_reflection"]
+        assert rr["model"] == "rtable" and rr["table"]["placeholder"] is True
+        assert rr["tint_luminous_factor"]["lamp"] == pytest.approx(1.0, abs=0.02)
+        assert any("PLACEHOLDER" in a for a in b["meta"]["approximations"])
+
+
+def test_rtable_lamp_solve_hits_design_luminance(built_rtable):
+    """r-table road luminance (1 deg observer along +z) at every zone centre equals the design value."""
+    import road_rtable as rt
+
+    m = built_rtable["outside_in"]["meta"]
+    rr = m["photometry"]["road_reflection"]
+    table = rt.load(rr["table_file"])
+    zones = [
+        {"zone": z["zone"], "z0": z["z_start_m"], "z1": z["z_end_m"], "spacing": z["luminaire_spacing_m"]}
+        for z in m["photometry"]["zones"]
+    ]
+    lamps = bts.luminaire_positions(zones)
+    lamp_l = m["luminaires"]["luminance_cd_m2"]
+    k = rr["tint_luminous_factor"]["lamp"]
+    for zn, design in zip(zones, m["photometry"]["zones"]):
+        pts = bts.zone_road_points(zn)
+        lum = k * sum(bts.direct_road_luminance(pts, lamps, j, table).mean() * lamp_l[j] for j in lamp_l)
+        assert lum == pytest.approx(design["road_luminance_cd_m2"], rel=1e-9), zn["zone"]
+
+
+def test_direct_road_luminance_lambertian_table_matches_illuminance():
+    """A constant-q table (q = rho / pi) reproduces the Lambertian rho E / pi."""
+    import road_rtable as rt
+
+    t = np.linspace(0.0, 12.0, 4801)  # dense: r = q cos^3 is interpolated linearly in tan(gamma)
+    q = 0.08 / math.pi
+    table = rt.RTable("lambert", t, [0.0, 180.0], np.repeat((q / (1 + t * t) ** 1.5)[:, None], 2, axis=1))
+    zones = bts.zone_profile(
+        80.0,
+        420.0,
+        120.0,
+        6.0,
+        80.0,
+        (72.0,),
+        (60.0,),
+        {k: 9.0 for k in ("threshold", "transition", "interior", "exit")},
+        "stepped",
+    )
+    lamps = bts.luminaire_positions(zones)
+    pts = bts.zone_road_points(zones[0])
+    e = bts.direct_road_illuminance(pts, lamps, zones[0]["zone"])
+    lum = bts.direct_road_luminance(pts, lamps, zones[0]["zone"], table)
+    # lamps beyond tan(gamma) = 12 are clamped to the last row (a few 1e-3 of the far-field light)
+    np.testing.assert_allclose(lum, 0.08 * e / math.pi, rtol=5e-3)
+
+
+@pytest.mark.skipif(not PBRT.is_file() and os.environ.get("OPENCAM_REQUIRE_PBRT") != "1", reason="pbrt not built")
+def test_pbrt_rtable_tunnel_renders(tmp_path):
+    """r-table road (patched pbrt roadrtable material): rendered ROI luminances near the 1 deg design values."""
+    if not PBRT.is_file():
+        pytest.fail("OPENCAM_REQUIRE_PBRT=1 but pbrt is not built")
+    from exr_multispectral import linear_rgb_from_exr
+
+    built = _build(
+        tmp_path,
+        "--road-reflection",
+        "rtable",
+        "--film",
+        "rgb",
+        "--xres",
+        "480",
+        "--yres",
+        "320",
+        "--pixelsamples",
+        "64",
+    )
+    (tmp_path / "out").mkdir(exist_ok=True)
+    for view, b in built.items():
+        subprocess.run([str(PBRT), "--quiet", b["scene"].name], cwd=tmp_path, check=True)
+        m = b["meta"]
+        Y = linear_rgb_from_exr(tmp_path / m["film_output"]) @ np.array([0.2126, 0.7152, 0.0722])
+        for k in (m["dynamic_range"]["bright_roi"], m["dynamic_range"]["dark_roi"]):
+            x0, y0, x1, y1 = m["rois"][k]["roi_xyxy"]
+            lum, pred = float(Y[y0:y1, x0:x1].mean()), m["rois"][k]["predicted_luminance_cd_m2"]
+            # Sunlit exterior road: ~1.0x (outside-in) / ~0.85x (seen from inside). Lamp-lit roads add
+            # lining interreflections and daylight; the glossy placeholder table reflects the daylight
+            # entering at the exit portal strongly toward the camera (inside-out exit zone ~3.8x).
+            lo, hi = (0.7, 1.5) if k == m["dynamic_range"]["bright_roi"] else (0.9, 5.0)
+            assert pred * lo < lum < pred * hi, (view, k, lum, pred)
+    shutil.rmtree(tmp_path / "out")
