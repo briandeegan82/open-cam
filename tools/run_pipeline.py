@@ -286,6 +286,26 @@ def main() -> None:
     pbrt_cmd = [str(pbrt_bin), *parse_render_pbrt_args(render), str(scene_file)]
     log.append(run_cmd(pbrt_cmd, repo, args.dry_run))
 
+    # 2a) Optional Monte Carlo denoiser (render.denoise, tools/denoise_spectral_exr.py; display renders only).
+    # Runs on the raw pbrt output, before lens post-processing and the sensor model, so sensor noise stays physical.
+    denoise_cfg = render.get("denoise") or {}
+    if bool(denoise_cfg.get("enabled", False)):
+        print(
+            "warning: render.denoise.enabled is true — the pbrt render is denoised with Intel Open Image Denoise; "
+            "fine texture is altered, so do not use this run for IQ metrics (noisy render kept as *_noisy.exr).",
+            file=sys.stderr,
+        )
+        denoise_tool = p(repo, paths.get("denoise_tool", "tools/denoise_spectral_exr.py"))
+        denoise_cmd = [py, str(denoise_tool), "--exr-in", str(exr_out), "--exr-out", str(exr_out)]
+        denoise_cmd += ["--scene", str(scene_file), "--pbrt", str(pbrt_bin)]
+        denoise_cmd += ["--guides", str(denoise_cfg.get("guides", "albedo_normal"))]
+        denoise_cmd += ["--guide-spp", str(int(denoise_cfg.get("guide_spp", 16)))]
+        denoise_cmd += ["--quality", str(denoise_cfg.get("quality", "high"))]
+        denoise_cmd += ["--device", str(denoise_cfg.get("device", "cpu"))]
+        if denoise_cfg.get("oidn"):
+            denoise_cmd += ["--oidn", str(p(repo, denoise_cfg["oidn"]))]
+        log.append(run_cmd(denoise_cmd, repo, args.dry_run))
+
     # 2b) Optional post-render PSF / MTF blur
     # NOTE: post-PSF must NOT be applied when the PBRT camera is "realistic".
     # The realistic camera already traces rays through the full multi-element lens

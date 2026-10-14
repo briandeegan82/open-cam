@@ -5,6 +5,7 @@ __pycache__/
 venv/
 out/
 third_party/pbrt-v4/build/
+third_party/oidn/
 scenes/generated/
 scenes/assets/
 .DS_Store

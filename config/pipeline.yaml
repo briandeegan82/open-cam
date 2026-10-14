@@ -45,6 +45,15 @@ render:
   # Extra PBRT render CLI args, e.g. ["--stats"] or ["--wavefront", "--stats"].
   # If gpu_enabled=true, --wavefront is injected automatically unless already present.
   pbrt_args: ["--stats"]
+  # Opt-in Monte Carlo denoiser (Intel Open Image Denoise; tools/denoise_spectral_exr.py, docs/DENOISING.md).
+  # Display/demo renders only: it also removes fine texture, so never score IQ metrics on a denoised run.
+  # Install the binary once with: venv/bin/python tools/fetch_oidn.py
+  denoise:
+    enabled: false
+    guides: albedo_normal  # albedo_normal | albedo | none (guides come from a cheap pbrt gbuffer render)
+    guide_spp: 16
+    quality: high          # high | balanced | fast
+    device: cpu
 validate:
   enabled: true
 validate_emva:
