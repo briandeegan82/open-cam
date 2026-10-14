@@ -103,6 +103,16 @@ lamp luminances come out between about 2.3 x 10^4 cd/m^2 (transition, interior) 
 cd/m^2 (`threshold_1`). They are written to `luminaires.luminance_cd_m2`, with per-zone lamp
 counts in `luminaires.count_by_zone`.
 
+With `--road-reflection rtable [--road-rtable NAME]` the asphalt is the pbrt `roadrtable` material
+instead (see [ROAD_RTABLE.md](ROAD_RTABLE.md)). The luminaires are then solved so that the r-table
+road luminance for a 1 deg observer looking along +z equals each zone's design value
+(`direct_road_luminance`). The exterior road becomes `q(sun) E_sun,h + Q0 E_sky,h`. The default
+table is a placeholder generated from open-cam's own asphalt model, not CIE data. Road points close
+to the camera are seen at 2-6 deg, where the material blends toward Q0. With the glossy placeholder,
+daylight entering through the exit portal brightens the inside-out exit-zone road well above its
+design value (about 3.8x in the 480 x 320 test render, compared with up to 1.8x for the Lambertian
+road).
+
 **Predicted vs rendered.** The predictions cover direct light only. In the render, light reflected
 by the lining and daylight coming in through the portal add to them. In the small RGB renders used
 by the pbrt test, the measured road luminances are about 1.2-1.4x the prediction in the interior

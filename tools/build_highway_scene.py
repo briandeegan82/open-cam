@@ -42,6 +42,7 @@ import highway_materials as hmat  # noqa: E402
 import highway_night as night  # noqa: E402
 import highway_variety as variety  # noqa: E402
 import highway_wet as wet  # noqa: E402
+import road_rtable as rt  # noqa: E402
 from fetch_highway_assets import cache_root, load_asset_manifest  # noqa: E402
 from highway_road_wear import WEAR_LEVELS, RoadWear, linear_normal_map  # noqa: E402
 from highway_sky import (  # noqa: E402
@@ -456,6 +457,11 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     ap.add_argument("--road", choices=("asphalt031", "asphalt026c", "plain"), default="asphalt031")
     ap.add_argument("--road-wear", choices=("none", *WEAR_LEVELS), default="moderate", help="Seeded road ageing.")
     ap.add_argument("--road-wear-seed", type=int, default=None, help="Road-wear seed (default: --seed, else 7).")
+    ap.add_argument(
+        "--road-rtable",
+        default=None,
+        help="Road r-table CSV or name in config/road_rtables (pbrt roadrtable asphalt; needs --road-wear none).",
+    )
     ap.add_argument("--road-wear-texel-m", type=float, default=0.02, help="Wear-map texel size [m].")
     ap.add_argument("--traffic", choices=("default", "none"), default="default")
     ap.add_argument("--proxy-cars", action="store_true", help="Use box proxies instead of the CC0 car models.")
@@ -555,6 +561,8 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
     write_spd(spd / "sun.spd", wl, solar_direct_spectrum(wl, elev))
     haze = atmosphere.params_from_args(args)
     wet.check_args(args, args.road_wear != "none")
+    if args.road_rtable and (args.road_wear != "none" or wet.enabled(args)):
+        raise SystemExit("--road-rtable replaces the dry asphalt only: use it with --road-wear none and a dry road")
     atm = None
     if haze is not None and args.time_of_day != "day":
         atm = atmosphere.setup_scene_night(haze, args, wl=wl, spd_dir=spd, sources=night.natural_sources(args))
@@ -633,6 +641,11 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
     road_spd = "spd/asphalt_aged.spd"
     tile = 1.0
     wear = None
+    rtable = None
+    if args.road_rtable:
+        rtable = rt.load(rt.resolve(args.road_rtable))
+        rt.warn_if_placeholder(rtable)
+        write_spd(spd / "asphalt_aged_rtint.spd", wl, rt.tint_spectrum(reflectance("asphalt_aged", wl), wl))
     if args.road_wear != "none":
         lanes = [[(Layout.lane_center(s * i - (s < 0)), 0.6 + 0.2 * i) for i in range(N_LANES)] for s in (1, -1)]
         geom = {
@@ -663,10 +676,22 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         L += [
             f'Texture "asphalt:lum" "float" "imagemap" "string filename" "{os.path.relpath(lum, out_dir)}"',
             f'Texture "asphalt" "spectrum" "scale" "spectrum tex" "{road_spd}" "texture scale" "asphalt:lum"',
-            'MakeNamedMaterial "asphalt" "string type" "coateddiffuse" "texture reflectance" "asphalt"',
-            '    "float roughness" [0.35] "float thickness" [0.001]',
+            *(
+                [
+                    'MakeNamedMaterial "asphalt" "string type" "coateddiffuse" "texture reflectance" "asphalt"',
+                    '    "float roughness" [0.35] "float thickness" [0.001]',
+                ]
+                if rtable is None
+                else [
+                    'Texture "asphalt:rtint" "spectrum" "scale" "spectrum tex" "spd/asphalt_aged_rtint.spd"'
+                    ' "texture scale" "asphalt:lum"',
+                    *rt.material_lines("asphalt", rtable, '"texture tint" "asphalt:rtint"'),
+                ]
+            ),
             f'    "string normalmap" "{os.path.relpath(linear_normal_map(raw / info["maps"]["normal"], out_dir / "textures"), out_dir)}"',
         ]
+    elif rtable is not None:
+        L += rt.material_lines("asphalt", rtable, '"spectrum tint" "spd/asphalt_aged_rtint.spd"')
     else:
         L.append(
             f'MakeNamedMaterial "asphalt" "string type" "coateddiffuse" "spectrum reflectance" "{road_spd}"'
@@ -1015,6 +1040,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
             "surface": args.road,
             "length_m": ROAD_Z1 - ROAD_Z0,
             "wear": wear.summary if wear is not None else None,
+            **({"rtable": rtable.summary()} if rtable is not None else {}),
             **({"wet": wet_meta} if wet_meta else {}),
         },
         "cars": cars_meta,
