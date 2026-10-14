@@ -122,6 +122,12 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--window-radiance", type=float, default=3000.0, help="window luminance-ish scale (HDR stress)")
     ap.add_argument("--lamp-radiance", type=float, default=20000.0)
     ap.add_argument("--fill-radiance", type=float, default=3.0)
+    ap.add_argument(
+        "--glass-roughness",
+        type=float,
+        default=0.0,
+        help="microfacet roughness of the glass sphere (0 = smooth; > 0 = frosted, spreads its caustic)",
+    )
     ap.add_argument("--camera", choices=("perspective", "thinlens", "realistic"), default="perspective")
     ap.add_argument(
         "--lens-dispersion",
@@ -241,11 +247,14 @@ def write_diorama(args: argparse.Namespace) -> dict:
             "roi_xyxy": proj.roi(x, CARD_Y0, x + size, CARD_Y0 + size, CARD_Z, 0.05),
         }
         x += size + 0.03
+    if args.glass_roughness < 0:
+        raise ValueError("--glass-roughness must be >= 0")
+    glass_roughness = f' "float roughness" [{args.glass_roughness:.6g}]' if args.glass_roughness > 0 else ""
     spheres = [
         ("matte", '"diffuse" "rgb reflectance" [0.5 0.5 0.5]'),
         ("glossy", '"coateddiffuse" "rgb reflectance" [0.6 0.08 0.05] "float roughness" [0.02]'),
         ("metal", '"conductor" "float roughness" [0.05]'),
-        ("glass", '"dielectric" "float eta" [1.5]'),
+        ("glass", '"dielectric" "float eta" [1.5]' + glass_roughness),
     ]
     for k, (name, mat) in enumerate(spheres):
         sx, r = -0.45 + 0.3 * k, 0.06

@@ -12,6 +12,12 @@
 
 `diorama.json` gives the raster ROIs for every chart patch, card, sphere, the window and a shadow reference. The ROIs come from the pinhole projection, which matches `--camera perspective`. With `--camera realistic` or `thinlens` they are only approximate because of distortion, and the focus defaults to the card plane.
 
+`--glass-roughness R` (default 0, smooth) makes the glass sphere a rough dielectric. At 480 x 320, 256 spp with
+the realistic lens and dispersion split, R >= 0.15 removes the fireflies around the glass sphere (85 to 0) and
+cuts fireflies over the whole image by about 40 % (229 to 137 pixels). Noise on flat areas is unchanged (6.7 %).
+The sphere then no longer acts as a clear refracting target: its caustic spreads out (the peak falls from
+about 250x to 30x the local level). Keep the default for caustic and refraction work.
+
 Scoring examples:
 - Texture acutance: `iqlab.dead_leaves.texture_mtf` on the dead-leaves ROI.
 - Colour: `iqlab.cpiq.chroma_level` on the chart patch ROIs.
