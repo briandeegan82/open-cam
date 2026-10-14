@@ -126,3 +126,15 @@ def test_sppm_spectral_film_matches_volpath(tmp_path):
     # RGB channels (sensor RGB -> output RGB) agree with the buckets' integral as in volpath
     rgb = np.array([spm[c].mean() / vol[c].mean() for c in "RGB"])
     assert np.all(np.abs(rgb - 1) < 0.08), rgb
+
+
+def test_glass_roughness_is_opt_in(tmp_path):
+    def glass_line(*extra):
+        args = dio.build_parser().parse_args(["--out-dir", str(tmp_path), *extra])
+        dio.write_diorama(args)
+        return next(ln for ln in (tmp_path / "iq_diorama.pbrt").read_text().splitlines() if '"dielectric"' in ln)
+
+    assert "roughness" not in glass_line()
+    assert '"float roughness" [0.15]' in glass_line("--glass-roughness", "0.15")
+    with pytest.raises(ValueError):
+        dio.write_diorama(dio.build_parser().parse_args(["--out-dir", str(tmp_path), "--glass-roughness", "-0.1"]))
