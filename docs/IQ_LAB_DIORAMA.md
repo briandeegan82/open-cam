@@ -39,3 +39,19 @@ reach the lamp via the glass/metal spheres), which a path tracer leaves grainy a
   with `--lens-dispersion-split` SPPM does not trace four camera paths but rotates the hero per pixel
   and iteration, which decorrelates the colour noise between pixels.
 - CPU only (no GPU/wavefront SPPM), no participating media, and `volpath` remains the default.
+
+Measured on the default diorama (pinhole, 480x320, same seed, about equal time: volpath 1024 spp
+104 s vs SPPM 1024 iterations x 100k photons, radius 0.01 m, 108 s), high-pass noise in the RGB
+channels:
+
+| region | volpath lum / chroma | spectral SPPM lum / chroma | RGB-film SPPM lum / chroma |
+|---|---|---|---|
+| floor beside the glass sphere (caustic) | 0.26 / 0.047 | 0.27 / 0.020 | 0.28 / 0.012 |
+| ColorChecker white patch | 0.07 / 0.024 | 0.24 / 0.070 | 0.18 / 0.027 |
+| matte sphere | 0.11 / 0.027 | 0.20 / 0.059 | 0.19 / 0.021 |
+
+SPPM halves the colour noise in the caustic region but is 2-3x noisier on directly lit diffuse
+surfaces at equal time, so it is not a general replacement for `volpath` here. The spectral film
+adds colour noise over RGB-film SPPM: it samples 360-830 nm uniformly (RGB films importance-sample
+the visible range) and every pixel shares the iteration's four wavelengths. Fewer iterations with
+more photons (64 x 2M) was worse everywhere.
