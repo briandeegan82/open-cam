@@ -22,6 +22,7 @@ from exr_multispectral import spectral_buckets_from_exr
 from synthetic_data import REPO, run_tool_main
 
 PBRT = Path(os.environ.get("OPENCAM_PBRT", REPO / "third_party" / "pbrt-v4" / "build" / "pbrt"))
+PBRT_TIMEOUT_S = int(os.environ.get("OPENCAM_PBRT_TIMEOUT", "600"))
 XRES, YRES, NBUCKETS = 96, 64, 16
 CAMERA_MODEL = REPO / "config" / "camera_recipes" / "default.yaml"
 
@@ -78,12 +79,17 @@ class TestPbrtEndToEnd(unittest.TestCase):
                 "700",
             ],
             check=True,
+            timeout=PBRT_TIMEOUT_S,
             capture_output=True,
         )
         cls.manifest_path = tmp / "scene" / "colorchecker_manifest.json"
         cls.manifest = json.loads(cls.manifest_path.read_text())
         cls.reference = dict(np.load(tmp / "scene" / "spectral_reference_1nm.npz"))
-        subprocess.run([str(PBRT), "--quiet", "--seed", "1", str(tmp / "scene" / "colorchecker.pbrt")], check=True)
+        subprocess.run(
+            [str(PBRT), "--quiet", "--seed", "1", str(tmp / "scene" / "colorchecker.pbrt")],
+            check=True,
+            timeout=PBRT_TIMEOUT_S,
+        )
         out = tmp / "electrons.npz"
         run_tool_main(
             pbrt_tool.main,
@@ -156,8 +162,16 @@ class TestPbrtSpectralSky(unittest.TestCase):
             args += ["--allow-missing-assets", "--film-output", str(exr), "--xres", "48", "--yres", "27"]
             args += ["--pixelsamples", "64", "--spectral-nbuckets", "3", "--sky", "hosek", "--sun-elevation", "40"]
             args += ["--spectral-lambda-min", "400", "--spectral-lambda-max", "700"]
-            subprocess.run([sys.executable, str(REPO / "tools" / "build_highway_scene.py"), *args], check=True)
-            subprocess.run([str(PBRT), "--quiet", "--seed", "1", str(tmp / "scene" / "highway.pbrt")], check=True)
+            subprocess.run(
+                [sys.executable, str(REPO / "tools" / "build_highway_scene.py"), *args],
+                check=True,
+                timeout=PBRT_TIMEOUT_S,
+            )
+            subprocess.run(
+                [str(PBRT), "--quiet", "--seed", "1", str(tmp / "scene" / "highway.pbrt")],
+                check=True,
+                timeout=PBRT_TIMEOUT_S,
+            )
             L, _ = spectral_buckets_from_exr(exr)
             self.assertTrue(np.isfinite(L).all())
             sky = L[:6].reshape(-1, L.shape[-1]).mean(0)  # 450 / 550 / 650 nm buckets
@@ -182,7 +196,7 @@ class TestPbrtHighwayHaze(unittest.TestCase):
         scene = tmp / name
         cmd = [sys.executable, str(REPO / "tools" / "build_highway_scene.py"), "--out-dir", str(scene)]
         cmd += ["--asset-manifest", str(tmp / "assets.yaml"), "--allow-missing-assets", *haze]
-        subprocess.run(cmd, check=True, capture_output=True)
+        subprocess.run(cmd, check=True, timeout=PBRT_TIMEOUT_S, capture_output=True)
         txt = (scene / "highway.pbrt").read_text()
         # natural lights only (sun/sky, or twilight sky + moon + moonlit sky); lamps come later
         head = txt[: txt.index("AttributeEnd", txt.rindex('LightSource "infinite"')) + len("AttributeEnd")]
@@ -202,7 +216,9 @@ class TestPbrtHighwayHaze(unittest.TestCase):
             + f'Shape "trianglemesh" "point3 P" [{-w} 0 {-w} {w} 0 {-w} {-w} 0 {w} {w} 0 {w}]'
             + ' "integer indices" [0 1 2 2 1 3]\n'
         )
-        subprocess.run([str(PBRT), "--quiet", "--seed", "1", str(scene / "probe.pbrt")], check=True)
+        subprocess.run(
+            [str(PBRT), "--quiet", "--seed", "1", str(scene / "probe.pbrt")], check=True, timeout=PBRT_TIMEOUT_S
+        )
         return float((read_rgb_exr(exr) @ LUMA).mean()), rho
 
     def test_road_illuminance_matches_manifest(self) -> None:
@@ -276,9 +292,14 @@ class TestPbrtHighwaySmoke(unittest.TestCase):
                     "700",
                 ],
                 check=True,
+                timeout=PBRT_TIMEOUT_S,
                 capture_output=True,
             )
-            subprocess.run([str(PBRT), "--quiet", "--seed", "1", str(tmp / "scene" / "highway.pbrt")], check=True)
+            subprocess.run(
+                [str(PBRT), "--quiet", "--seed", "1", str(tmp / "scene" / "highway.pbrt")],
+                check=True,
+                timeout=PBRT_TIMEOUT_S,
+            )
             L, _ = spectral_buckets_from_exr(exr)
             self.assertEqual(L.shape[:2], (36, 64))
             self.assertTrue(np.isfinite(L).all())
@@ -323,6 +344,7 @@ class TestPbrtHighwaySmoke(unittest.TestCase):
             subprocess.run(
                 [sys.executable, str(REPO / "tools" / "build_highway_scene.py"), "--out-dir", str(scene), *common, *fx],
                 check=True,
+                timeout=PBRT_TIMEOUT_S,
                 capture_output=True,
             )
             exr = tmp / "rs.exr"
@@ -367,7 +389,9 @@ class TestPbrtWetCoating(unittest.TestCase):
             f'Shape "trianglemesh" "point3 P" [{-w} 0 {-w} {w} 0 {-w} {-w} 0 {w} {w} 0 {w}]'
             ' "integer indices" [0 2 1 2 3 1]\n'
         )
-        subprocess.run([str(PBRT), "--quiet", "--seed", "1", str(tmp / f"{name}.pbrt")], check=True)
+        subprocess.run(
+            [str(PBRT), "--quiet", "--seed", "1", str(tmp / f"{name}.pbrt")], check=True, timeout=PBRT_TIMEOUT_S
+        )
         return float((read_rgb_exr(exr) @ LUMA).mean())
 
     def test_wet_body_brdf_vs_lekner_dorf(self) -> None:

@@ -15,6 +15,7 @@ from exr_multispectral import read_separate_exr_channels
 from synthetic_data import REPO
 
 PBRT = Path(os.environ.get("OPENCAM_PBRT", REPO / "third_party" / "pbrt-v4" / "build" / "pbrt"))
+PBRT_TIMEOUT_S = int(os.environ.get("OPENCAM_PBRT_TIMEOUT", "600"))
 
 
 def _small_table() -> rt.RTable:
@@ -107,7 +108,12 @@ def _pbrt_has_rtable() -> bool:
             'Camera "perspective"\nWorldBegin\n'
             'Material "roadrtable" "float tangamma" [0 1] "float beta" [0 180] "float r" [1 1 1 1]\n'
         )
-        return subprocess.run([str(PBRT), "--quiet", str(p)], capture_output=True, cwd=td).returncode == 0
+        return (
+            subprocess.run(
+                [str(PBRT), "--quiet", str(p)], capture_output=True, cwd=td, timeout=PBRT_TIMEOUT_S
+            ).returncode
+            == 0
+        )
 
 
 PBRT_RTABLE = _pbrt_has_rtable()
@@ -135,7 +141,9 @@ class TestPbrtRoadRTable(unittest.TestCase):
                     'Shape "bilinearmesh" "point3 P" [-50 -50 0 50 -50 0 -50 50 0 50 50 0]',
                 ]
                 (Path(td) / "s.pbrt").write_text("\n".join(s) + "\n")
-                subprocess.run([str(PBRT), "--quiet", "s.pbrt"], check=True, cwd=td, capture_output=True)
+                subprocess.run(
+                    [str(PBRT), "--quiet", "s.pbrt"], check=True, cwd=td, capture_output=True, timeout=PBRT_TIMEOUT_S
+                )
                 ch = read_separate_exr_channels(Path(td) / "o.exr")
                 out.append(float(np.mean(ch["G"])))
         return out[0] / out[1]

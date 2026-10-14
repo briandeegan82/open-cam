@@ -15,6 +15,7 @@ from synthetic_data import REPO
 from test_highway_scene import build_without_assets
 
 PBRT = Path(os.environ.get("OPENCAM_PBRT", REPO / "third_party" / "pbrt-v4" / "build" / "pbrt"))
+PBRT_TIMEOUT_S = int(os.environ.get("OPENCAM_PBRT_TIMEOUT", "600"))
 
 
 def _pbrt_has_fluorescent() -> bool:
@@ -26,7 +27,7 @@ def _pbrt_has_fluorescent() -> bool:
             'Material "fluorescent" "spectrum excitation" [360 0.5 830 0] "spectrum emission" [500 0 600 1 700 0]\n'
             'Shape "sphere"\n'
         )
-        r = subprocess.run([str(PBRT), "--quiet", "s.pbrt"], cwd=t, capture_output=True)
+        r = subprocess.run([str(PBRT), "--quiet", "s.pbrt"], cwd=t, capture_output=True, timeout=PBRT_TIMEOUT_S)
         return r.returncode == 0
 
 

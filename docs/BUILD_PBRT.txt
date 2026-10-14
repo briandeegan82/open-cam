@@ -26,6 +26,13 @@ Patches:
   offset, so buckets one stratum apart got identical paths and per-bucket metrics showed a
   periodic ripple (docs/SFR_SPECTRAL_RIPPLE.md). Same cost and expectation; Film "spectral"
   "bool jitterwavelengths" false restores stock sampling.
+- 0008-scene-light-camera-deadlock.patch: fixes an intermittent hang while loading
+  scenes whose camera sits in a medium (e.g. the hazy/foggy highway). The camera job waits
+  for its medium and meanwhile runs other queued jobs on the same thread; a light job
+  picked up there called GetCamera() and waited on the camera job below it on the stack,
+  so pbrt spun forever (about 1 run in 100 of the dusk-fog probe in
+  tests/test_pbrt_e2e.py, and the 3 h 45 min CI stall). Light jobs now take the camera
+  transform straight from the camera entity. Rendered output is unchanged.
 - pbrt-v4-spectral-basis-infinite-light.patch: an "infinite" light may give both
   "filename" and n "L" spectra; the equal-area image then has channels B0..B{n-1}, each
   a per-pixel luminance weight of the corresponding (unit-luminance-normalised) spectrum,
