@@ -317,7 +317,6 @@ def main() -> None:
         f"# Illuminant: {_rel(repo, ill_path)}",
         f"# Film: {film_type} -> {film_filename}",
         'Option "disablepixeljitter" false',
-        'Option "seed" 0',
         "",
         'ColorSpace "srgb"',
         "",

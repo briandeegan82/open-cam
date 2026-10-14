@@ -1,0 +1,71 @@
+diff --git a/src/pbrt/util/spectrum.h b/src/pbrt/util/spectrum.h
+--- a/src/pbrt/util/spectrum.h
++++ b/src/pbrt/util/spectrum.h
+@@ -285,6 +285,26 @@
+ 
+     std::string ToString() const;
+ 
++    // open-cam: one wavelength per stratum of width (max - min) / NSpectrumSamples, each
++    // jittered independently (SampleUniform shifts all strata by the same offset, so film
++    // buckets one stratum apart receive identical paths). Every lambda[i] is still uniform.
++    PBRT_CPU_GPU
++    static SampledWavelengths SampleUniformJittered(Float u, Float lambda_min,
++                                                    Float lambda_max) {
++        SampledWavelengths swl;
++        Float delta = (lambda_max - lambda_min) / NSpectrumSamples;
++        Float us = u * NSpectrumSamples;
++        int s0 = std::min<int>(int(us), NSpectrumSamples - 1);
++        uint64_t bits = uint64_t(FloatToBits(u)) * 0x9e3779b97f4a7c15ull;
++        for (int i = 0; i < NSpectrumSamples; ++i) {
++            Float v = i == 0 ? us - s0 : Float(MixBits(bits + i) >> 40) * 0x1p-24f;
++            v = std::min<Float>(v, OneMinusEpsilon);
++            swl.lambda[i] = lambda_min + ((s0 + i) % NSpectrumSamples + v) * delta;
++            swl.pdf[i] = 1 / (lambda_max - lambda_min);
++        }
++        return swl;
++    }
++
+     PBRT_CPU_GPU
+     static SampledWavelengths SampleUniform(Float u, Float lambda_min = Lambda_min,
+                                             Float lambda_max = Lambda_max) {
+diff --git a/src/pbrt/film.h b/src/pbrt/film.h
+--- a/src/pbrt/film.h
++++ b/src/pbrt/film.h
+@@ -406,7 +406,9 @@
+ 
+     PBRT_CPU_GPU
+     SampledWavelengths SampleWavelengths(Float u) const {
+-        return SampledWavelengths::SampleUniform(u, lambdaMin, lambdaMax);
++        return jitterWavelengths
++                   ? SampledWavelengths::SampleUniformJittered(u, lambdaMin, lambdaMax)
++                   : SampledWavelengths::SampleUniform(u, lambdaMin, lambdaMax);
+     }
+ 
+     PBRT_CPU_GPU
+@@ -526,6 +528,8 @@
+     int nBuckets;
+     Float maxComponentValue;
+     bool writeFP16;
++    // open-cam "bool jitterwavelengths" (default true): see SampleUniformJittered.
++    bool jitterWavelengths = true;
+     Float filterIntegral;
+     Array2D<Pixel> pixels;
+     SquareMatrix<3> outputRGBFromSensorRGB;
+diff --git a/src/pbrt/film.cpp b/src/pbrt/film.cpp
+--- a/src/pbrt/film.cpp
++++ b/src/pbrt/film.cpp
+@@ -1059,9 +1059,11 @@
+ 
+     Float maxComponentValue = parameters.GetOneFloat("maxcomponentvalue", Infinity);
+ 
+-    return alloc.new_object<SpectralFilm>(filmBaseParameters, lambdaMin, lambdaMax,
+-                                          nBuckets, colorSpace, maxComponentValue,
+-                                          writeFP16, alloc);
++    SpectralFilm *film = alloc.new_object<SpectralFilm>(
++        filmBaseParameters, lambdaMin, lambdaMax, nBuckets, colorSpace, maxComponentValue,
++        writeFP16, alloc);
++    film->jitterWavelengths = parameters.GetOneBool("jitterwavelengths", true);
++    return film;
+ }
+ 
+ Film Film::Create(const std::string &name, const ParameterDictionary &parameters,
