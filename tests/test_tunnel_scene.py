@@ -300,3 +300,26 @@ def test_pbrt_rtable_tunnel_renders(tmp_path):
             lo, hi = (0.7, 1.5) if k == m["dynamic_range"]["bright_roi"] else (0.9, 5.0)
             assert pred * lo < lum < pred * hi, (view, k, lum, pred)
     shutil.rmtree(tmp_path / "out")
+
+
+def test_sky_portal_guide_rectangles_face_outward(built):
+    txt = built["inside_out"]["scene"].read_text()
+    line = next(ln for ln in txt.splitlines() if '"point3 guideportals"' in ln)
+    pts = np.array(line.split("[")[1].split("]")[0].split(), dtype=float).reshape(2, 4, 3)
+    assert '"float guidefraction" [0.5]' in txt
+    tun = built["inside_out"]["meta"]["tunnel"]
+    for rect, z, sign in ((pts[0], tun["portal_entrance_z"], -1), (pts[1], tun["portal_exit_z"], 1)):
+        assert np.allclose(rect[:, 2], z)
+        e1, e2 = rect[1] - rect[0], rect[3] - rect[0]
+        assert abs(e1 @ e2) < 1e-9 and np.allclose(rect[2], rect[1] + e2)
+        n = np.cross(e1, e2)
+        assert np.sign(n[2]) == sign and np.allclose(n[:2], 0)
+        assert rect[:, 0].min() == bts.WALL_X[0] and rect[:, 0].max() == bts.WALL_X[1]
+        assert rect[:, 1].min() == 0 and rect[:, 1].max() == bts.CROWN_H
+
+
+def test_sky_portal_guide_off_and_validation(tmp_path):
+    b = _build(tmp_path, "--sky-portal-guide", "0")
+    assert "guideportals" not in b["outside_in"]["scene"].read_text()
+    with pytest.raises(ValueError):
+        bts.sky_guide_lines(1.0, 40.0, 440.0)

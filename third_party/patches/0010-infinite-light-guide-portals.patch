@@ -1,0 +1,210 @@
+diff --git a/src/pbrt/lights.cpp b/src/pbrt/lights.cpp
+index 9ddf719..b208073 100644
+--- a/src/pbrt/lights.cpp
++++ b/src/pbrt/lights.cpp
+@@ -1072,7 +1072,37 @@ PBRT_CPU_GPU Float ImageInfiniteLight::PDF_Li(LightSampleContext ctx, Vector3f w
+         pdf = compensatedDistribution.PDF(uv);
+     else
+         pdf = distribution.PDF(uv);
+-    return pdf / (4 * Pi);
++    pdf /= 4 * Pi;
++    int nActive = NumGuideActive(ctx.p());
++    if (nActive > 0)
++        pdf = (1 - guideFraction) * pdf + guideFraction * GuidePDF(ctx.p(), w, nActive);
++    return pdf;
++}
++
++void ImageInfiniteLight::SetGuidePortals(const std::vector<Point3f> &pts, Float fraction) {
++    if (pts.empty())
++        return;
++    if (pts.size() % 4 != 0 || pts.size() / 4 > MaxGuidePortals)
++        ErrorExit("\"guideportals\": expected 4 points per portal, at most %d portals, "
++                  "got %d points",
++                  MaxGuidePortals, int(pts.size()));
++    if (!(fraction > 0 && fraction < 1))
++        ErrorExit("\"guidefraction\" must be in (0, 1), got %f", fraction);
++    nGuide = int(pts.size() / 4);
++    guideFraction = fraction;
++    for (int i = 0; i < nGuide; ++i) {
++        const Point3f *q = &pts[4 * i];
++        GuidePortal &g = guide[i];
++        g.p0 = q[0];
++        g.e1 = q[1] - q[0];
++        g.e2 = q[3] - q[0];
++        Vector3f c = Cross(g.e1, g.e2);
++        g.area = Length(c);
++        if (g.area == 0 || std::abs(Dot(Normalize(g.e1), Normalize(g.e2))) > 1e-3f ||
++            Length(q[2] - (q[1] + g.e2)) > 1e-3f * std::sqrt(g.area))
++            ErrorExit("\"guideportals\": portal %d is not a rectangle p0 p1 p2 p3", i);
++        g.n = c / g.area;
++    }
+ }
+ 
+ SampledSpectrum ImageInfiniteLight::Phi(SampledWavelengths lambda) const {
+@@ -1563,6 +1593,12 @@ Light Light::Create(const std::string &name, const ParameterDictionary &paramete
+             parameters.GetSpectrumArray("L", SpectrumType::Illuminant, alloc);
+         Float scale = parameters.GetOneFloat("scale", 1);
+         std::vector<Point3f> portal = parameters.GetPoint3fArray("portal");
++        std::vector<Point3f> guidePortals = parameters.GetPoint3fArray("guideportals");
++        Float guideFraction = parameters.GetOneFloat("guidefraction", 0.5f);
++        for (Point3f &p : guidePortals)
++            p = cameraTransform.RenderFromWorld(p);
++        if (!guidePortals.empty() && !portal.empty())
++            ErrorExit(loc, "\"guideportals\" cannot be combined with \"portal\".");
+         std::string filename = ResolveFilename(parameters.GetOneString("filename", ""));
+         Float E_v = parameters.GetOneFloat("illuminance", -1);
+ 
+@@ -1730,6 +1766,11 @@ Light Light::Create(const std::string &name, const ParameterDictionary &paramete
+                                                              std::move(image), colorSpace,
+                                                              scale, filename, alloc);
+         }
++        if (!guidePortals.empty()) {
++            if (!light.Is<ImageInfiniteLight>())
++                ErrorExit(loc, "\"guideportals\" needs an image (\"filename\") infinite light.");
++            light.Cast<ImageInfiniteLight>()->SetGuidePortals(guidePortals, guideFraction);
++        }
+     } else
+         ErrorExit(loc, "%s: light type unknown.", name);
+ 
+diff --git a/src/pbrt/lights.h b/src/pbrt/lights.h
+index b59d91b..f460229 100644
+--- a/src/pbrt/lights.h
++++ b/src/pbrt/lights.h
+@@ -582,32 +582,113 @@ class ImageInfiniteLight : public LightBase {
+     pstd::optional<LightLiSample> SampleLi(LightSampleContext ctx, Point2f u,
+                                            SampledWavelengths lambda,
+                                            bool allowIncompletePDF) const {
+-        // Find $(u,v)$ sample coordinates in infinite light texture
+-        Float mapPDF = 0;
++        // open-cam: optional portal guiding (one-sample mixture with the map
++        // distribution) for points behind a guide portal, e.g. inside a tunnel.
++        Point3f p = ctx.p();
++        int nActive = NumGuideActive(p);
++        Float pg = nActive > 0 ? guideFraction : 0;
++        const PiecewiseConstant2D &dist =
++            allowIncompletePDF ? compensatedDistribution : distribution;
++        Vector3f wi;
+         Point2f uv;
+-        if (allowIncompletePDF)
+-            uv = compensatedDistribution.Sample(u, &mapPDF);
+-        else
+-            uv = distribution.Sample(u, &mapPDF);
+-        if (mapPDF == 0)
+-            return {};
+-
+-        // Convert infinite light sample point to direction
+-        Vector3f wLight = EqualAreaSquareToSphere(uv);
+-        Vector3f wi = renderFromLight(wLight);
++        Float mapPDF = 0;
++        if (pg > 0 && u[0] < pg) {
++            Float u0 = u[0] / pg * nActive;
++            int k = std::min<int>(int(u0), nActive - 1);
++            u0 = std::min<Float>(u0 - k, OneMinusEpsilon);
++            const GuidePortal &g = guide[ActiveGuide(p, k)];
++            Point3f q = g.p0 + u0 * g.e1 + u[1] * g.e2;
++            wi = q - p;
++            if (LengthSquared(wi) == 0)
++                return {};
++            wi = Normalize(wi);
++            uv = EqualAreaSphereToSquare(Normalize(renderFromLight.ApplyInverse(wi)));
++            mapPDF = dist.PDF(uv);
++        } else {
++            // Find $(u,v)$ sample coordinates in infinite light texture
++            if (pg > 0)
++                u[0] = std::min<Float>((u[0] - pg) / (1 - pg), OneMinusEpsilon);
++            uv = dist.Sample(u, &mapPDF);
++            if (mapPDF == 0 && pg == 0)
++                return {};
++            // Convert infinite light sample point to direction
++            wi = renderFromLight(EqualAreaSquareToSphere(uv));
++        }
+ 
+         // Compute PDF for sampled infinite light direction
+-        Float pdf = mapPDF / (4 * Pi);
++        Float pdf = (1 - pg) * mapPDF / (4 * Pi);
++        if (pg > 0)
++            pdf += pg * GuidePDF(p, wi, nActive);
++        if (pdf == 0)
++            return {};
+ 
+         // Return radiance value for infinite light direction
+         return LightLiSample(
+             ImageLe(uv, lambda), wi, pdf,
+-            Interaction(ctx.p() + wi * (2 * sceneRadius), &mediumInterface));
++            Interaction(p + wi * (2 * sceneRadius), &mediumInterface));
+     }
+ 
++    // open-cam: guide portals are world-space rectangles p0..p3 (render space after
++    // transform); Cross(p1 - p0, p3 - p0) must point out of the enclosure (to the sky).
++    void SetGuidePortals(const std::vector<Point3f> &pts, Float fraction);
++
+     pstd::optional<LightBounds> Bounds() const { return {}; }
+ 
+   private:
++    struct GuidePortal {
++        Point3f p0;
++        Vector3f e1, e2, n;
++        Float area;
++    };
++    static constexpr int MaxGuidePortals = 4;
++
++    // Active for points behind the portal whose projection lies within it (5 % margin).
++    PBRT_CPU_GPU
++    bool GuideActive(int i, Point3f p) const {
++        const GuidePortal &g = guide[i];
++        Vector3f d = p - g.p0;
++        if (Dot(d, g.n) >= 0)
++            return false;
++        Float s1 = Dot(d, g.e1) / LengthSquared(g.e1), s2 = Dot(d, g.e2) / LengthSquared(g.e2);
++        return s1 > -0.05f && s1 < 1.05f && s2 > -0.05f && s2 < 1.05f;
++    }
++    PBRT_CPU_GPU
++    int NumGuideActive(Point3f p) const {
++        int n = 0;
++        for (int i = 0; i < nGuide; ++i)
++            n += GuideActive(i, p);
++        return n;
++    }
++    PBRT_CPU_GPU
++    int ActiveGuide(Point3f p, int k) const {
++        for (int i = 0; i < nGuide; ++i)
++            if (GuideActive(i, p) && k-- == 0)
++                return i;
++        return 0;
++    }
++    // Solid-angle density of uniform area sampling over the active portals.
++    PBRT_CPU_GPU
++    Float GuidePDF(Point3f p, Vector3f w, int nActive) const {
++        Float pdf = 0;
++        for (int i = 0; i < nGuide; ++i) {
++            if (!GuideActive(i, p))
++                continue;
++            const GuidePortal &g = guide[i];
++            Float dn = Dot(w, g.n);
++            if (dn <= 0)
++                continue;
++            Float t = Dot(g.p0 - p, g.n) / dn;
++            if (t <= 0)
++                continue;
++            Vector3f d = (p + t * w) - g.p0;
++            Float s1 = Dot(d, g.e1) / LengthSquared(g.e1);
++            Float s2 = Dot(d, g.e2) / LengthSquared(g.e2);
++            if (s1 >= 0 && s1 <= 1 && s2 >= 0 && s2 <= 1)
++                pdf += t * t / (g.area * dn);
++        }
++        return pdf / nActive;
++    }
++
+     // ImageInfiniteLight Private Methods
+     PBRT_CPU_GPU
+     SampledSpectrum ImageLe(Point2f uv, const SampledWavelengths &lambda) const {
+@@ -638,6 +719,9 @@ class ImageInfiniteLight : public LightBase {
+     Float sceneRadius;
+     PiecewiseConstant2D distribution;
+     PiecewiseConstant2D compensatedDistribution;
++    GuidePortal guide[MaxGuidePortals];
++    int nGuide = 0;
++    Float guideFraction = 0;
+ };
+ 
+ // PortalImageInfiniteLight Definition

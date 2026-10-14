@@ -78,10 +78,12 @@ MakeNamedMaterial "asphalt" "string type" "roadrtable" "spectrum tint" "spd/asph
 - Only the dry tables are supported. Wet tables (W1-W4) would just be more CSVs, but the wet-road model in
   `tools/highway_wet.py` is separate.
 - Observer elevations above about 1.5 deg are an assumption (blend to Q0), not part of the standard.
-- Render noise: the table's peak is at grazing incidence toward lamps far beyond the point. pbrt chooses
-  which lamp to sample without knowing the BRDF, so those lamps are picked rarely and contribute a lot when
-  they are. In the 720 x 480, 128 spp inside-out tunnel render, the near road (seen at about 10 deg) has 41 %
-  pixel-to-pixel noise, against 14 % for the Lambertian road. Further down the road it is the same as
-  Lambertian (about 46 %). Use more samples, or the display denoiser for pictures only.
+- Render noise: on the inside-out view most of the near-road noise is daylight from the exit portal reflected
+  by the glossy table toward the camera, not the tunnel lamps (128 spp: lamps only 4 %, sky only 160 %). pbrt
+  samples the sky over the whole sphere, and almost all of those directions are blocked by the tube. The tunnel
+  builder therefore aims part of the sky samples through the portal openings (`--sky-portal-guide`, see
+  [TUNNEL_SCENES.md](TUNNEL_SCENES.md)). In the 480 x 320, 128 spp inside-out render this cuts near-road
+  noise (std / mean) from 46 % to 30 %, and from 156 % to 97 % with only the sky lit. The remaining noise is
+  mostly rare bright paths; use more samples, or the display denoiser for pictures only.
 - The placeholder is open-cam's own model: S1 is about 2.9 and Q0 about 0.058, so it is not an R-class. Do not
   quote numbers rendered with it as CIE road luminances.

@@ -395,6 +395,13 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     ap.add_argument("--tunnel-length", type=float, default=400.0)
     ap.add_argument("--portal-distance", type=float, default=40.0, help="outside_in: camera to entrance portal [m].")
     ap.add_argument("--exit-distance", type=float, default=60.0, help="inside_out: camera to exit portal [m].")
+    ap.add_argument(
+        "--sky-portal-guide",
+        type=float,
+        default=0.5,
+        help="Fraction of sky light samples aimed through the two portal openings for points inside the tube "
+        "(patched pbrt 'guideportals'; unbiased, cuts sky noise on the interior road). 0 = off.",
+    )
     ap.add_argument("--l20", type=float, default=3000.0, help="Design access-zone luminance L20 [cd/m^2].")
     ap.add_argument("--k", type=float, default=0.025, help="Threshold-zone ratio k = L_th / L20.")
     ap.add_argument("--interior-luminance", type=float, default=6.0, help="Interior-zone road luminance [cd/m^2].")
@@ -439,6 +446,21 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     ap.add_argument("--sampler-seed", type=int, default=0, help="In-scene sampler seed (overrides pbrt --seed).")
     return ap.parse_args(argv)
+
+
+def sky_guide_lines(fraction: float, z_in: float, z_out: float) -> list[str]:
+    """pbrt ``guideportals`` for the sky light: the tube's bounding rectangle at each portal, normals outward."""
+    if fraction == 0:
+        return []
+    if not 0 < fraction < 1:
+        raise ValueError("--sky-portal-guide must be 0 (off) or in (0, 1)")
+    x0, x1 = WALL_X
+    rects = (
+        [(x1, 0.0, z_in), (x0, 0.0, z_in), (x0, CROWN_H, z_in), (x1, CROWN_H, z_in)],  # normal -z
+        [(x0, 0.0, z_out), (x1, 0.0, z_out), (x1, CROWN_H, z_out), (x0, CROWN_H, z_out)],  # normal +z
+    )
+    pts = " ".join(_f(v) for r in rects for q in r for v in q)
+    return [f'        "point3 guideportals" [{pts}]', f'        "float guidefraction" [{_f(fraction)}]']
 
 
 def build(args: argparse.Namespace) -> dict:  # noqa: C901 (linear scene assembly)
@@ -540,6 +562,7 @@ def build(args: argparse.Namespace) -> dict:  # noqa: C901 (linear scene assembl
         "    Rotate -90 1 0 0",
         f'    LightSource "infinite" "string filename" "textures/{sky_file.name}"',
         f'        "float illuminance" [{_f(e_sky_h)}]',
+        *sky_guide_lines(args.sky_portal_guide, z_in, z_out),
         "AttributeEnd",
         "",
         *(
