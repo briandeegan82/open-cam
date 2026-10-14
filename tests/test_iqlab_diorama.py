@@ -73,3 +73,56 @@ def test_render_rois_hit_the_right_objects(tmp_path):
     assert (
         roi(meta["cards"]["dead_leaves"]["roi_xyxy"]).std() > 0.1 * roi(meta["cards"]["dead_leaves"]["roi_xyxy"]).mean()
     )
+
+
+def test_sppm_integrator_line(tmp_path):
+    args = dio.build_parser().parse_args(
+        ["--out-dir", str(tmp_path), "--integrator", "sppm", "--sppm-photons", "5000", "--sppm-radius", "0.03"]
+    )
+    dio.write_diorama(args)
+    scene = (tmp_path / "iq_diorama.pbrt").read_text()
+    assert (
+        'Integrator "sppm" "integer maxdepth" [6] "integer photonsperiteration" [5000] "float radius" [0.03]' in scene
+    )
+    default = dio.build_parser().parse_args(["--out-dir", str(tmp_path / "d")])
+    assert dio.integrator_line(default).startswith('Integrator "volpath"')
+    with pytest.raises(ValueError):
+        dio.integrator_line(dio.build_parser().parse_args(["--integrator", "sppm", "--sppm-photons", "0"]))
+
+
+def _spectral_exr(path):
+    import re
+
+    import Imath
+    import OpenEXR
+
+    exr = OpenEXR.InputFile(str(path))
+    dw = exr.header()["dataWindow"]
+    w, h = dw.max.x - dw.min.x + 1, dw.max.y - dw.min.y + 1
+    pt = Imath.PixelType(Imath.PixelType.FLOAT)
+    chans = {c: np.frombuffer(exr.channel(c, pt), np.float32).reshape(h, w) for c in exr.header()["channels"]}
+    buckets = sorted((c for c in chans if c.startswith("S0.")), key=lambda c: float(re.findall(r"[\d.]+", c[3:])[0]))
+    return chans, buckets
+
+
+@pytest.mark.skipif(not PBRT.is_file(), reason="pbrt binary not built")
+def test_sppm_spectral_film_matches_volpath(tmp_path):
+    """Spectral SPPM (pbrt patch 0009) writes the volpath EXR layout and agrees per bucket."""
+    out = {}
+    for name, extra in (
+        ("volpath", ["--pixelsamples", "64"]),
+        ("sppm", ["--integrator", "sppm", "--pixelsamples", "256", "--sppm-photons", "20000"]),
+    ):
+        d = tmp_path / name
+        args = ["--out-dir", str(d), "--xres", "60", "--yres", "40", "--spectral-nbuckets", "8", *extra]
+        meta = dio.write_diorama(dio.build_parser().parse_args(args))
+        subprocess.run([str(PBRT), "--quiet", "--seed", "1", "iq_diorama.pbrt"], cwd=d, check=True, timeout=600)
+        out[name] = _spectral_exr(d / meta["film_output"])
+    (vol, vb), (spm, sb) = out["volpath"], out["sppm"]
+    assert sb == vb and len(sb) == 8
+    assert all(np.isfinite(spm[c]).all() for c in spm)
+    ratio = np.array([spm[c].mean() / vol[c].mean() for c in vb])
+    assert np.all(np.abs(ratio - 1) < 0.08), ratio
+    # RGB channels (sensor RGB -> output RGB) agree with the buckets' integral as in volpath
+    rgb = np.array([spm[c].mean() / vol[c].mean() for c in "RGB"])
+    assert np.all(np.abs(rgb - 1) < 0.08), rgb

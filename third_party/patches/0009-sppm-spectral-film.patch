@@ -1,0 +1,272 @@
+--- a/src/pbrt/film.h
++++ b/src/pbrt/film.h
+@@ -491,6 +491,24 @@
+         return {};
+     }
+ 
++    // open-cam spectral SPPM: overwrite a pixel with its final sensor RGB and per-bucket
++    // radiance so WriteImage() produces the usual RGB + S0.<lambda>nm layout.
++    int NBuckets() const { return nBuckets; }
++    int BucketOf(Float lambda) const { return LambdaToBucket(lambda); }
++    void SetPixelFinal(Point2i p, RGB sensorRGB, const Float *bucketValues) {
++        Pixel &pix = pixels[p];
++        for (int c = 0; c < 3; ++c) {
++            pix.rgbSum[c] = sensorRGB[c];
++            pix.rgbSplat[c] = 0.;
++        }
++        pix.rgbWeightSum = 1.;
++        for (int i = 0; i < nBuckets; ++i) {
++            pix.bucketSums[i] = bucketValues[i];
++            pix.weightSums[i] = 1.;
++            pix.bucketSplats[i] = 0.;
++        }
++    }
++
+     PBRT_CPU_GPU void ResetPixel(Point2i p) {
+         Pixel &pix = pixels[p];
+         pix.rgbSum[0] = pix.rgbSum[1] = pix.rgbSum[2] = 0.;
+--- a/src/pbrt/cpu/integrators.cpp
++++ b/src/pbrt/cpu/integrators.cpp
+@@ -2846,8 +2846,41 @@
+     std::atomic<int> m{0};
+     RGB tau;
+     Float n = 0;
++    // open-cam spectral SPPM: this iteration's camera wavelengths (hero rotated by
++    // `hero` for "dispersionsplit", secondaries terminated by a dispersive lens).
++    SampledWavelengths lambda;
++    int hero = 0;
++    size_t index = 0;
+ };
+ 
++// open-cam spectral SPPM: per-pixel, per-bucket accumulators (nBuckets entries each).
++struct SPPMSpectralBuffers {
++    int nBuckets = 0;
++    std::vector<Float> Ld, wLd, tau, wPhi;
++    std::unique_ptr<AtomicFloat[]> Phi;
++    void Init(size_t nPixels, int nb) {
++        nBuckets = nb;
++        Ld.assign(nPixels * nb, 0.f);
++        wLd.assign(nPixels * nb, 0.f);
++        tau.assign(nPixels * nb, 0.f);
++        wPhi.assign(nPixels * nb, 0.f);
++        Phi.reset(new AtomicFloat[nPixels * nb]);
++        for (size_t i = 0; i < nPixels * nb; ++i)
++            Phi[i] = 0.f;
++    }
++};
++
++// Spectrum indexed like the photon pass's wavelengths, re-ordered to a pixel whose
++// hero was rotated by h (SampledWavelengths::RotateHero(h)).
++inline SampledSpectrum RotateSpectrum(const SampledSpectrum &s, int h) {
++    if (h == 0)
++        return s;
++    SampledSpectrum r;
++    for (int i = 0; i < NSpectrumSamples; ++i)
++        r[i] = s[(i + h) % NSpectrumSamples];
++    return r;
++}
++
+ // SPPMPixelListNode Definition
+ struct SPPMPixelListNode {
+     SPPMPixel *pixel;
+@@ -2887,6 +2920,38 @@
+         p.radius = initialSearchRadius;
+     pixelMemoryBytes += pixels.size() * sizeof(SPPMPixel);
+ 
++    // open-cam: spectral film support (per-bucket accumulators, sensor-RGB channels)
++    SpectralFilm *spectralFilm =
++        film.Is<SpectralFilm>() ? film.Cast<SpectralFilm>() : nullptr;
++    SPPMSpectralBuffers spec;
++    const PixelSensor *sensor = film.GetPixelSensor();
++    if (spectralFilm) {
++        spec.Init(nPixels, spectralFilm->NBuckets());
++        pixelMemoryBytes += size_t(nPixels) * spec.nBuckets * 5 * sizeof(Float);
++    }
++    const bool rotateHero = CameraWavelengthPasses(camera) > 1;
++    auto PixelIndex = [&](Point2i p) {
++        return size_t(p.y - pixelBounds.pMin.y) * pixelBounds.Diagonal().x +
++               (p.x - pixelBounds.pMin.x);
++    };
++    // RGB for the film: output RGB (RGB film, unchanged) or sensor RGB (spectral film,
++    // converted to output RGB by SpectralFilm::GetPixelRGB()).
++    auto FilmRGB = [&](const SampledSpectrum &L, const SampledWavelengths &lambda) {
++        return spectralFilm ? sensor->ToSensorRGB(L, lambda) : film.ToOutputRGB(L, lambda);
++    };
++    // Mirrors SpectralFilm::AddSample(): terminated wavelengths are skipped.
++    auto AddLd = [&](SPPMPixel &pixel, Point2i pPixel, const SampledSpectrum &L,
++                     const SampledWavelengths &lambda) {
++        pixel.Ld += FilmRGB(L, lambda);
++        if (!spectralFilm)
++            return;
++        size_t base = PixelIndex(pPixel) * spec.nBuckets;
++        for (int i = 0; i < NSpectrumSamples; ++i)
++            if (lambda.PDF()[i] != 0)
++                spec.Ld[base + spectralFilm->BucketOf(lambda[i])] +=
++                    L[i] * CIE_Y_integral;
++    };
++
+     // Create light samplers for SPPM rendering
+     BVHLightSampler lightSampler(lights, Allocator());
+     PowerLightSampler shootLightSampler(lights, Allocator());
+@@ -2936,10 +3001,32 @@
+                 sampler.StartPixelSample(pPixel, iter);
+                 // Generate camera ray for pixel for SPPM
+                 SampledWavelengths lambda = passLambda;
++                SPPMPixel &pixel = pixels[pPixel];
++                // "dispersionsplit": a dispersive lens follows only the hero, so give
++                // neighbouring pixels and successive iterations different heroes.
++                pixel.hero = rotateHero ? int((MixBits((uint64_t(pPixel.x) << 32) ^
++                                                       uint64_t(pPixel.y)) +
++                                               uint64_t(iter)) %
++                                              NSpectrumSamples)
++                                        : 0;
++                if (pixel.hero)
++                    lambda.RotateHero(pixel.hero);
+                 CameraSample cs = GetCameraSample(sampler, pPixel, film.GetFilter());
+                 cs.time = timeSample;
+                 pstd::optional<CameraRayDifferential> crd =
+                     camera.GenerateRayDifferential(cs, lambda);
++                pixel.lambda = lambda;
++                pixel.index = PixelIndex(pPixel);
++                if (spectralFilm) {
++                    // Every iteration counts, hit or not (as RGB SPPM divides by iter + 1)
++                    size_t base = PixelIndex(pPixel) * spec.nBuckets;
++                    for (int i = 0; i < NSpectrumSamples; ++i)
++                        if (lambda.PDF()[i] != 0) {
++                            int b = spectralFilm->BucketOf(lambda[i]);
++                            spec.wLd[base + b] += 1;
++                            spec.wPhi[base + b] += photonsPerIteration;
++                        }
++                }
+                 if (!crd || !crd->weight)
+                     continue;
+                 SampledSpectrum beta = crd->weight;
+@@ -2948,7 +3035,6 @@
+                     ray.ScaleDifferentials(invSqrtSPP);
+ 
+                 // Follow camera ray path until a visible point is created
+-                SPPMPixel &pixel = pixels[pPixel];
+                 Float etaScale = 1, p_b;
+                 bool specularBounce = true, haveSetVisiblePoint = false;
+                 LightSampleContext prevIntrCtx;
+@@ -2974,7 +3060,7 @@
+                             }
+                         }
+ 
+-                        pixel.Ld += film.ToOutputRGB(L, lambda);
++                        AddLd(pixel, pPixel, L, lambda);
+                         break;
+                     }
+ 
+@@ -3008,7 +3094,7 @@
+                         }
+                     }
+ 
+-                    pixel.Ld += film.ToOutputRGB(L, lambda);
++                    AddLd(pixel, pPixel, L, lambda);
+ 
+                     // Terminate path at maximum depth or if visible point has been set
+                     if (depth++ == maxDepth || haveSetVisiblePoint)
+@@ -3018,7 +3104,7 @@
+                     SampledSpectrum Ld =
+                         SampleLd(isect, bsdf, lambda, sampler, &lightSampler);
+                     if (Ld)
+-                        pixel.Ld += film.ToOutputRGB(beta * Ld, lambda);
++                        AddLd(pixel, pPixel, beta * Ld, lambda);
+ 
+                     // Possibly create visible point and end camera path
+                     BxDFFlags flags = bsdf.Flags();
+@@ -3197,16 +3283,41 @@
+                                     continue;
+                                 // Update _pixel_ $\Phi$ and $m$ for nearby photon
+                                 Vector3f wi = -photonRay.d;
+-                                SampledSpectrum Phi =
+-                                    beta * pixel.vp.bsdf.f(pixel.vp.wo, wi);
++                                // Visible point BSDF uses the pixel's (rotated) order
++                                SampledSpectrum Phi = pixel.vp.bsdf.f(pixel.vp.wo, wi);
++                                SampledSpectrum photonBeta = beta;
++                                // A photon terminated by dispersive glass carries only
++                                // its hero (index 0). Weight it by 1 / P(the pixel's kept
++                                // wavelength is that hero): 1 if the pixel also kept only
++                                // index 0 (no hero rotation), else NSpectrumSamples.
++                                if (lambda.SecondaryTerminated()) {
++                                    Float w = pixel.vp.secondaryLambdaTerminated && !rotateHero
++                                                  ? 1
++                                                  : NSpectrumSamples;
++                                    photonBeta[0] *= w;
++                                    for (int i = 1; i < NSpectrumSamples; ++i)
++                                        photonBeta[i] = 0;
++                                }
++                                Phi *= RotateSpectrum(photonBeta, pixel.hero);
+                                 // Update _Phi_i_ for photon contribution
+-                                SampledWavelengths photonLambda = lambda;
++                                SampledWavelengths photonLambda = passLambda;
++                                if (pixel.hero)
++                                    photonLambda.RotateHero(pixel.hero);
+                                 if (pixel.vp.secondaryLambdaTerminated)
+                                     photonLambda.TerminateSecondary();
+-                                RGB Phi_i =
+-                                    film.ToOutputRGB(pixel.vp.beta * Phi, photonLambda);
++                                RGB Phi_i = FilmRGB(pixel.vp.beta * Phi, photonLambda);
+                                 for (int i = 0; i < 3; ++i)
+                                     pixel.Phi_i[i].Add(Phi_i[i]);
++                                if (spectralFilm) {
++                                    SampledSpectrum v = pixel.vp.beta * Phi;
++                                    size_t base =
++                                        pixel.index * spec.nBuckets;
++                                    for (int i = 0; i < NSpectrumSamples; ++i)
++                                        if (photonLambda.PDF()[i] != 0)
++                                            spec.Phi[base + spectralFilm->BucketOf(
++                                                                photonLambda[i])]
++                                                .Add(v[i] * CIE_Y_integral);
++                                }
+ 
+                                 ++pixel.m;
+                             }
+@@ -3262,6 +3373,15 @@
+                 // Update $\tau$ for pixel
+                 RGB Phi_i(p.Phi_i[0], p.Phi_i[1], p.Phi_i[2]);
+                 p.tau = (p.tau + Phi_i) * Sqr(rNew) / Sqr(p.radius);
++                if (spectralFilm) {
++                    size_t base = PixelIndex(pPixel) * spec.nBuckets;
++                    for (int b = 0; b < spec.nBuckets; ++b) {
++                        spec.tau[base + b] =
++                            (spec.tau[base + b] + Float(spec.Phi[base + b])) *
++                            Sqr(rNew) / Sqr(p.radius);
++                        spec.Phi[base + b] = 0.f;
++                    }
++                }
+ 
+                 // Set remaining pixel values for next photon pass
+                 p.n = nNew;
+@@ -3279,6 +3399,30 @@
+         if (iter + 1 == nIterations || (iter + 1 <= 64 && IsPowerOf2(iter + 1)) ||
+             ((iter + 1) % 64 == 0)) {
+             uint64_t np = (uint64_t)(iter + 1) * (uint64_t)photonsPerIteration;
++            if (spectralFilm) {
++                // Spectral film: final sensor RGB + per-bucket radiance, written by the film
++                ParallelFor2D(pixelBounds, [&](Point2i pPixel) {
++                    const SPPMPixel &pixel = pixels[pPixel];
++                    RGB L = pixel.Ld / (iter + 1) +
++                            pixel.tau / (np * Pi * Sqr(pixel.radius));
++                    size_t base = PixelIndex(pPixel) * spec.nBuckets;
++                    std::vector<Float> buckets(spec.nBuckets, 0.f);
++                    for (int b = 0; b < spec.nBuckets; ++b) {
++                        if (spec.wLd[base + b] > 0)
++                            buckets[b] += spec.Ld[base + b] / spec.wLd[base + b];
++                        if (spec.wPhi[base + b] > 0)
++                            buckets[b] += spec.tau[base + b] /
++                                          (spec.wPhi[base + b] * Pi * Sqr(pixel.radius));
++                    }
++                    spectralFilm->SetPixelFinal(pPixel, L, buckets.data());
++                });
++                ImageMetadata metadata;
++                metadata.renderTimeSeconds = progress.ElapsedSeconds();
++                metadata.samplesPerPixel = iter + 1;
++                camera.InitMetadata(&metadata);
++                spectralFilm->WriteImage(metadata);
++                continue;
++            }
+             Image rgbImage(PixelFormat::Float, Point2i(pixelBounds.Diagonal()),
+                            {"R", "G", "B"});
+ 

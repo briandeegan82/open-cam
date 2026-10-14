@@ -17,3 +17,41 @@ Scoring examples:
 - Colour: `iqlab.cpiq.chroma_level` on the chart patch ROIs.
 - SFR: `sfr_analysis.slanted_edge_sfr` on the edge ROI.
 - Scene contrast: window ROI / shadow ROI.
+
+## Caustics: spectral SPPM (opt-in)
+
+`--integrator sppm` switches the diorama from `volpath` to pbrt's stochastic progressive photon
+mapping. Photon mapping converges on the focused caustic under the glass sphere (and paths that
+reach the lamp via the glass/metal spheres), which a path tracer leaves grainy at any practical spp.
+
+- `--pixelsamples` sets the number of SPPM iterations; `--sppm-photons` (photons per iteration,
+  default 200000) and `--sppm-radius` (initial gather radius in metres, default 0.02) set the
+  photon budget and the initial blur. The radius shrinks every iteration, so the estimate is
+  consistent but biased (slightly blurred caustics/shading) at a finite iteration count.
+- The spectral film works with SPPM through pbrt patch `0009-sppm-spectral-film.patch`: per-pixel,
+  per-bucket accumulators write the same `RGB` + `S0.<lambda>nm` EXR layout as `volpath`, so the
+  sensor model reads it unchanged. Upstream SPPM only supports RGB films.
+- Each iteration uses one wavelength set for the whole image (shared by the camera and photon
+  passes), so at low iteration counts the image has a global colour error: on the diorama the RGB
+  means were 10-15 % off `volpath` at 64 iterations and within 3 % at 1024. Use hundreds of iterations
+  or more.
+- Realistic lenses work. With a dispersive lens only the hero wavelength reaches each visible point;
+  with `--lens-dispersion-split` SPPM does not trace four camera paths but rotates the hero per pixel
+  and iteration, which decorrelates the colour noise between pixels.
+- CPU only (no GPU/wavefront SPPM), no participating media, and `volpath` remains the default.
+
+Measured on the default diorama (pinhole, 480x320, same seed, about equal time: volpath 1024 spp
+104 s vs SPPM 1024 iterations x 100k photons, radius 0.01 m, 108 s), high-pass noise in the RGB
+channels:
+
+| region | volpath lum / chroma | spectral SPPM lum / chroma | RGB-film SPPM lum / chroma |
+|---|---|---|---|
+| floor beside the glass sphere (caustic) | 0.26 / 0.047 | 0.27 / 0.020 | 0.28 / 0.012 |
+| ColorChecker white patch | 0.07 / 0.024 | 0.24 / 0.070 | 0.18 / 0.027 |
+| matte sphere | 0.11 / 0.027 | 0.20 / 0.059 | 0.19 / 0.021 |
+
+SPPM halves the colour noise in the caustic region but is 2-3x noisier on directly lit diffuse
+surfaces at equal time, so it is not a general replacement for `volpath` here. The spectral film
+adds colour noise over RGB-film SPPM: it samples 360-830 nm uniformly (RGB films importance-sample
+the visible range) and every pixel shares the iteration's four wavelengths. Fewer iterations with
+more photons (64 x 2M) was worse everywhere.
