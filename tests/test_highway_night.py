@@ -27,6 +27,7 @@ from synthetic_data import REPO
 from test_highway_scene import build_without_assets
 
 PBRT = Path(os.environ.get("OPENCAM_PBRT", REPO / "third_party" / "pbrt-v4" / "build" / "pbrt"))
+PBRT_TIMEOUT_S = int(os.environ.get("OPENCAM_PBRT_TIMEOUT", "600"))
 WL = night.LIGHT_WL
 
 
@@ -232,7 +233,7 @@ def _pbrt_has_retro() -> bool:
             'Film "rgb" "integer xresolution" [1] "integer yresolution" [1] "string filename" "t.exr"\n'
             'Camera "perspective"\nWorldBegin\nMaterial "retroreflective"\n'
         )
-        r = subprocess.run([str(PBRT), "--quiet", str(p)], capture_output=True, cwd=td)
+        r = subprocess.run([str(PBRT), "--quiet", str(p)], capture_output=True, cwd=td, timeout=PBRT_TIMEOUT_S)
         return r.returncode == 0
 
 
@@ -259,7 +260,9 @@ def _render(td: Path, cam: np.ndarray, look: np.ndarray, up: np.ndarray, light: 
         *body,
     ]
     (td / "s.pbrt").write_text("\n".join(s) + "\n")
-    subprocess.run([str(PBRT), "--quiet", "--seed", "3", "s.pbrt"], check=True, cwd=td, capture_output=True)
+    subprocess.run(
+        [str(PBRT), "--quiet", "--seed", "3", "s.pbrt"], check=True, cwd=td, capture_output=True, timeout=PBRT_TIMEOUT_S
+    )
     return read_separate_exr_channels(td / "out.exr")
 
 

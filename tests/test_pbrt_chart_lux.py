@@ -21,7 +21,7 @@ import numpy as np
 import pbrt_spectral_exr_to_electrons as pbrt_tool
 import spectral_sensor_forward as analytic_tool
 from synthetic_data import REPO, run_tool_main
-from test_pbrt_e2e import PBRT, XRES, YRES, _patch_centres_px
+from test_pbrt_e2e import PBRT, PBRT_TIMEOUT_S, XRES, YRES, _patch_centres_px
 
 RECIPES = REPO / "config" / "camera_recipes"
 # recipe -> (lens file, pbrt stop diameter mm, focal length mm); matches the recipe's lens model.
@@ -80,7 +80,9 @@ def _render(tmp: Path, tag: str, extra: list[str]) -> Path:
         check=True,
         capture_output=True,
     )
-    subprocess.run([str(PBRT), "--quiet", "--seed", "1", str(out / "colorchecker.pbrt")], check=True)
+    subprocess.run(
+        [str(PBRT), "--quiet", "--seed", "1", str(out / "colorchecker.pbrt")], check=True, timeout=PBRT_TIMEOUT_S
+    )
     return out
 
 

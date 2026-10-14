@@ -19,7 +19,7 @@ import numpy as np
 import yaml
 from camera_model import load_camera_model, noise_config_from_camera_model
 from synthetic_data import REPO
-from test_pbrt_e2e import PBRT
+from test_pbrt_e2e import PBRT, PBRT_TIMEOUT_S
 
 XRES, YRES = 96, 64
 CAMERA_MODEL = REPO / "config" / "camera_recipes" / "iphone_8.yaml"
@@ -27,7 +27,7 @@ TOOLS = REPO / "tools"
 
 
 def _run(*args: str) -> None:
-    subprocess.run([sys.executable, *args], check=True, capture_output=True, cwd=REPO)
+    subprocess.run([sys.executable, *args], check=True, timeout=PBRT_TIMEOUT_S, capture_output=True, cwd=REPO)
 
 
 @unittest.skipUnless(PBRT.is_file(), f"pbrt binary not built ({PBRT}); see docs/BUILD_PBRT.txt")
@@ -44,7 +44,9 @@ class TestPbrtFullPipeline(unittest.TestCase):
             *("--xres", str(XRES), "--yres", str(YRES), "--pixelsamples", "16"),
             *("--spectral-nbuckets", "16", "--spectral-lambda-min", "400", "--spectral-lambda-max", "700"),
         )
-        subprocess.run([str(PBRT), "--quiet", "--seed", "1", str(scene / "colorchecker.pbrt")], check=True)
+        subprocess.run(
+            [str(PBRT), "--quiet", "--seed", "1", str(scene / "colorchecker.pbrt")], check=True, timeout=PBRT_TIMEOUT_S
+        )
 
         camera_model = load_camera_model(CAMERA_MODEL)
         emva, adc = camera_model["noise"]["emva"], camera_model["noise"]["adc"]

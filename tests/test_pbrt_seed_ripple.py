@@ -17,6 +17,7 @@ sys.path.insert(0, str(REPO / "tools"))
 from exr_multispectral import spectral_buckets_from_exr  # noqa: E402
 
 PBRT = Path(os.environ.get("OPENCAM_PBRT", REPO / "third_party" / "pbrt-v4" / "build" / "pbrt"))
+PBRT_TIMEOUT_S = int(os.environ.get("OPENCAM_PBRT_TIMEOUT", "600"))
 
 SCENE = """LookAt 0 0 5  0 0 0  0 1 0
 Camera "perspective" "float fov" [30]
@@ -40,7 +41,9 @@ def test_builders_do_not_pin_the_pbrt_seed():
 class TestPbrtSeedAndRipple(unittest.TestCase):
     def _render(self, tmp: Path, seed: int, film: str = "") -> np.ndarray:
         (tmp / "s.pbrt").write_text(SCENE.format(film=film))
-        subprocess.run([str(PBRT), "--quiet", "--seed", str(seed), "s.pbrt"], cwd=tmp, check=True)
+        subprocess.run(
+            [str(PBRT), "--quiet", "--seed", str(seed), "s.pbrt"], cwd=tmp, check=True, timeout=PBRT_TIMEOUT_S
+        )
         cube, _ = spectral_buckets_from_exr(tmp / "out.exr")
         return np.asarray(cube, dtype=np.float64)
 

@@ -18,6 +18,7 @@ sys.path.insert(0, str(REPO / "tools"))
 import build_tunnel_scene as bts  # noqa: E402
 
 PBRT = REPO / "third_party" / "pbrt-v4" / "build" / "pbrt"
+PBRT_TIMEOUT_S = int(os.environ.get("OPENCAM_PBRT_TIMEOUT", "600"))
 
 
 def _build(tmp_path: Path, *extra: str) -> dict:
@@ -188,7 +189,7 @@ def test_pbrt_radiance_ratio_matches_manifest(tmp_path):
     built = _build(tmp_path, "--film", "rgb", "--xres", "480", "--yres", "320", "--pixelsamples", "64")
     (tmp_path / "out").mkdir(exist_ok=True)
     for view, b in built.items():
-        subprocess.run([str(PBRT), "--quiet", b["scene"].name], cwd=tmp_path, check=True)
+        subprocess.run([str(PBRT), "--quiet", b["scene"].name], cwd=tmp_path, check=True, timeout=PBRT_TIMEOUT_S)
         m = b["meta"]
         Y = linear_rgb_from_exr(tmp_path / m["film_output"]) @ np.array([0.2126, 0.7152, 0.0722])
         lum = {}
@@ -287,7 +288,7 @@ def test_pbrt_rtable_tunnel_renders(tmp_path):
     )
     (tmp_path / "out").mkdir(exist_ok=True)
     for view, b in built.items():
-        subprocess.run([str(PBRT), "--quiet", b["scene"].name], cwd=tmp_path, check=True)
+        subprocess.run([str(PBRT), "--quiet", b["scene"].name], cwd=tmp_path, check=True, timeout=PBRT_TIMEOUT_S)
         m = b["meta"]
         Y = linear_rgb_from_exr(tmp_path / m["film_output"]) @ np.array([0.2126, 0.7152, 0.0722])
         for k in (m["dynamic_range"]["bright_roi"], m["dynamic_range"]["dark_roi"]):

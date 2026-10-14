@@ -17,6 +17,7 @@ from exr_multispectral import spectral_buckets_from_exr
 from synthetic_data import REPO
 
 PBRT = Path(os.environ.get("OPENCAM_PBRT", REPO / "third_party" / "pbrt-v4" / "build" / "pbrt"))
+PBRT_TIMEOUT_S = int(os.environ.get("OPENCAM_PBRT_TIMEOUT", "600"))
 
 if not PBRT.is_file() and os.environ.get("OPENCAM_REQUIRE_PBRT") == "1":
     raise RuntimeError(f"OPENCAM_REQUIRE_PBRT=1 but pbrt binary not found at {PBRT}")
@@ -54,7 +55,7 @@ def _render(tmp: Path, name: str, *extra: str) -> np.ndarray:
     )
     pbrt_file = scene / "colorchecker.pbrt"
     assert ('"bool dispersionsplit" true' in pbrt_file.read_text()) == ("--lens-dispersion-split" in extra)
-    subprocess.run([str(PBRT), "--quiet", str(pbrt_file)], check=True, cwd=scene)
+    subprocess.run([str(PBRT), "--quiet", str(pbrt_file)], check=True, cwd=scene, timeout=PBRT_TIMEOUT_S)
     return spectral_buckets_from_exr(exr)[0]
 
 

@@ -8,6 +8,7 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
@@ -28,7 +29,7 @@ jobs:
       - name: Format check
         run: ruff format --check .
       - name: Pipeline tests
-        run: python -m pytest tests -q
+        run: python -m pytest tests -q --timeout=900
       - name: GUI tests
         working-directory: gui
         run: python -m pytest -q
@@ -37,6 +38,9 @@ jobs:
 
   pbrt-e2e:
     runs-on: ubuntu-latest
+    # A cold pbrt build plus the render tests; a stuck pbrt render fails here instead of
+    # running to GitHub's 6 h default.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
         with:
@@ -61,15 +65,39 @@ jobs:
         run: |
           sudo apt-get update -q
           sudo apt-get install -y -q libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev \
-            libxi-dev libgl-dev libwayland-dev libxkbcommon-dev wayland-protocols pkg-config cmake
+            libxi-dev libgl-dev libwayland-dev libxkbcommon-dev wayland-protocols pkg-config cmake ccache
+      # Compiler cache for pbrt rebuilds after a patch change: falls back to the newest
+      # cache from any earlier patch stack, so only the patched sources recompile.
+      - name: Cache pbrt compiler output (ccache)
+        if: steps.pbrt-cache.outputs.cache-hit != 'true'
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/ccache
+          key: pbrt-ccache-${{ runner.os }}-${{ steps.pbrt.outputs.sha }}-${{ hashFiles('third_party/patches/*.patch', 'tools/build_pbrt.sh') }}
+          restore-keys: |
+            pbrt-ccache-${{ runner.os }}-${{ steps.pbrt.outputs.sha }}-
+            pbrt-ccache-${{ runner.os }}-
       - name: Build pbrt-v4 (CPU, with third_party/patches applied)
         if: steps.pbrt-cache.outputs.cache-hit != 'true'
-        run: tools/build_pbrt.sh  # applies third_party/patches/*.patch, then builds
+        run: |
+          ccache --zero-stats
+          tools/build_pbrt.sh  # applies third_party/patches/*.patch, then builds
+          ccache --show-stats
         env:
           PBRT_NATIVE: "OFF"  # no -march=native: the cached binary must run on any runner CPU
+          CMAKE_C_COMPILER_LAUNCHER: ccache
+          CMAKE_CXX_COMPILER_LAUNCHER: ccache
+          CCACHE_DIR: ${{ runner.temp }}/ccache
+          CCACHE_BASEDIR: ${{ github.workspace }}
+          CCACHE_MAXSIZE: 1G
+          CCACHE_COMPILERCHECK: content
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
+      # Each pbrt call in the tests is killed after OPENCAM_PBRT_TIMEOUT s (TimeoutExpired names
+      # the scene); --timeout dumps every thread's stack if a test hangs elsewhere.
       - name: End-to-end render test
+        timeout-minutes: 30
         env:
           OPENCAM_REQUIRE_PBRT: "1"
-        run: python -m pytest tests/test_pbrt_e2e.py tests/test_pbrt_full_pipeline.py tests/test_highway_night.py tests/test_highway_spectral_sky.py tests/test_road_rtable.py -v
+          OPENCAM_PBRT_TIMEOUT: "600"
+        run: python -m pytest tests/test_pbrt_e2e.py tests/test_pbrt_full_pipeline.py tests/test_highway_night.py tests/test_highway_spectral_sky.py tests/test_road_rtable.py -v --durations=15 --timeout=900
