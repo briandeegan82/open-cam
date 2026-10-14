@@ -239,10 +239,12 @@ This is passed to scene generation as `build_colorchecker_scene.py --illuminant 
 
 ## Validation and Tests
 
-Run unit tests:
+Run the tests (pytest, as CI does; `pyproject.toml` puts `tools/` on the path):
 
 ```bash
-PYTHONPATH=tools:. venv/bin/python -m unittest discover -s tests -v
+venv/bin/python -m pytest tests -q            # pbrt render tests are skipped if pbrt isn't built
+(cd gui && ../venv/bin/python -m pytest -q)   # GUI tests
+OPENCAM_REQUIRE_PBRT=1 venv/bin/python -m pytest tests/test_pbrt_e2e.py -v   # fail instead of skip without pbrt
 ```
 
 Useful validation commands:
@@ -328,8 +330,8 @@ venv/bin/python tools/munsell_mat_to_sqlite.py --summary
 - `cfa.demosaic` implements bilinear and Malvar-He-Cutler reconstruction for the legacy 2x2 Bayer path (`cfa.pattern`). The opt-in generic CFA path (`cfa.layout`: RGBW, RCCB, RYYCy, RCCG, Quad Bayer, custom NxM, per-channel spectral QE) uses per-channel normalised-convolution bilinear or guide-channel gradient demosaicing, not a learned/edge-directed state-of-the-art demosaic; Quad Bayer remosaic is a nearest-site rearrangement. See [docs/CFA_NIR.md](docs/CFA_NIR.md).
 - NIR / no-IRCF: stock pbrt-v4 renders 360-830 nm; 850/940 nm needs the opt-in NIR pbrt build (`PBRT_LAMBDA_MAX_NM=1100`, patch 0002). NIR QE curves beyond the measured ~700 nm are a Si absorption model (Green 2008) with an assumed IR-transparent colour filter; ColorChecker and most material reflectances are measured only to 730 nm and held constant beyond (pbrt extrapolation). See [docs/CFA_NIR.md](docs/CFA_NIR.md).
 - Highway wet road (`--road-wetness`, `--puddles`, `--spray`): flat puddles, no raindrops/ripples on the road, spray density scaling partly assumed; see `docs/HIGHWAY_SCENES.md`.
-- Tunnel HDR scene: Lambertian asphalt, a step from the threshold to the interior zone (no transition or exit-zone lighting), luminaires solved for direct road luminance only and box proxy cars; luminance levels follow cited summaries of the CIE 88 zone definitions, not the standard itself (see docs/TUNNEL_SCENES.md).
-- Post-PSF modes `gaussian`/`chromatic_gaussian`/`airy_disk` are simple approximations, not derived from a lens. The opt-in `lens_diffraction` mode (`tools/lens_diffraction_psf.py`) computes field- and wavelength-dependent diffraction PSFs from a traced prescription (FFT of the traced, vignetted pupil; Goodman, *Introduction to Fourier Optics*), glass dispersion (chromatic aberration) is modelled only for lenses with a glass sidecar (`dgauss.50mm`, `wide_22mm`; the wide-angle glasses are inferred from n_d) and costs hero-wavelength colour noise in pbrt (see [`docs/LENS_DISPERSION.md`](docs/LENS_DISPERSION.md)), even-asphere surfaces are traced from a `.asphere.yaml` sidecar (the US 8,390,940 B2 phone lens `phone_6p_2.97mm`; see [`docs/LENS_ASPHERE.md`](docs/LENS_ASPHERE.md)), diffraction is added to pbrt's geometric blur as a product of MTFs (exact only in the diffraction- and geometric-limited regimes), and polarisation, coatings, scatter and ghosts are not modelled. See `docs/LENS_MODELS.txt` (Diffraction).
+- Tunnel HDR scene: Lambertian asphalt by default (opt-in r-table road, placeholder data only), stepped threshold / transition / interior / exit zones (`--zone-profile stepped`; `two-step` keeps the old threshold-to-interior step), luminaires solved for direct road luminance only (wall interreflection and daylight spill add about 20–50 % in the render) and box proxy cars; luminance levels follow cited summaries of the CIE 88 zone definitions, not the standard itself (see docs/TUNNEL_SCENES.md).
+- Post-PSF modes `gaussian`/`chromatic_gaussian`/`airy_disk` are simple approximations, not derived from a lens. The opt-in `lens_diffraction` mode (`tools/lens_diffraction_psf.py`) computes field- and wavelength-dependent diffraction PSFs from a traced prescription (FFT of the traced, vignetted pupil; Goodman, *Introduction to Fourier Optics*), glass dispersion (chromatic aberration) is modelled only for lenses with a glass sidecar (`dgauss.50mm`, `wide_22mm`; the wide-angle glasses are inferred from n_d). By default pbrt traces dispersion at the hero wavelength only, which adds colour noise; `lens.dispersion_split: true` (`--lens-dispersion-split`) traces all 4 wavelengths at about 3× the render time (see [`docs/LENS_DISPERSION.md`](docs/LENS_DISPERSION.md)), even-asphere surfaces are traced from a `.asphere.yaml` sidecar (the US 8,390,940 B2 phone lens `phone_6p_2.97mm`; see [`docs/LENS_ASPHERE.md`](docs/LENS_ASPHERE.md)), diffraction is added to pbrt's geometric blur as a product of MTFs (exact only in the diffraction- and geometric-limited regimes), and polarisation is not modelled. Coatings, ghosts and surface scatter are separate opt-in stages (see the traced-ghost and lens-scatter entries above). See `docs/LENS_MODELS.txt` (Diffraction).
 - PBRT spectral sampling remains Monte Carlo based; use validation and repeated runs for sensitive comparisons.
 - Per-wavelength-bucket images still carry Monte Carlo noise (each bucket sees about 4/nbuckets of the paths). The spectral film now jitters its 4 hero wavelengths independently per stratum, so buckets one stratum apart no longer share paths and the periodic ripple is gone (`"bool jitterwavelengths" false` restores stock pbrt); see [`docs/SFR_SPECTRAL_RIPPLE.md`](docs/SFR_SPECTRAL_RIPPLE.md).
 - `tools/sfr_analysis.py` uses an ISO 12233-style signed-derivative edge fit with robust outlier rejection; the old `|derivative|` centroid (kept as `row_edge_positions_legacy`) was biased toward 0 deg on noisy renders.
@@ -360,7 +362,8 @@ curve and generated image comes from importing or subprocess-calling the same
 
 Before opening a PR:
 
-- `PYTHONPATH=tools:. venv/bin/python -m unittest discover -s tests -v`
+- `venv/bin/ruff check . && venv/bin/ruff format --check .`
+- `venv/bin/python -m pytest tests -q` and `(cd gui && ../venv/bin/python -m pytest -q)`
 - `venv/bin/python tools/run_pipeline.py --config config/pipeline.yaml --dry-run`
 
 Keep generated artifacts (`out/`, `scenes/generated/`) out of commits unless a change explicitly requires them.

@@ -11,7 +11,7 @@
 
 These are the same checks CI runs (`.github/workflows/ci.yml`):
 
-- Lint: `venv/bin/ruff check .`
+- Lint + format: `venv/bin/ruff check . && venv/bin/ruff format --check .`
 - Pipeline unit + module tests: `venv/bin/python -m pytest tests`
   (`PYTHONPATH=tools:. venv/bin/python -m unittest discover -s tests` also works)
 - GUI tests: `cd gui && ../venv/bin/python -m pytest`
