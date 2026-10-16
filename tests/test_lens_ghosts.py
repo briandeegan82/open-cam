@@ -578,3 +578,22 @@ def test_ghost_paths_off_gives_transmittance_only():
     axis = lg.ghost_energy_fractions(lens, [0.0, 0.0, 1.0], LAMS, n_grid=48)["primary_transmittance"]
     np.testing.assert_allclose(trans[48, 64], axis, rtol=0.02)
     assert trans[48, 64, 0] < trans[48, 64, 3]
+
+
+def test_render_ghosts_independent_of_worker_count():
+    lens = lg.load_lens(WIDE, aperture_diameter_mm=8.0, focus_distance_m=4.0, coating="mgf2")
+    cube = _point_source_cube()
+    cube[70, 100, :] = 500.0
+    cube[20, 90, :] = 300.0
+    mask = np.ones(LAMS.size, bool)
+    out = []
+    for workers in (1, 2):
+        cfg = lg.resolve_config(
+            {"enabled": True, "pupil_samples": 32, "film_diagonal_mm": 35.0, "workers": workers},
+            {"camera": "realistic"},
+        )
+        ghost, _t, rep = lg.render_ghosts(cube, list(LAMS), mask, lens, cfg)
+        assert rep["sources"]["n_sources"] == 3 and rep["workers"] == workers
+        out.append((ghost, rep["ghost_to_source_energy"]))
+    np.testing.assert_allclose(out[0][0], out[1][0], rtol=1e-5, atol=1e-9)
+    assert out[0][1] == pytest.approx(out[1][1], rel=1e-9)

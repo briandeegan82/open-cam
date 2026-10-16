@@ -760,16 +760,20 @@ class FilmMapping:
 
 def _bilinear_splat(px, py, weights, h, w) -> np.ndarray:
     """Bilinear splat of points with (N, r) weights into an (r, h, w) array (pixel-centre coords)."""
-    out = np.zeros((weights.shape[1], h * w))
     x0 = np.floor(px).astype(np.int64)
     y0 = np.floor(py).astype(np.int64)
     fx, fy = px - x0, py - y0
+    idx, fac = [], []
     for dx, dy, f in ((0, 0, (1 - fx) * (1 - fy)), (1, 0, fx * (1 - fy)), (0, 1, (1 - fx) * fy), (1, 1, fx * fy)):
         xi, yi = x0 + dx, y0 + dy
         ok = (xi >= 0) & (xi < w) & (yi >= 0) & (yi < h)
-        idx = yi[ok] * w + xi[ok]
-        for c in range(weights.shape[1]):
-            out[c] += np.bincount(idx, weights=weights[ok, c] * f[ok], minlength=h * w)
+        idx.append(yi[ok] * w + xi[ok])
+        fac.append(weights[ok] * f[ok, None])
+    idx = np.concatenate(idx)
+    fac = np.concatenate(fac)
+    out = np.empty((weights.shape[1], h * w))
+    for c in range(weights.shape[1]):
+        out[c] = np.bincount(idx, weights=fac[:, c], minlength=h * w)
     return out.reshape(weights.shape[1], h, w)
 
 
@@ -899,6 +903,7 @@ DEFAULTS = {
     "glass_absorption": True,
     "dispersion": False,
     "dispersion_groups": 0,
+    "workers": 0,
 }
 
 
@@ -1023,55 +1028,83 @@ def _gauss_blur_local(maps: np.ndarray, sigma: float) -> np.ndarray:
     return np.stack([gaussian_filter(m, sigma, mode="constant", truncate=3.0) for m in maps])
 
 
+def _crop(x, y, pad: int, h: int, w: int) -> tuple[int, int, int, int]:
+    x0 = max(int(math.floor(x.min())) - pad, 0)
+    x1 = min(int(math.ceil(x.max())) + pad + 1, w)
+    y0 = max(int(math.floor(y.min())) - pad, 0)
+    y1 = min(int(math.ceil(y.max())) + pad + 1, h)
+    return x0, x1, y0, y1
+
+
 def _splat_ghost(ghost: np.ndarray, gx, gy, alive, wsp: np.ndarray, n_grid: int, chan=None) -> None:
-    """Rasterise one ghost's ray grid into ``ghost`` (H, W, L) in place (into channels ``chan``, default all).
+    """Rasterise one ghost's ray grid into the channel-first ``ghost`` (L, H, W) in place (into channels ``chan``, default all).
 
     The per-ray spectra are factored once, ``wsp ~ coeff @ spectra`` (rank <= 4, since they vary only
     through the angle dependence of the coatings); rasterisation is linear, so only the rank-r
-    coefficient maps are splatted and expanded to the L buckets at the end.
+    coefficient maps are splatted and expanded to the L buckets at the end.  Point sets sharing a
+    blur are splatted and blurred together, each in its own crop (blur support + bilinear spill).
     """
-    h, w, _nl = ghost.shape
+    _nl, h, w = ghost.shape
     coeff, spectra = _low_rank(wsp)
     if coeff.shape[1] == 0:
         return
-    sets = rasterize_ray_grid(gx, gy, alive, coeff, n_grid)
-    sets = [st for st in sets if st[0].size]
+    sets = [st for st in rasterize_ray_grid(gx, gy, alive, coeff, n_grid) if st[0].size]
     if not sets:
         return
-    pad = int(math.ceil(3 * min(max(st[3] for st in sets), MAX_BLUR_PX))) + 2
-    x0 = max(int(math.floor(min(st[0].min() for st in sets))) - pad, 0)
-    x1 = min(int(math.ceil(max(st[0].max() for st in sets))) + pad + 1, w)
-    y0 = max(int(math.floor(min(st[1].min() for st in sets))) - pad, 0)
-    y1 = min(int(math.ceil(max(st[1].max() for st in sets))) + pad + 1, h)
-    if x1 <= x0 or y1 <= y0:
-        return
-    # One blur per distinct (capped, rounded) sigma: point sets sharing a blur are splatted together.
-    by_sigma: dict[float, np.ndarray] = {}
+    by_sigma: dict[float, list] = {}
     for x, y, ws, sigma in sets:
-        key = round(min(sigma, MAX_BLUR_PX), 1)
+        by_sigma.setdefault(round(min(sigma, MAX_BLUR_PX), 1), []).append((x, y, ws))
+    pad = int(math.ceil(3 * max(by_sigma))) + 2
+    xa = np.concatenate([st[0] for st in sets])
+    ya = np.concatenate([st[1] for st in sets])
+    X0, X1, Y0, Y1 = _crop(xa, ya, pad, h, w)
+    if X1 <= X0 or Y1 <= Y0:
+        return
+    maps = np.zeros((coeff.shape[1], Y1 - Y0, X1 - X0))
+    for key, group in by_sigma.items():
+        x = np.concatenate([g[0] for g in group])
+        y = np.concatenate([g[1] for g in group])
+        ws = np.concatenate([g[2] for g in group])
+        x0, x1, y0, y1 = _crop(x, y, int(math.ceil(3 * key)) + 2, h, w)
+        if x1 <= x0 or y1 <= y0:
+            continue
         m = _bilinear_splat(x - x0, y - y0, ws, y1 - y0, x1 - x0)
-        by_sigma[key] = by_sigma[key] + m if key in by_sigma else m
-    maps = sum(_gauss_blur_local(m, k) if k > 0 else m for k, m in by_sigma.items())
-    flat = maps.reshape(maps.shape[0], -1).T @ spectra
-    ghost[y0:y1, x0:x1, slice(None) if chan is None else chan] += flat.reshape(y1 - y0, x1 - x0, -1)
+        if key > 0:
+            m = _gauss_blur_local(m, key)
+        maps[:, y0 - Y0 : y1 - Y0, x0 - X0 : x1 - X0] += m
+    rows = np.flatnonzero(maps.any(axis=(0, 2)))
+    if rows.size == 0:
+        return
+    r0, r1 = int(rows[0]), int(rows[-1]) + 1
+    maps = maps[:, r0:r1]
+    tgt = ghost[:, Y0 + r0 : Y0 + r1, X0:X1]
+    for j, c in enumerate(range(_nl) if chan is None else chan):
+        tgt[c] += np.tensordot(spectra[:, j], maps, 1)
 
 
-def render_ghosts(cube: np.ndarray, lams: list[float], spectral_mask: np.ndarray, lens: Lens, cfg: dict):
-    """Return (ghost cube (H, W, L), primary transmittance map or None, report dict)."""
-    t0 = time.time()
-    h, w, nl = cube.shape
-    mapping = FilmMapping(lens, w, h, str(cfg["camera"]), cfg.get("film_diagonal_mm"), cfg.get("fov_deg"))
-    sources, info = find_sources(cube, spectral_mask, cfg)
-    ghost = np.zeros((h, w, nl), np.float64)
-    pairs = ghost_pairs(lens)
-    n_grid = int(cfg["pupil_samples"])
-    min_frac = float(cfg["min_ghost_fraction"])
-    groups = dispersion_groups(lens, lams, cfg)
+_POOL_CTX: dict = {}
+
+
+def _ghosts_for_sources(src_ids: list[int]) -> tuple:
+    """Ghost cube and energy tallies for the given sources (runs in a worker with ``_POOL_CTX``)."""
+    c = _POOL_CTX
+    sources, lens, mapping, groups, lams, spectral_mask = (
+        c["sources"],
+        c["lens"],
+        c["mapping"],
+        c["groups"],
+        c["lams"],
+        c["spectral_mask"],
+    )
+    n_grid, min_frac = c["n_grid"], c["min_frac"]
+    h, w, nl = c["shape"]
+    ghost = c["slots"][c.get("slot", 0)] if "slots" in c else np.zeros((nl, h, w), np.float64)
     ghost_energy = np.zeros(nl)
     src_energy = np.zeros(nl)
     skipped = 0
-    per_pair = {p: 0.0 for p in pairs}
-    for src in sources if bool(cfg.get("ghost_paths", True)) else []:
+    per_pair: dict = {}
+    for s_id in src_ids:
+        src = sources[s_id]
         fx, fy = mapping.pixel_to_film(src["x"], src["y"])
         d = mapping.direction_for_film(float(fx), float(fy))
         if d is None:
@@ -1106,7 +1139,90 @@ def render_ghosts(cube: np.ndarray, lams: list[float], spectral_mask: np.ndarray
                 _splat_ghost(ghost, gx, gy, alive, wsp, n_grid, idx)
                 e = wsp.sum(0)
                 ghost_energy[idx] += e
-                per_pair[pair] += float(e[mask_g].sum() if spectral_mask.any() else e.sum())
+                per_pair[pair] = per_pair.get(pair, 0.0) + float(e[mask_g].sum() if spectral_mask.any() else e.sum())
+    return (None if "slots" in c else ghost), ghost_energy, src_energy, skipped, per_pair
+
+
+def _pool_init(counter) -> None:
+    with counter.get_lock():
+        _POOL_CTX["slot"] = counter.value
+        counter.value += 1
+
+
+def _render_ghosts_parallel(n_sources: int, n_workers: int, shape) -> tuple[np.ndarray, list]:
+    """One task per source over ``n_workers`` forked processes; each adds into its own shared buffer."""
+    import mmap  # noqa: PLC0415
+    import multiprocessing as mp  # noqa: PLC0415
+
+    n = int(np.prod(shape))
+    buf = mmap.mmap(-1, n_workers * n * 8)  # anonymous shared mapping, inherited by the forked workers
+    h, w, nl = shape
+    slots = np.frombuffer(buf, np.float64).reshape(n_workers, nl, h, w)
+    _POOL_CTX["slots"] = slots
+    ctx = mp.get_context("fork")
+    counter = ctx.Value("i", 0)
+    with ctx.Pool(n_workers, initializer=_pool_init, initargs=(counter,)) as pool:
+        results = list(pool.imap_unordered(_ghosts_for_sources, [[k] for k in range(n_sources)]))
+    ghost = slots.sum(0)
+    del slots
+    _POOL_CTX.pop("slots", None)
+    buf.close()
+    return ghost, results
+
+
+def _n_workers(cfg: dict, n_sources: int) -> int:
+    import os  # noqa: PLC0415
+
+    n = int(cfg.get("workers", 0) or 0)
+    n = (os.cpu_count() or 1) if n <= 0 else n
+    return max(1, min(n, n_sources))
+
+
+def render_ghosts(cube: np.ndarray, lams: list[float], spectral_mask: np.ndarray, lens: Lens, cfg: dict):
+    """Return (ghost cube (H, W, L), primary transmittance map or None, report dict).
+
+    Sources are split over ``cfg["workers"]`` processes (0: all cores); the result does not depend on
+    the worker count beyond floating-point summation order.
+    """
+    t0 = time.time()
+    h, w, nl = cube.shape
+    mapping = FilmMapping(lens, w, h, str(cfg["camera"]), cfg.get("film_diagonal_mm"), cfg.get("fov_deg"))
+    sources, info = find_sources(cube, spectral_mask, cfg)
+    if not bool(cfg.get("ghost_paths", True)):
+        sources = []
+    pairs = ghost_pairs(lens)
+    groups = dispersion_groups(lens, lams, cfg)
+    _POOL_CTX.update(
+        sources=sources,
+        lens=lens,
+        mapping=mapping,
+        groups=groups,
+        lams=list(lams),
+        spectral_mask=spectral_mask,
+        n_grid=int(cfg["pupil_samples"]),
+        min_frac=float(cfg["min_ghost_fraction"]),
+        shape=(h, w, nl),
+    )
+    n_workers = _n_workers(cfg, len(sources))
+    try:
+        if n_workers == 1:
+            results = [_ghosts_for_sources(list(range(len(sources))))]
+            ghost = results[0][0]
+        else:
+            ghost, results = _render_ghosts_parallel(len(sources), n_workers, (h, w, nl))
+    finally:
+        _POOL_CTX.clear()
+    ghost = np.ascontiguousarray(np.moveaxis(ghost, 0, -1))
+    ghost_energy = np.zeros(nl)
+    src_energy = np.zeros(nl)
+    skipped = 0
+    per_pair = {p: 0.0 for p in pairs}
+    for _g, ge, se, sk, pp in results:
+        ghost_energy += ge
+        src_energy += se
+        skipped += sk
+        for k, v in pp.items():
+            per_pair[k] = per_pair.get(k, 0.0) + v
     trans_map = None
     if bool(cfg.get("apply_primary_transmittance", False)):
         trans_map = primary_transmittance_map(lens, mapping, lams)
@@ -1128,6 +1244,7 @@ def render_ghosts(cube: np.ndarray, lams: list[float], spectral_mask: np.ndarray
         "glass_absorption": lens.glass_absorption,
         "dispersion_wavelengths_nm": [g.wavelength_nm for g, _i in groups] if groups[0][0] is not lens else None,
         "runtime_s": time.time() - t0,
+        "workers": n_workers,
     }
     return ghost.astype(np.float32), trans_map, report
 
