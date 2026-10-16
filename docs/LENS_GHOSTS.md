@@ -71,6 +71,7 @@ lens:
     dispersion_groups: 0     # 0 = every bucket, N = N wavelength groups
     apply_primary_transmittance: false  # true: scale the image by the traced lens transmittance
     ghost_paths: true        # false (with apply_primary_transmittance): lens transmittance only, no ghosts
+    workers: 0               # source-level processes; 0 = all CPU cores, 1 = serial (same result)
 ```
 
 pbrt's `RealisticCamera` passes the primary image with unit transmission: no coating loss and
@@ -153,7 +154,9 @@ QHQ coatings.
 - Extended sources are sampled at `cluster_px` (default 8 px; flux-weighted centroid per block).
   Strongly magnified ghosts of an extended source therefore show faint `cluster_px`-step contours.
   Lower `cluster_px` for smoother results, at a run time that scales with the number of sources
-  (observed 4-9 s per source, all 66 paths, `wide_22mm.dat`, `pupil_samples: 64`, 8 CPU cores).
+  Sources are split over `workers` processes (default: all cores); the ghost image does not depend
+  on the worker count. Most of the time goes into rasterising and blurring the ghost footprints,
+  not into ray tracing.
 - Polarisation: unpolarised average per interface, no polarisation state carried along the path.
 - The `qhq` high-index layer (n = 2.10) is a representative value, not a specific catalog material.
 - Ghost footprints are sampled by `pupil_samples^2` rays. Strongly magnified ghosts show
