@@ -33,7 +33,7 @@ def test_integer_split_is_two_shifted_copies():
     rng = np.random.default_rng(1)
     img = rng.random((40, 50)).astype(np.float64)
     out = olpf.apply_plane(img, 2.0, 2.0)
-    ref = 0.25 * sum(np.roll(np.roll(img, sy, 0), sx, 1) for sx in (-1, 1) for sy in (-1, 1))
+    ref = 0.25 * sum(np.roll(np.roll(img, sy, 0), sx, 1) for sx in (0, 2) for sy in (0, 2))
     np.testing.assert_allclose(out[4:-4, 4:-4], ref[4:-4, 4:-4], atol=1e-10)
 
 
@@ -46,7 +46,20 @@ def test_slanted_edge_mtf_is_cosine(d):
     k = (f > 0.02) & (f < 0.45)
     ratio = np.interp(f[k], res.frequency_cy_per_px, res.mtf) / base.mtf[k]
     np.testing.assert_allclose(ratio, np.abs(np.cos(np.pi * f[k] * d)), atol=0.03)
-    assert olpf.apply_plane(img, d, 0.0).sum() == pytest.approx(img.sum(), rel=1e-9)
+    padded = np.pad(img, 8)  # dark border: no light leaves the frame
+    assert olpf.apply_plane(padded, d, 0.0).sum() == pytest.approx(
+        padded.sum(), rel=1e-9 if float(d).is_integer() else 1e-4
+    )
+
+
+def test_bright_source_does_not_ring():
+    img = np.ones((80, 80))
+    yy, xx = np.mgrid[:80, :80]
+    img[(yy - 40) ** 2 + (xx - 40) ** 2 <= 36] = 2000.0
+    out = olpf.apply_plane(img, 1.0, 1.0)
+    assert out.min() >= 1.0 - 1e-9
+    np.testing.assert_allclose(out[41, 55:], 1.0, atol=1e-9)
+    np.testing.assert_allclose(out[55:, 41], 1.0, atol=1e-9)
 
 
 def test_split_resolution_and_validation():

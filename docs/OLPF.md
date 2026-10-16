@@ -50,12 +50,13 @@ filter is applied twice.
 ## Limits
 
 - pbrt has already integrated each EXR pixel over its area, so the filter acts as its transfer
-  function on the sampled image. This is exact for integer even splits; other splits are a
-  band-limited interpolation, whose small undershoot at hard edges is clipped and reported. The
+  function on the sampled image. The spots sit at (0, 0), (d, 0), (0, d) and (d, d), as behind a
+  real plate where the ordinary ray is undeviated, so the image moves by d/2 and integer splits are
+  exact pixel shifts with no ringing. Fractional splits are a band-limited interpolation, whose small undershoot at hard edges is clipped and reported. The
   filter removes detail below the pixel Nyquist frequency and the CFA colour aliasing it causes.
   It cannot remove luma aliasing that pbrt has already folded into the pixel grid above Nyquist.
   Doing that would need a supersampled render followed by pixel integration.
-- Light spread past the image border is lost (at most d/2 px at each edge).
+- Light spread past the image border is lost (at most d px at the right and bottom edges).
 - Not modelled: the walk-off's dependence on angle of incidence (it varies with the chief-ray
   angle), the IR-cut coating and cover-glass of the filter stack (the IRCF is a QE curve), and the
   focus shift the plate causes.

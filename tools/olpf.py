@@ -17,8 +17,9 @@ for which d(lambda) follows the quartz dispersion of Ghosh, Opt. Commun. 163, 95
 
 The filter acts on the spectral EXR before the radiance -> electrons conversion, one EXR pixel per
 sensor pixel (as in that conversion). The EXR is already integrated over each pixel, so the filter is
-applied as its transfer function on the sampled image (exact for integer even splits, band-limited
-interpolation otherwise): it suppresses detail below the pixel Nyquist frequency and the CFA colour
+applied as its transfer function on the sampled image. The spots sit at (0, 0), (d, 0), (0, d), (d, d)
+as behind a real plate (the ordinary ray is undeviated), so integer splits are exact pixel shifts;
+fractional splits are a band-limited interpolation: it suppresses detail below the pixel Nyquist frequency and the CFA colour
 aliasing that comes from it, but cannot remove aliasing that pbrt already folded into the pixel
 grid above Nyquist. Not modelled: the IR-cut coating and cover-glass of the filter stack (see
 ``sensor.quantum_efficiency.ircf_csv``), angle-of-incidence dependence of the walk-off, and the
@@ -107,7 +108,10 @@ def transfer(fx, fy, dx_px: float, dy_px: float) -> np.ndarray:
 
 
 def apply_plane(img: np.ndarray, dx_px: float, dy_px: float) -> np.ndarray:
-    """Filter one image plane: multiply its spectrum by ``transfer`` (reflect-padded, energy conserving)."""
+    """Filter one image plane: spots at 0 and +d on each axis (``transfer`` times a d/2 shift, reflect-padded).
+
+    Spots at +-d/2 would need half-pixel shifts for odd integer splits, whose band-limited interpolation
+    rings along rows and columns around very bright sources (clipped lamps, the sun)."""
     if dx_px == 0 and dy_px == 0:
         return img
     a = np.asarray(img, dtype=np.float64)
@@ -115,14 +119,15 @@ def apply_plane(img: np.ndarray, dx_px: float, dy_px: float) -> np.ndarray:
     p = np.pad(a, pad, mode="reflect")
     fy = np.fft.fftfreq(p.shape[0])[:, None]
     fx = np.fft.rfftfreq(p.shape[1])[None, :]
-    out = np.fft.irfft2(np.fft.rfft2(p) * transfer(fx, fy, dx_px, dy_px), s=p.shape)
+    shift = np.exp(-1j * np.pi * (fx * dx_px + fy * dy_px))
+    out = np.fft.irfft2(np.fft.rfft2(p) * transfer(fx, fy, dx_px, dy_px) * shift, s=p.shape)
     return out[pad:-pad, pad:-pad].astype(img.dtype, copy=False)
 
 
 def apply_channels(chans: dict[str, np.ndarray], sensor_cfg: dict) -> tuple[dict[str, np.ndarray], dict]:
     """Apply ``sensor.olpf`` to every image channel (S0.<lambda>nm at its wavelength, others at 550 nm).
 
-    Negative undershoot of the band-limited interpolation at hard edges (a few % for non-integer splits)
+    Negative undershoot of the band-limited interpolation at hard edges (a few % for fractional splits)
     is clipped to zero; the clipped energy is reported.
     """
     from exr_multispectral import parse_s0_wavelength_nm
