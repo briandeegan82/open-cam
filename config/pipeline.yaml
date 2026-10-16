@@ -40,10 +40,10 @@ render:
   # Example: spectra/illuminant/interpolated/D65.csv
   illuminant: spectra/illuminant/interpolated/D65.csv
   builder_extra_args: []
-  # GPU render path (PBRT wavefront). Requires a GPU-enabled PBRT build.
+  # GPU render path: adds pbrt --gpu when the pbrt build has the GPU renderer (CUDA/OptiX);
+  # on a CPU-only build it is ignored and the default CPU integrator is used.
   gpu_enabled: true
-  # Extra PBRT render CLI args, e.g. ["--stats"] or ["--wavefront", "--stats"].
-  # If gpu_enabled=true, --wavefront is injected automatically unless already present.
+  # Extra PBRT render CLI args, e.g. ["--stats"]. Avoid "--wavefront" on CPU: it is ~5x slower.
   pbrt_args: ["--stats"]
   # Opt-in Monte Carlo denoiser (Intel Open Image Denoise; tools/denoise_spectral_exr.py, docs/DENOISING.md).
   # Display/demo renders only: it also removes fine texture, so never score IQ metrics on a denoised run.

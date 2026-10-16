@@ -86,7 +86,7 @@ render:
   pbrt_args: ["--stats"]
 ```
 
-This causes `tools/run_pipeline.py` to invoke PBRT with `--wavefront` (unless already present in `render.pbrt_args`).
+If the pbrt binary was built with the GPU renderer (its `--help` lists `--gpu`), `tools/run_pipeline.py` adds `--gpu`. On a CPU-only build the setting is ignored and pbrt runs its default CPU integrator. `--wavefront` is not added: on CPU it gives the same image about 5x slower.
 
 Use `--dry-run` to confirm command wiring before launching a full run:
 

@@ -57,14 +57,28 @@ def pick_override(overrides: dict, key: str, default):
     return default if v is None else v
 
 
-def parse_render_pbrt_args(render: dict) -> list[str]:
+def pbrt_has_gpu(pbrt_bin: Path | str) -> bool:
+    """True if this pbrt build has the GPU renderer (its --help lists --gpu)."""
+    try:
+        out = subprocess.run([str(pbrt_bin), "--help"], capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return "--gpu " in (out.stdout + out.stderr)
+
+
+def parse_render_pbrt_args(render: dict, gpu_available: bool = False) -> list[str]:
+    """pbrt CLI tokens for the render stage.
+
+    render.gpu_enabled adds --gpu only when the build has a GPU renderer. --wavefront is not
+    added: on CPU it runs the wavefront integrator, ~5x slower than the default with the same result.
+    """
     gpu_enabled = bool(render.get("gpu_enabled", False))
     pbrt_args = render.get("pbrt_args", []) or []
     if not isinstance(pbrt_args, list):
         raise TypeError("render.pbrt_args must be a YAML list of CLI tokens")
     args = [str(tok) for tok in pbrt_args]
-    if gpu_enabled and "--wavefront" not in args:
-        args = ["--wavefront", *args]
+    if gpu_enabled and gpu_available and "--gpu" not in args:
+        args = ["--gpu", *args]
     return args
 
 
@@ -283,7 +297,13 @@ def main() -> None:
     log.append(run_cmd(build_cmd, repo, args.dry_run))
 
     # 2) Render with pbrt
-    pbrt_cmd = [str(pbrt_bin), *parse_render_pbrt_args(render), str(scene_file)]
+    gpu_available = bool(render.get("gpu_enabled", False)) and pbrt_has_gpu(pbrt_bin)
+    if render.get("gpu_enabled", False) and not gpu_available:
+        print(
+            "note: render.gpu_enabled is set but this pbrt build has no GPU renderer; rendering on CPU.",
+            file=sys.stderr,
+        )
+    pbrt_cmd = [str(pbrt_bin), *parse_render_pbrt_args(render, gpu_available), str(scene_file)]
     log.append(run_cmd(pbrt_cmd, repo, args.dry_run))
 
     # 2a) Optional Monte Carlo denoiser (render.denoise, tools/denoise_spectral_exr.py; display renders only).
