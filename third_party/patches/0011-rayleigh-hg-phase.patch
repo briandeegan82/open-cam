@@ -1,0 +1,102 @@
+--- a/src/pbrt/media.h
++++ b/src/pbrt/media.h
+@@ -47,13 +47,37 @@
+     PBRT_CPU_GPU
+     HGPhaseFunction(Float g) : g(g) {}
+ 
++    // open-cam: optional molecular (Rayleigh) lobe, p = wr p_R + (1 - wr) p_HG
++    // ("float rayleighfraction" on homogeneous/uniformgrid media; 0 = plain HG).
++    void SetRayleighFraction(Float w) { wr = Clamp(w, 0, 1); }
++
++    PBRT_CPU_GPU
++    static Float Rayleigh(Float cosTheta) { return 3 * Inv4Pi / 4 * (1 + Sqr(cosTheta)); }
++
+     PBRT_CPU_GPU
+-    Float p(Vector3f wo, Vector3f wi) const { return HenyeyGreenstein(Dot(wo, wi), g); }
++    Float p(Vector3f wo, Vector3f wi) const {
++        Float c = Dot(wo, wi);
++        Float hg = HenyeyGreenstein(c, g);
++        return wr > 0 ? wr * Rayleigh(c) + (1 - wr) * hg : hg;
++    }
+ 
+     PBRT_CPU_GPU
+     pstd::optional<PhaseFunctionSample> Sample_p(Vector3f wo, Point2f u) const {
++        if (wr > 0 && u[0] < wr) {
++            // Rayleigh lobe: invert the CDF (3mu + mu^3 + 4) / 8 = v (Cardano).
++            Float v = std::min<Float>(u[0] / wr, OneMinusEpsilon);
++            Float z = 4 * v - 2, r = std::sqrt(z * z + 1);
++            Float mu = Clamp(std::cbrt(z + r) + std::cbrt(z - r), -1, 1);
++            Float sinTheta = SafeSqrt(1 - Sqr(mu)), phi = 2 * Pi * u[1];
++            Frame f = Frame::FromZ(-wo);  // mu is symmetric, so the sign convention is immaterial
++            Vector3f wi = f.FromLocal(SphericalDirection(sinTheta, mu, phi));
++            Float pdf = p(wo, wi);
++            return PhaseFunctionSample{pdf, wi, pdf};
++        }
++        Point2f uh = wr > 0 ? Point2f(std::min<Float>((u[0] - wr) / (1 - wr), OneMinusEpsilon), u[1]) : u;
+         Float pdf;
+-        Vector3f wi = SampleHenyeyGreenstein(wo, g, u, &pdf);
++        Vector3f wi = SampleHenyeyGreenstein(wo, g, uh, &pdf);
++        pdf = p(wo, wi);
+         return PhaseFunctionSample{pdf, wi, pdf};
+     }
+ 
+@@ -67,6 +91,7 @@
+   private:
+     // HGPhaseFunction Private Members
+     Float g;
++    Float wr = 0;
+ };
+ 
+ // MediumProperties Definition
+@@ -259,6 +284,11 @@
+     // HomogeneousMedium Private Data
+     DenselySampledSpectrum sigma_a_spec, sigma_s_spec, Le_spec;
+     HGPhaseFunction phase;
++
++  public:
++    void SetRayleighFraction(Float w) { phase.SetRayleighFraction(w); }
++
++  private:
+ };
+ 
+ // GridMedium Definition
+@@ -343,6 +373,11 @@
+     DenselySampledSpectrum sigma_a_spec, sigma_s_spec;
+     SampledGrid<Float> densityGrid;
+     HGPhaseFunction phase;
++
++  public:
++    void SetRayleighFraction(Float w) { phase.SetRayleighFraction(w); }
++
++  private:
+     pstd::optional<SampledGrid<Float>> temperatureGrid;
+     DenselySampledSpectrum Le_spec;
+     SampledGrid<Float> LeScale;
+--- a/src/pbrt/media.cpp
++++ b/src/pbrt/media.cpp
+@@ -196,8 +196,10 @@
+     Float sigmaScale = parameters.GetOneFloat("scale", 1.f);
+     Float g = parameters.GetOneFloat("g", 0.0f);
+ 
+-    return alloc.new_object<HomogeneousMedium>(sig_a, sig_s, sigmaScale, Le, LeScale, g,
++    HomogeneousMedium *medium = alloc.new_object<HomogeneousMedium>(sig_a, sig_s, sigmaScale, Le, LeScale, g,
+                                                alloc);
++    medium->SetRayleighFraction(parameters.GetOneFloat("rayleighfraction", 0.f));
++    return medium;
+ }
+ 
+ std::string HomogeneousMedium::ToString() const {
+@@ -323,10 +325,12 @@
+                                                      parameters.GetOneFloat("temperaturecutoff", 0.f));
+     Float temperatureScale = parameters.GetOneFloat("temperaturescale", 1.f);
+ 
+-    return alloc.new_object<GridMedium>(
++    GridMedium *medium = alloc.new_object<GridMedium>(
+         Bounds3f(p0, p1), renderFromMedium, sigma_a, sigma_s, sigmaScale, g,
+         std::move(densityGrid), std::move(temperatureGrid), temperatureScale,
+         temperatureOffset, Le, std::move(LeGrid), alloc);
++    medium->SetRayleighFraction(parameters.GetOneFloat("rayleighfraction", 0.f));
++    return medium;
+ }
+ 
+ std::string GridMedium::ToString() const {

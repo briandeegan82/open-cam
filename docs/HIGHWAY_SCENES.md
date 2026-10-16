@@ -393,7 +393,14 @@ Haze aerosol g ~ 0.7 (Shettle & Fenn 1979), fog droplets ~0.85 (Mie, Deirmendjia
 | `fog` | 150 m | 0 | 0.85 | 0.999 | 150 m radiation-fog layer | 4.5 | 64 |
 
 All parameters can be overridden (`--visibility-m`, `--haze-angstrom`, `--haze-g`,
-`--haze-albedo`, `--haze-profile exponential|layer`, `--haze-height-m`, `--haze-maxdepth`). The
+`--haze-albedo`, `--haze-profile exponential|layer`, `--haze-height-m`, `--haze-maxdepth`).
+
+`--haze-phase mixed` (opt-in) replaces the single effective Henyey-Greenstein lobe with the
+physical mixture `p = w_R p_Rayleigh + (1 - w_R) p_HG(g)`, `w_R = sigma_R / sigma_s` at 550 nm
+(pbrt patch 0011, medium parameter `"float rayleighfraction"`). Both modes have the same mean
+cosine; the mixture puts more light into side and back scatter in clear air (w_R 0.09 for
+`clear`, 0.03 `hazy`, ~0 in `mist`/`fog`). pbrt's phase function is wavelength-independent, so
+w_R is fixed at its 550 nm value. The
 medium is a `uniformgrid` that is horizontally uniform over +-200 km and varies only with height:
 density 1 at the road (so V holds at the camera) and either exp(-y/H) or a layer of depth H with
 a smooth top. Each medium interaction counts as a bounce in `volpath`, so `maxdepth` is raised
