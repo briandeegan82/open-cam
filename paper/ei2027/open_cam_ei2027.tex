@@ -11,12 +11,14 @@
 \emergencystretch=1.5em
 
 %% Numbers produced by scripts/fig_mtf.py (figures/mtf_summary.json).
-\newcommand{\mtfFoc}{0.209}
-\newcommand{\mtfDefTwo}{0.270}
-\newcommand{\mtfDefFive}{0.294}
-\newcommand{\mtfNyqFoc}{0.127}
-\newcommand{\mtfLamBest}{423}
-\newcommand{\mtfLamRange}{0.201--0.221}
+\newcommand{\mtfFoc}{0.257}
+\newcommand{\mtfDefTwo}{0.328}
+\newcommand{\mtfDefFive}{0.340}
+\newcommand{\mtfNyqDefTwo}{0.191}
+\newcommand{\mtfNyqFoc}{0.267}
+\newcommand{\mtfNyqLensFoc}{0.42}
+\newcommand{\mtfBandFoc}{0.18--0.27}
+\newcommand{\mtfBandFive}{0.33--0.46}
 
 \title{open-cam: an open-source hyperspectral, ray-traced camera simulator built on pbrt-v4 for sensor, lens and CFA studies}
 
@@ -118,12 +120,12 @@ All results below were produced on a CPU build of pbrt-v4 with the scripts in \t
 \label{fig:ptc}
 \end{figure*}
 
-\textbf{Traced-lens MTF.} We rendered a 5$^\circ$ slanted edge at 3.2\,m through the 50\,mm double-Gauss prescription (32 buckets, 400--700\,nm) at f/2 in focus, at f/2 focused at 2.6\,m, and at f/5.6 focused at 2.6\,m, and analysed it with \texttt{sfr\_analysis.slanted\_edge\_sfr}. With the generic green QE the MTF50 is \mtfFoc, \mtfDefTwo{} and \mtfDefFive{}\,cy/px respectively, and the in-focus MTF at Nyquist is \mtfNyqFoc{} (Fig.~\ref{fig:mtf}). Two observations are worth reporting as measured rather than explained away. First, the nominal \texttt{focusdistance} of 3.2\,m is not the sharpest setting: focusing at 2.6\,m gives a higher MTF50, so a through-focus sweep, rather than the nominal value, should be used to find best focus with this prescription. Second, stopping down to f/5.6 raises MTF50 further, as expected from the smaller blur circle. Because the film is spectral, the same render also yields an MTF per wavelength bucket (Fig.~\ref{fig:mtf}, right). Here we report the data only with a caveat: the per-bucket MTF50 shows a periodic ripple of roughly $\pm$5\% with a period of about five buckets in all three renders, which is not plausible as a lens property and which we have not yet traced (pbrt-v4's stochastic wavelength sampling is a candidate). The bucket-to-bucket structure should therefore not be interpreted as chromatic aberration; resolving it, e.g.\ with monochromatic renders, is required before per-wavelength MTF can be used quantitatively. Edge positions were located with a 50\%-crossing fit after per-row flat-fielding, because the derivative-centroid estimator in \texttt{sfr\_analysis.py} was biased by render noise on this edge (it reported a $-2.3^\circ$ edge for a measured $-5.0^\circ$); the ESF binning, LSF and MTF use the repository functions. Note that these values are in film pixels of the renderer and include the pbrt-v4 Gaussian reconstruction filter.
+\textbf{Traced-lens MTF.} We rendered a 5$^\circ$ slanted edge at 3.2\,m through the 50\,mm double-Gauss prescription (32 buckets, 400--700\,nm, 4096 samples per pixel) at f/2 in focus, at f/2 focused at 2.6\,m, and at f/5.6 focused at 2.6\,m, and analysed it with \texttt{sfr\_analysis.slanted\_edge\_sfr}. With the generic green QE the MTF50 is \mtfFoc, \mtfDefTwo{} and \mtfDefFive{}\,cy/px respectively, and the in-focus MTF at Nyquist is \mtfNyqFoc{} (Fig.~\ref{fig:mtf}). Two observations are worth reporting as measured rather than explained away. First, the nominal \texttt{focusdistance} of 3.2\,m does not maximise MTF50: focusing at 2.6\,m gives a higher MTF50, but the two f/2 curves cross near 0.4\,cy/px and the nominal focus keeps more contrast towards Nyquist (\mtfNyqFoc{} against \mtfNyqDefTwo{}). This is consistent with residual spherical aberration at f/2, where moving focus trades a sharp core for a smaller halo, though we have not verified that cause. Best focus therefore depends on the frequency of interest and should be found with a through-focus sweep, not the nominal value. Second, stopping down to f/5.6 raises MTF50 further, as expected from the smaller blur circle. Because the film is spectral, the same render also yields an MTF per wavelength; Fig.~\ref{fig:mtf} (right) shows MTF50 in bands of four buckets (37.5\,nm). open-cam traces the glass dispersion of the prescription (the patent's $\nu_d$ values, with the $n(\lambda)$ shape of the nearest SCHOTT glass), and the bands show the resulting axial colour. At f/2 in focus, MTF50 is highest near 490--530\,nm and falls towards both ends of the band (\mtfBandFoc\,cy/px); at f/5.6 focused at 2.6\,m the curve is U-shaped (\mtfBandFive\,cy/px), consistent with blue and red foci lying closer to the edge distance than the green focus. With dispersion switched off (\texttt{--no-lens-dispersion}) the bands are flat to within render noise, so the variation comes from the glass model, not the renderer. An earlier version of this analysis showed a periodic ripple across buckets; it was a pbrt-v4 wavelength-sampling artefact (one wavelength offset shared by the four hero wavelengths, and a seed override), which open-cam now removes by jittering each wavelength stratum independently. Edge positions were located with a 50\%-crossing fit after per-row flat-fielding, because the derivative-centroid estimator in \texttt{sfr\_analysis.py} was biased by render noise on this edge (it reported a $-2.3^\circ$ edge for a measured $-5.0^\circ$); the ESF binning, LSF and MTF use the repository functions. These values are in film pixels and include the pixel aperture: each pixel integrates radiance over its own area (a box reconstruction filter one pixel wide), whose MTF $|\mathrm{sinc}\,f|$ is 0.64 at Nyquist. Dividing it out gives a lens-only in-focus MTF at Nyquist of \mtfNyqLensFoc{}.
 
 \begin{figure*}[t]
 \centering
 \includegraphics[width=0.85\textwidth]{figures/fig_mtf.pdf}
-\caption{Slanted-edge MTF through the traced 50\,mm double-Gauss lens. Left: green-channel MTF for three aperture/focus settings (dotted line: Nyquist). Right: MTF50 computed separately in each spectral bucket of the same renders; the periodic ripple is unexplained (see text).}
+\caption{Slanted-edge MTF through the traced 50\,mm double-Gauss lens. Left: green-channel MTF for three aperture/focus settings (dotted line: Nyquist). Right: MTF50 of the same renders in 37.5\,nm wavelength bands; the variation is the axial colour of the traced glasses (see text).}
 \label{fig:mtf}
 \end{figure*}
 

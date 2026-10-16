@@ -9,7 +9,7 @@ PY="${REPO}/venv/bin/python"
 PBRT="${REPO}/third_party/pbrt-v4/build/pbrt"
 B="paper/ei2027/build"
 SPP_CC="${SPP_CC:-1024}"
-SPP_EDGE="${SPP_EDGE:-512}"
+SPP_EDGE="${SPP_EDGE:-4096}"
 mkdir -p "${B}/scenes"
 
 # ColorChecker: same geometry/lens as config/pipeline.yaml (iphone_8 recipe, realistic
