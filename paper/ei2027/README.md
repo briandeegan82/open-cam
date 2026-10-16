@@ -21,7 +21,7 @@ Requires TeX Live with `pdflatex`, `bibtex`, `latexmk`, `microtype`, `booktabs`,
 ## Regenerate results (from the repository root)
 
 ```bash
-# 1. Spectral pbrt-v4 renders (CPU; ~15 min on 8 cores at the default sample counts)
+# 1. Spectral pbrt-v4 renders (CPU; ~65 min on 8 cores at the default sample counts, ~54 min of it the 4096 spp edges)
 paper/ei2027/scripts/render_scenes.sh          # SPP_CC=1024 SPP_EDGE=4096 by default
 # 2. Pipeline stages + all figures and JSON summaries
 paper/ei2027/scripts/make_figures.sh
