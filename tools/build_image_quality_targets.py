@@ -101,7 +101,7 @@ def _scene_header(args: argparse.Namespace, scene_dir: Path, repo: Path, film_ou
         "",
         f'Sampler "zsobol" "integer pixelsamples" [{int(args.pixelsamples)}]',
         'Integrator "path" "integer maxdepth" [8]',
-        'PixelFilter "gaussian"',
+        'PixelFilter "box" "float xradius" [0.5] "float yradius" [0.5]',
         "",
         *_film_block(args, film_output),
         "",

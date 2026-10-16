@@ -197,7 +197,7 @@ def write_diorama(args: argparse.Namespace) -> dict:
         'ColorSpace "srgb"',
         f'Sampler "zsobol" "integer pixelsamples" [{int(args.pixelsamples)}]',
         integrator_line(args),
-        'PixelFilter "gaussian"',
+        'PixelFilter "box" "float xradius" [0.5] "float yradius" [0.5]',
         *iq._film_block(args, film),
         "Scale -1 1 1",  # un-mirror pbrt's LookAt so world +x is raster right (charts read normally)
         f"LookAt 0 {h:.6g} {d:.6g}  0 {h:.6g} 0  0 1 0",

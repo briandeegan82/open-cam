@@ -705,7 +705,7 @@ def build(args: argparse.Namespace) -> dict:  # noqa: C901 (linear scene assembl
             'ColorSpace "srgb"',
             f'Sampler "zsobol" "integer pixelsamples" [{args.pixelsamples}] "integer seed" [{args.sampler_seed}]',
             f'Integrator "path" "integer maxdepth" [{args.maxdepth}] "bool regularize" true',
-            'PixelFilter "gaussian"',
+            'PixelFilter "box" "float xradius" [0.5] "float yradius" [0.5]',
             *film_lines(args, film_out),
             f"LookAt {_pts(eye)}  {_pts(target)}  0 1 0",
             *camera_lines(args, repo, out_dir),

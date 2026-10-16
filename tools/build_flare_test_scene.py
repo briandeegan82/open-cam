@@ -42,7 +42,7 @@ def _header(args: argparse.Namespace, out_dir: Path, film_output: str, label: st
         'ColorSpace "srgb"',
         f'Sampler "zsobol" "integer pixelsamples" [{int(args.pixelsamples)}]',
         'Integrator "path" "integer maxdepth" [2]',
-        'PixelFilter "gaussian"',
+        'PixelFilter "box" "float xradius" [0.5] "float yradius" [0.5]',
         *iq._film_block(args, film_output),
         "",
         f"LookAt 0 0 {float(args.cam_dist):.6g}  0 0 0  0 1 0",
