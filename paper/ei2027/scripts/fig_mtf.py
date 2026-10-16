@@ -3,10 +3,10 @@
 Reads the spectral pbrt-v4 renders produced by render_scenes.sh
 (build/edge_*.exr), integrates the buckets with the default green QE x IRCF,
 and runs tools/sfr_analysis.slanted_edge_sfr. Because the film is spectral,
-the same render also gives an MTF50 per wavelength band of BAND buckets. Note
-dgauss.50mm.dat has one refractive index per element, so the traced lens has no
-dispersion and the per-band spread is pbrt Monte Carlo noise (see
-docs/SFR_SPECTRAL_RIPPLE.md).
+the same render also gives an MTF50 per wavelength band of BAND buckets. dgauss.50mm.dat
+has a glass sidecar, so the trace includes dispersion and the per-band MTF50 shows
+the lens's axial colour (render with --no-lens-dispersion to remove it; see
+docs/LENS_DISPERSION.md and docs/SFR_SPECTRAL_RIPPLE.md).
 
 Run from the repository root:
     venv/bin/python paper/ei2027/scripts/fig_mtf.py
