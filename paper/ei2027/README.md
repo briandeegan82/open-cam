@@ -22,7 +22,7 @@ Requires TeX Live with `pdflatex`, `bibtex`, `latexmk`, `microtype`, `booktabs`,
 
 ```bash
 # 1. Spectral pbrt-v4 renders (CPU; ~15 min on 8 cores at the default sample counts)
-paper/ei2027/scripts/render_scenes.sh          # SPP_CC=1024 SPP_EDGE=512 by default
+paper/ei2027/scripts/render_scenes.sh          # SPP_CC=1024 SPP_EDGE=4096 by default
 # 2. Pipeline stages + all figures and JSON summaries
 paper/ei2027/scripts/make_figures.sh
 ```
@@ -32,7 +32,7 @@ paper/ei2027/scripts/make_figures.sh
 | Output | Scene | Camera |
 |---|---|---|
 | `cc_D65.exr`, `cc_A.exr` | `build_colorchecker_scene.py`, 960x640, 64 buckets 360–830 nm, 1024 spp | realistic, `wide_22mm.dat`, 8.756 mm aperture, focus 4 m (as `config/pipeline.yaml`) |
-| `edge_{f2_focused,f2_defocus,f56_defocus}.exr` | `build_image_quality_targets.py --target slanted_edge`, 5° edge at 3.2 m, 32 buckets 400–700 nm, 512 spp | realistic, `dgauss.50mm.dat`; aperture 25 / 25 / 8.93 mm, focus 3.2 / 2.6 / 2.6 m |
+| `edge_{f2_focused,f2_defocus,f56_defocus}.exr` | `build_image_quality_targets.py --target slanted_edge`, 5° edge at 3.2 m, 32 buckets 400–700 nm, 4096 spp | realistic, `dgauss.50mm.dat`; aperture 25 / 25 / 8.93 mm, focus 3.2 / 2.6 / 2.6 m |
 
 `make_figures.sh` then runs, with `--target-illuminance-lux 500 --integration-time-s 0.12`
 (the `config/pipeline.yaml` defaults):
@@ -46,7 +46,7 @@ paper/ei2027/scripts/make_figures.sh
 |---|---|---|
 | `scripts/fig_colorchecker.py` | `figures/fig_colorchecker.pdf` | `figures/colorchecker_summary.json` |
 | `scripts/fig_ptc.py` | `figures/fig_ptc.pdf` (EMVA1288 photon transfer, iphone_8, 256x256, 29 levels, seed 1288) | `figures/ptc_summary.json` |
-| `scripts/fig_mtf.py` | `figures/fig_mtf.pdf` (slanted-edge MTF, green QE×IRCF and per bucket) | `figures/mtf_summary.json` |
+| `scripts/fig_mtf.py` | `figures/fig_mtf.pdf` (slanted-edge MTF, green QE×IRCF and per 4-bucket wavelength band) | `figures/mtf_summary.json` |
 | `scripts/fig_cfa.py` | `figures/fig_qe.pdf`, `figures/fig_cfa_mosaics.pdf` | `figures/cfa_summary.json` |
 
 Notes:

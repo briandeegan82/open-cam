@@ -3,10 +3,10 @@
 Reads the spectral pbrt-v4 renders produced by render_scenes.sh
 (build/edge_*.exr), integrates the buckets with the default green QE x IRCF,
 and runs tools/sfr_analysis.slanted_edge_sfr. Because the film is spectral,
-the same render also gives a per-wavelength MTF50 (longitudinal chromatic
-aberration of the traced prescription -- but see docs/SFR_SPECTRAL_RIPPLE.md:
-dgauss.50mm.dat has one refractive index per element, so the traced lens has
-no dispersion and the per-bucket spread is pbrt Monte Carlo noise).
+the same render also gives an MTF50 per wavelength band of BAND buckets. Note
+dgauss.50mm.dat has one refractive index per element, so the traced lens has no
+dispersion and the per-band spread is pbrt Monte Carlo noise (see
+docs/SFR_SPECTRAL_RIPPLE.md).
 
 Run from the repository root:
     venv/bin/python paper/ei2027/scripts/fig_mtf.py
@@ -42,6 +42,7 @@ CASES = [
 ]
 ROI_HALF_H = 120
 ROI_HALF_W = 40
+BAND = 4  # spectral buckets per band in the per-wavelength panel
 
 
 def edge_roi(img: np.ndarray) -> np.ndarray:
@@ -83,32 +84,35 @@ def main() -> None:
         wts = spectral_electron_weights(lam, qe_g[:, None], trapezoid_weights_nm(lam), 1.0, 1.0)
         green = integrate_spectral_planes(planes, wts)[..., 0]
         res = edge_sfr(edge_roi(green))
-        per_lam = []
-        for k in range(lam.size):
+        nb = lam.size // BAND
+        band_nm = lam[: nb * BAND].reshape(nb, BAND).mean(axis=1)
+        per_band = []
+        for b in range(nb):
+            band = planes[..., b * BAND : (b + 1) * BAND].sum(axis=-1)
             try:
-                per_lam.append(edge_sfr(edge_roi(planes[..., k]))["mtf50"])
-            except Exception:  # noqa: BLE001 - low-signal edge buckets
-                per_lam.append(float("nan"))
+                per_band.append(edge_sfr(edge_roi(band))["mtf50"])
+            except Exception:  # noqa: BLE001 - low-signal edge bands
+                per_band.append(float("nan"))
         results[name] = {
             "label": label,
             "edge_angle_deg": res["angle_deg"],
             "mtf50_cy_per_px": res["mtf50"],
             "mtf10_cy_per_px": res["mtf10"],
             "mtf_at_nyquist": res["nyquist"],
-            "lambda_nm": lam.tolist(),
-            "mtf50_per_lambda_cy_per_px": per_lam,
+            "band_nm": band_nm.tolist(),
+            "mtf50_per_band_cy_per_px": per_band,
         }
         sel = res["frequency"] <= 1.0
         axes[0].plot(res["frequency"][sel], res["mtf"][sel], lw=1, label=label)
-        axes[1].plot(lam, per_lam, "o-", ms=2, lw=0.8, label=label)
+        axes[1].plot(band_nm, per_band, "o-", ms=2, lw=0.8, label=label)
     axes[0].axvline(0.5, color="0.5", ls=":", lw=1)
     axes[0].set_xlabel("frequency [cy/px]")
     axes[0].set_ylabel("MTF (green channel)")
     axes[0].set_ylim(0, 1.05)
     axes[0].set_title("Slanted-edge SFR, dgauss 50 mm", fontsize=9)
-    axes[1].set_xlabel("wavelength bucket [nm]")
+    axes[1].set_xlabel("wavelength band centre [nm]")
     axes[1].set_ylabel("MTF50 [cy/px]")
-    axes[1].set_title("Per-bucket MTF50", fontsize=9)
+    axes[1].set_title("MTF50 per wavelength band", fontsize=9)
     for ax in axes:
         ax.tick_params(labelsize=7)
         ax.grid(True, lw=0.3, alpha=0.5)
@@ -118,15 +122,15 @@ def main() -> None:
     fig.savefig(OUT / "fig_mtf.pdf")
     (OUT / "mtf_summary.json").write_text(json.dumps(results, indent=2))
     for name, r in results.items():
-        pl = np.array(r["mtf50_per_lambda_cy_per_px"])
+        pl = np.array(r["mtf50_per_band_cy_per_px"])
         print(
             name,
             {k: round(v, 4) for k, v in r.items() if isinstance(v, float)},
-            "per-lambda MTF50 min/max",
+            "per-band MTF50 min/max",
             np.nanmin(pl).round(4),
             np.nanmax(pl).round(4),
             "argmax nm",
-            r["lambda_nm"][int(np.nanargmax(pl))],
+            r["band_nm"][int(np.nanargmax(pl))],
         )
 
 
