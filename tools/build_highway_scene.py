@@ -63,6 +63,7 @@ SKIES = {
     "syferfontein_6d_clear": "sky_syferfontein_6d_clear",
     "analytic": None,
     "hosek": None,
+    "prague": None,
 }
 CAR_MODELS = ("car_bmw_m6", "car_pontiac_gto", "car_vintage")
 LANE_W = 3.66  # 12 ft
@@ -446,6 +447,18 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     ap.add_argument("--turbidity", type=float, default=3.0, help="Atmospheric turbidity for --sky hosek (1-10).")
     ap.add_argument(
+        "--prague-dataset",
+        type=Path,
+        default=None,
+        help="Prague sky model dataset file for --sky prague (download it yourself; default $OPEN_CAM_PRAGUE_DATASET).",
+    )
+    ap.add_argument(
+        "--prague-visibility-km",
+        type=float,
+        default=59.4,
+        help="Ground-level visibility [km] for --sky prague (dataset range 20-131.8).",
+    )
+    ap.add_argument(
         "--sun-azimuth", type=float, default=140.0, help="Sun azimuth [deg] from the road direction, + = right."
     )
     ap.add_argument(
@@ -541,12 +554,14 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         zs = math.radians(90.0 - elev)
         sun_l = np.array([math.sin(zs), 0.0, math.cos(zs)])
         sky_file = out_dir / "textures" / f"sky_cie12_{elev:.1f}.exr"
-        if not sky_file.is_file() and args.sky != "hosek":
+        if not sky_file.is_file() and args.sky not in ("hosek", "prague"):
             write_rgb_exr(sky_file, analytic_clear_sky(512, elev))
         sky_ratio = None
         sky_desc = "analytic CIE standard clear sky (type 12)"
-    if (args.sky == "hosek" or args.sky_spectrum != "rgb") and args.time_of_day != "day":
-        raise SystemExit("--sky hosek / --sky-spectrum daylight are daytime skies; not supported with --time-of-day")
+    if (args.sky in ("hosek", "prague") or args.sky_spectrum != "rgb") and args.time_of_day != "day":
+        raise SystemExit(
+            "--sky hosek / prague / --sky-spectrum daylight are daytime skies; not supported with --time-of-day"
+        )
     sky_light = spectral_sky_light(args, sky_file, elev, out_dir, spd)
     if sky_light is not None:
         sky_file, sky_desc = sky_light["file"], sky_light["description"]

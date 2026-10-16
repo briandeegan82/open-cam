@@ -123,6 +123,9 @@ see daylight spectra:
 ```bash
 # Hosek-Wilkie spectral clear sky (no HDRI needed); turbidity 1-10, default 3
 venv/bin/python tools/build_highway_scene.py --sky hosek --sun-elevation 43 --turbidity 3
+# Prague sky model (opt-in; download the dataset yourself, see below); visibility 20-131.8 km
+venv/bin/python tools/build_highway_scene.py --sky prague --sun-elevation 43 \
+    --prague-dataset ~/data/PragueSkyModelDatasetSWIR.dat --prague-visibility-km 59.4
 # keep the Poly Haven HDRI (or --sky analytic) but render it with daylight spectra
 venv/bin/python tools/build_highway_scene.py --sky kloofendal_43d_clear --sky-spectrum daylight
 ```
@@ -153,6 +156,24 @@ luminance kept; the manifest reports `out_of_gamut_luminance_fraction`).
   evaluated by a NumPy port (`HosekWilkieSky`, matches the C code to 1e-15). Ground albedo
   0.1. Spectra are 320-720 nm; the daylight-basis metamer reproduces them within ~4-10 %
   (luminance-weighted max deviation, 400-720 nm, sun 20-70 deg) and extends them to 830 nm.
+- `--sky prague` (opt-in): the Prague sky model (Wilkie et al. 2021, "A fitted radiance and
+  attenuation model for realistic atmospheres", ACM TOG 40(4):135; Vevoda et al. 2022, "A Wide
+  Spectral Range Sky Radiance Model", Pacific Graphics), ground-level sky radiance. A NumPy port
+  of the authors' Apache-2.0 C++ (`tools/prague_sky.py`, licence in
+  `third_party/licenses/pragueskymodel-LICENSE.txt`) reads the dataset by memory map; it matches
+  the reference CLI to 6e-8 relative (float32 output) at sun elevations -2 to 62 deg with
+  interpolated visibility/albedo. **The dataset is not in open-cam**: the authors distribute it
+  (Google Drive, linked from https://github.com/PetrVevoda/pragueskymodel) without a stated
+  licence, so download it yourself and pass `--prague-dataset PATH` or set
+  `OPEN_CAM_PRAGUE_DATASET`. Tested with the 280-2480 nm `PragueSkyModelDatasetSWIR.dat`
+  (55 channels of 40 nm, visibility 20-131.8 km, ground level only); the other datasets have
+  the same format. The 40 nm channels (constant within each band, as in the reference code)
+  are integrated against the CMFs over 360-830 nm and given the daylight-basis metamer like
+  `hosek`; wavelengths above 830 nm are not rendered by the spectral film, so the model's NIR
+  range is not used yet. Ground albedo 0.1; the solar disc still comes from the builder's sun
+  model. At 40 deg sun elevation and 59.4 km visibility the Prague sky gives 13.3 klx diffuse
+  horizontal (Hosek turbidity 3: 15.3 klx), horizontal CCT 11.8 kK (Hosek 14.6 kK) and zenith
+  CCT 16.2 kK (Hosek 40.4 kK).
 - `--sky-spectrum daylight`: the RGB map (HDRI with the sun removed, or the CIE type-12
   map) read as linear sRGB. For `kloofendal_43d_clear` all sky pixels are in gamut;
   `syferfontein_6d_clear` (sun at 6 deg, orange horizon) has ~30 % of its luminance clamped.
