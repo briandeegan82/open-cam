@@ -793,6 +793,57 @@ def apply_adc_dnl(dn: np.ndarray, table: np.ndarray, max_dn: float) -> np.ndarra
     return np.clip(dn + table[idx], 0.0, max_dn)
 
 
+def random_telegraph_offsets(
+    shape: tuple[int, ...], cfg: dict, spatial_seed: int, rng: np.random.Generator
+) -> tuple[np.ndarray | None, dict]:
+    """Random telegraph signal (RTS) noise: a few pixels toggle between two discrete levels.
+
+    A single trap at the source-follower Si/SiO2 interface captures and emits a carrier at random,
+    so the pixel output jumps between two levels separated by ``A`` (a few e-; it grows as the
+    gate shrinks, so small automotive pixels show more of it). Model:
+
+    * a fixed set of RTS pixels (``pixel_fraction``) with amplitudes ``A ~ Exp(amplitude_mean_e)``
+      (a heavy tail, as measured RTS amplitude histograms show), drawn from a generator seeded
+      by the camera's spatial seed, so the same pixels flicker in every frame;
+    * each frame, every RTS pixel is in its high state with probability
+      ``p = tau_high / (tau_high + tau_low)`` (or ``high_state_probability``), drawn from the
+      temporal generator; the output gains ``A`` in the high state.
+
+    Frames are independent samples of the stationary two-state process (the frame time is taken
+    as long compared with the dwell times). Returns (offsets in e- or None, stats).
+    """
+    if not bool(cfg.get("enabled", False)):
+        return None, {"enabled": False}
+    frac = float(cfg.get("pixel_fraction", 1e-3))
+    amp_mean = float(cfg.get("amplitude_mean_e", 3.0))
+    if "tau_high_s" in cfg or "tau_low_s" in cfg:
+        th, tl = float(cfg.get("tau_high_s", 1.0)), float(cfg.get("tau_low_s", 1.0))
+        if th <= 0 or tl <= 0:
+            raise ValueError("random_telegraph_noise tau_high_s / tau_low_s must be > 0")
+        p_high = th / (th + tl)
+    else:
+        p_high = float(cfg.get("high_state_probability", 0.5))
+    if not 0.0 <= frac <= 1.0 or amp_mean < 0.0 or not 0.0 <= p_high <= 1.0:
+        raise ValueError(
+            "random_telegraph_noise: need 0 <= pixel_fraction, high_state_probability <= 1, amplitude >= 0"
+        )
+    srng = np.random.default_rng([int(spatial_seed), 0x525453])  # own stream: other fixed patterns unchanged
+    is_rts = srng.random(shape) < frac
+    amp = np.where(is_rts, srng.exponential(amp_mean, size=shape), 0.0)
+    high = rng.random(shape) < p_high
+    off = (amp * (is_rts & high)).astype(np.float32)
+    n = int(is_rts.sum())
+    stats = {
+        "enabled": True,
+        "pixels": n,
+        "pixel_fraction": n / max(1, is_rts.size),
+        "amplitude_mean_e": float(amp[is_rts].mean()) if n else 0.0,
+        "high_state_probability": p_high,
+        "pixels_high_this_frame": int((is_rts & high).sum()),
+    }
+    return off, stats
+
+
 def apply_hot_stuck_pixel_model(
     signal_e: np.ndarray,
     rng: np.random.Generator,
@@ -1636,6 +1687,11 @@ def main() -> None:
     read_e = rng.normal(0.0, sigma_d_e, size=signal_e.shape).astype(np.float32)
     if sigma_ktc_e > 0.0:
         read_e = read_e + rng.normal(0.0, sigma_ktc_e, size=signal_e.shape).astype(np.float32)
+    rts_e, rts_stats = random_telegraph_offsets(
+        signal_e.shape, emva.get("random_telegraph_noise") or {}, _spatial_seed, rng
+    )
+    if rts_e is not None:
+        read_e = read_e + rts_e
     if adc_clipping:
         total_e = np.clip(shot_e, 0.0, full_well_e) + rc_fpn + read_e
     else:
@@ -1880,6 +1936,7 @@ def main() -> None:
         "adc_dnl_model": "fixed_per_bin_map" if adc_dnl_std_lsb > 0.0 else None,
         "adc_clipping": adc_clipping,
         "defect_pixels": defect_stats,
+        "random_telegraph_noise": rts_stats,
         "preview_no_normalize": preview_no_normalize,
         "crosstalk_enabled": crosstalk_enabled,
         "crosstalk_matrix_3x3": crosstalk_matrix.tolist(),
