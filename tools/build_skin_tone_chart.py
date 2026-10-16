@@ -69,7 +69,7 @@ def scene_lines(args, ill_name: str, geo: list[dict], film: str) -> list[str]:
         'ColorSpace "srgb"',
         f'Sampler "zsobol" "integer pixelsamples" [{int(args.pixelsamples)}]',
         'Integrator "path" "integer maxdepth" [1]',
-        'PixelFilter "gaussian"',
+        'PixelFilter "box" "float xradius" [0.5] "float yradius" [0.5]',
         *iq._film_block(args, film),
         f"LookAt 0 0 {float(args.cam_dist):.6g}  0 0 0  0 1 0",
         *iq._camera_block(args, Path(args.out_dir), REPO),

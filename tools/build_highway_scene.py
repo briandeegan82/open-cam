@@ -599,7 +599,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         'ColorSpace "srgb"',
         f'Sampler "zsobol" "integer pixelsamples" [{args.pixelsamples}]',
         f'Integrator "{fx.integrator(integrator)}" "integer maxdepth" [{maxdepth}] "bool regularize" true',
-        'PixelFilter "gaussian"',
+        'PixelFilter "box" "float xradius" [0.5] "float yradius" [0.5]',
         *film,
         *fx.film_lines(),
         *fx.camera_transform_lines(eye, target),

@@ -317,7 +317,7 @@ def emit_hue_scene(
         "",
         'Sampler "zsobol" "integer pixelsamples" [%d]' % int(args.pixelsamples),
         'Integrator "path" "integer maxdepth" [6]',
-        'PixelFilter "gaussian"',
+        'PixelFilter "box" "float xradius" [0.5] "float yradius" [0.5]',
         "",
         *film_block,
         "",
