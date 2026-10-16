@@ -24,3 +24,4 @@ lens:
     dispersion: false          # true: trace ghosts per wavelength group (cost x groups)
     dispersion_groups: 0       # with dispersion: 0 = one group per spectral bucket
     max_sources: 256
+    workers: 0                 # processes over sources; 0 = all CPU cores
