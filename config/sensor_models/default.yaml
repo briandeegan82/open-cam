@@ -70,6 +70,14 @@ noise:
     # Models the 1/f characteristic of MOS transistor flicker noise that survives CDS.
     # Typical BSI CMOS with partial CDS: 0.2–1.0 e.  Set 0 when full CDS is effective.
     flicker_noise_std_e: 0.0
+    # Random telegraph signal (RTS) noise: a fixed few pixels toggle between two levels A e- apart
+    # (single source-follower traps; worse for small pixels). Off by default. Each frame an RTS
+    # pixel is high with p = tau_high / (tau_high + tau_low) (or high_state_probability).
+    random_telegraph_noise:
+      enabled: false
+      pixel_fraction: 0.001    # share of pixels with an active trap
+      amplitude_mean_e: 3.0    # mean step height (exponential distribution)
+      high_state_probability: 0.5
     # Charge blooming: lateral overflow to adjacent pixels when full well is exceeded.
     # Only active in the Bayer (mono-CFA) path.  Disabled by default since most modern
     # BSI sensors have overflow drain structures that suppress lateral blooming.
