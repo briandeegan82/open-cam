@@ -13,10 +13,14 @@ The medium is parameterised the way visibility is reported in meteorology:
 * Molecular (Rayleigh) scattering of sea-level air is included in the same total
   (1.16e-5 /m at 550 nm, lambda^-4.08; Bucholtz 1995, Appl. Opt. 34, 2765), so ``V`` is the
   total visibility; the aerosol part is ``3.912/V - sigma_R(550)``.
-* A single Henyey-Greenstein phase function (pbrt media support one): g ~0.7 for haze
-  aerosol (d'Almeida et al. 1991, continental models g = 0.64-0.72), ~0.85 for fog droplets
-  (Mie, 5-15 um water drops). Molecular scattering is folded in by the scattering-weighted
-  mean g at 550 nm (an approximation of the Rayleigh + HG mixture).
+* Phase function: Henyey-Greenstein for the aerosol, g ~0.7 for haze (d'Almeida et al. 1991,
+  continental models g = 0.64-0.72), ~0.85 for fog droplets (Mie, 5-15 um water drops).
+  ``--haze-phase effective`` (default) folds molecular scattering into one HG lobe with the
+  scattering-weighted mean g at 550 nm. ``--haze-phase mixed`` uses the physical mixture
+  ``p = w_R p_Rayleigh + (1 - w_R) p_HG(g)``, ``w_R = sigma_R / sigma_s`` at 550 nm (pbrt
+  patch 0011, ``"float rayleighfraction"``). This matters in clear air, where the effective g
+  under-weights side and back scatter; in fog w_R ~ 0 and the two agree. pbrt's phase function
+  is wavelength-independent, so w_R is taken at 550 nm (the real fraction rises toward blue).
 * Single-scattering albedo omega of the aerosol (0.9-0.95 continental haze, ~1 for water
   droplets; Hess, Koepke & Schult 1998, OPAC).
 
@@ -67,6 +71,7 @@ class HazeParams:
     profile: str  # "exponential" (scale height) or "layer" (uniform up to height, cosine taper)
     height_m: float
     description: str = ""
+    phase: str = "effective"  # "effective" (one HG lobe) or "mixed" (Rayleigh + HG)
 
 
 PRESETS = {
@@ -85,6 +90,12 @@ def add_cli_args(ap: argparse.ArgumentParser) -> None:
     g.add_argument("--visibility-m", type=float, default=None, help="Meteorological visibility V [m].")
     g.add_argument("--haze-angstrom", type=float, default=None, help="Angstrom exponent alpha.")
     g.add_argument("--haze-g", type=float, default=None, help="Henyey-Greenstein asymmetry g.")
+    g.add_argument(
+        "--haze-phase",
+        choices=("effective", "mixed"),
+        default=None,
+        help="effective: one HG lobe with the scattering-weighted g (default); mixed: Rayleigh + HG mixture.",
+    )
     g.add_argument("--haze-albedo", type=float, default=None, help="Aerosol single-scattering albedo.")
     g.add_argument("--haze-profile", choices=("exponential", "layer"), default=None)
     g.add_argument("--haze-height-m", type=float, default=None, help="Scale height / layer depth [m].")
@@ -114,6 +125,7 @@ def params_from_args(args: argparse.Namespace) -> HazeParams | None:
         "albedo": args.haze_albedo,
         "profile": args.haze_profile,
         "height_m": args.haze_height_m,
+        "phase": getattr(args, "haze_phase", None),
     }
     p = replace(p, **{k: v for k, v in over.items() if v is not None})
     if p.visibility_m <= 0 or not 0.0 < p.albedo <= 1.0 or not -1.0 < p.g < 1.0 or p.height_m <= 0:
@@ -150,6 +162,21 @@ def effective_g(p: HazeParams) -> float:
     _, ss, _ = coefficients(p, 550.0)
     ss_aer = float(ss) - RAYLEIGH_550_PER_M
     return p.g * ss_aer / float(ss) if float(ss) > 0 else 0.0
+
+
+def rayleigh_fraction(p: HazeParams) -> float:
+    """Molecular share of the scattering coefficient at 550 nm (the Rayleigh lobe weight)."""
+    _, ss, _ = coefficients(p, 550.0)
+    return min(1.0, RAYLEIGH_550_PER_M / float(ss)) if float(ss) > 0 else 0.0
+
+
+def phase_params(p: HazeParams) -> tuple[float, float]:
+    """(HG g, Rayleigh fraction) passed to pbrt for this phase mode."""
+    if p.phase == "mixed":
+        return p.g, rayleigh_fraction(p)
+    if p.phase != "effective":
+        raise ValueError(f"haze phase must be effective|mixed, got {p.phase!r}")
+    return effective_g(p), 0.0
 
 
 def medium_top_m(p: HazeParams) -> float:
@@ -217,12 +244,14 @@ def pbrt_medium_lines(p: HazeParams, sigma_a_spd: str, sigma_s_spd: str) -> list
     vals = np.tile(np.repeat(rho, GRID_NXZ)[None, :], (GRID_NXZ, 1)).ravel()  # index (z*ny + y)*nx + x
     w = GRID_HALF_WIDTH_M
     return [
-        f"# Atmosphere: {p.name} (V = {p.visibility_m:g} m, alpha = {p.angstrom:g}, g = {effective_g(p):.3f},"
+        f"# Atmosphere: {p.name} (V = {p.visibility_m:g} m, alpha = {p.angstrom:g}, g = {phase_params(p)[0]:.3f},"
+        f" Rayleigh fraction = {phase_params(p)[1]:.3f},"
         f" omega = {p.albedo:g}, {p.profile} {p.height_m:g} m)",
         "Identity",  # medium in world space (the CTM still holds the LookAt here)
         'MakeNamedMedium "haze" "string type" "uniformgrid"',
         f'    "spectrum sigma_a" "{sigma_a_spd}" "spectrum sigma_s" "{sigma_s_spd}" "float scale" [1]',
-        f'    "float g" [{effective_g(p):.6g}]',
+        f'    "float g" [{phase_params(p)[0]:.6g}]',
+        *([f'    "float rayleighfraction" [{phase_params(p)[1]:.6g}]'] if p.phase == "mixed" else []),
         f'    "integer nx" [{GRID_NXZ}] "integer ny" [{GRID_NY}] "integer nz" [{GRID_NXZ}]',
         f'    "point3 p0" [{-w:.6g} {y0:.6g} {-w:.6g}] "point3 p1" [{w:.6g} {y1:.6g} {w:.6g}]',
         '    "float density" [ ' + " ".join(f"{v:.6g}" for v in vals) + " ]",
@@ -246,6 +275,16 @@ def _sample_hg(g: float, mu: np.ndarray, rng: np.random.Generator) -> np.ndarray
     return np.clip(mu * cos_t + np.sqrt(np.clip(1.0 - mu * mu, 0.0, None)) * sin_t * np.cos(phi), -1.0, 1.0)
 
 
+def _sample_rayleigh(mu: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+    n = mu.size
+    z = 4.0 * rng.random(n) - 2.0
+    r = np.sqrt(z * z + 1.0)
+    cos_t = np.clip(np.cbrt(z + r) + np.cbrt(z - r), -1.0, 1.0)
+    phi = 2.0 * np.pi * rng.random(n)
+    sin_t = np.sqrt(1.0 - cos_t**2)
+    return np.clip(mu * cos_t + np.sqrt(np.clip(1.0 - mu * mu, 0.0, None)) * sin_t * np.cos(phi), -1.0, 1.0)
+
+
 def slab_flux_mc(
     p: HazeParams,
     wl_nm: float,
@@ -262,7 +301,7 @@ def slab_flux_mc(
     """
     sa, ss, se = (float(v) for v in coefficients(p, wl_nm))
     omega = ss / se
-    g = effective_g(p)
+    g, w_r = phase_params(p)
     yc, rho = grid_profile(p)
     top = float(yc[-1])
     sig_maj = se * float(rho.max())
@@ -288,7 +327,11 @@ def slab_flux_mc(
         w = np.where(hit, w * ground_albedo, np.where(real, w * omega, w))
         mu = np.where(hit, np.sqrt(rng.random(y.size)), mu)
         if real.any():
-            mu[real] = _sample_hg(g, mu[real], rng)
+            idx = np.flatnonzero(real)
+            ray = rng.random(idx.size) < w_r
+            mu[idx[~ray]] = _sample_hg(g, mu[idx[~ray]], rng)
+            if ray.any():
+                mu[idx[ray]] = _sample_rayleigh(mu[idx[ray]], rng)
         scattered = scattered | hit | real
         # Russian roulette on low weights, drop escaped photons.
         low = w < 1e-3
@@ -373,6 +416,8 @@ def manifest_entry(p: HazeParams, wl_nm: np.ndarray) -> dict:
         "sigma_ext_per_m_450_550_650": [float(v) for v in se],
         "single_scattering_albedo_550": float(ss[1] / se[1]),
         "hg_g_effective": effective_g(p),
+        "phase_hg_g": phase_params(p)[0],
+        "phase_rayleigh_fraction_550": phase_params(p)[1],
         "medium_top_m": medium_top_m(p),
         "vertical_optical_depth_550": optical_depth_vertical(p, 550.0),
         "pbrt_medium": "uniformgrid 'haze' (camera, lights and surfaces inside), integrator volpath",
