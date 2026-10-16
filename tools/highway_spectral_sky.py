@@ -49,6 +49,7 @@ SRGB_TO_XYZ = np.array(
 BASIS_M = np.array([[-2.052, 5.206], [9.443, 5.343], [-0.425, -8.328]])
 HOSEK_GROUND_ALBEDO = 0.1  # grass/asphalt surroundings (visible albedo ~0.1-0.2)
 HOSEK_MAP_SIZE = 512
+PRAGUE_DEFAULT_VISIBILITY_KM = 59.4  # reference CLI default; dataset range 20-131.8 km
 
 
 def daylight_components() -> tuple[np.ndarray, np.ndarray]:
@@ -255,6 +256,31 @@ def hosek_weight_map(n: int, sun_elevation_deg: float, turbidity: float = 3.0, a
     return coeffs_to_weights(xyz_to_coeffs(hosek_xyz_map(n, sun_elevation_deg, turbidity, albedo)))
 
 
+def prague_xyz_map(
+    n: int,
+    sun_elevation_deg: float,
+    dataset: str | os.PathLike | None = None,
+    visibility_km: float = PRAGUE_DEFAULT_VISIBILITY_KM,
+    albedo: float = HOSEK_GROUND_ALBEDO,
+) -> np.ndarray:
+    """Equal-area (n, n, 3) CIE XYZ of the Prague sky model (sun at light-space azimuth 0, zero
+    below the horizon, no sun disc). Each 40 nm model channel is constant over its band, as in the
+    reference code, and is integrated against the CMFs over the band; 683 * Y is cd/m^2."""
+    from prague_sky import PragueSky
+
+    sky = PragueSky(dataset)
+    edges = sky.channel_edges_nm
+    use = np.nonzero((edges[1:] > 360.0) & (edges[:-1] < 830.0))[0]
+    grid = np.arange(360.0, 830.0 + 1e-9, 1.0)
+    band = np.stack([((grid >= edges[k]) & (grid < edges[k + 1])).astype(float) for k in use])
+    d = equal_area_directions(n)
+    up = d[..., 2] > 0.0
+    out = np.zeros((n, n, 3))
+    rad = sky.radiance(d[up], sun_elevation_deg, visibility_km, albedo, channels=use)
+    out[up] = spectrum_xyz(grid, rad @ band)
+    return out
+
+
 def write_weight_exr(path: Path, w: np.ndarray) -> None:
     """Basis-weight map as a float EXR with channels B0..B{K-1} (pbrt patch convention)."""
     import OpenEXR
@@ -340,7 +366,7 @@ def spectral_sky_light(args, sky_file: Path, elev: float, out_dir: Path, spd_dir
     The absolute level is still set by the builder's ``"float illuminance"`` (the patched light
     rescales the map to it), so the manifest radiometry is unchanged.
     """
-    if args.sky != "hosek" and args.sky_spectrum == "rgb":
+    if args.sky not in ("hosek", "prague") and args.sky_spectrum == "rgb":
         return None
     tex = out_dir / "textures"
     info: dict = {"basis": "CIE daylight S0 + M1 S1 + M2 S2 (doi:10.25039/CIE.DS.w7zunnny)"}
@@ -361,6 +387,31 @@ def spectral_sky_light(args, sky_file: Path, elev: float, out_dir: Path, spd_dir
             "Sky radiance: Hosek-Wilkie spectral model (320-720 nm) represented by its CIE daylight-model "
             "metamer per pixel (~4-10 % spectral residual 400-720 nm); absolute level from the builder's "
             "clear-sky fit."
+        )
+    elif args.sky == "prague":
+        from prague_sky import dataset_path
+
+        try:
+            ds = dataset_path(getattr(args, "prague_dataset", None))
+        except FileNotFoundError as e:
+            raise SystemExit(str(e)) from e
+        vis = float(getattr(args, "prague_visibility_km", PRAGUE_DEFAULT_VISIBILITY_KM))
+        f = tex / f"sky_prague_e{elev:.1f}_v{vis:.1f}_daylight.exr"
+        c = xyz_to_coeffs(prague_xyz_map(HOSEK_MAP_SIZE, elev, ds, vis, HOSEK_GROUND_ALBEDO))
+        w = coeffs_to_weights(c)
+        write_weight_exr(f, w)
+        desc = f"Prague sky model (visibility {vis:g} km) on a CIE daylight basis"
+        info |= {
+            "model": "Prague sky model ground-level radiance -> daylight-model spectrum with the same XYZ per pixel",
+            "dataset": ds.name,
+            "visibility_km": vis,
+            "ground_albedo": HOSEK_GROUND_ALBEDO,
+            "model_illuminance_horizontal_lux": KM * map_horizontal_luminance_integral(w),
+        }
+        approx = (
+            "Sky radiance: Prague sky model (Wilkie et al. 2021; 40 nm channels, user-supplied dataset) "
+            "represented by its CIE daylight-model metamer per pixel; absolute level from the builder's "
+            "clear-sky fit; wavelengths above 830 nm are not rendered."
         )
     else:
         f = tex / f"{sky_file.stem}_daylight.exr"
