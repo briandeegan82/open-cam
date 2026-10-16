@@ -283,6 +283,9 @@ def spectral_radiance_to_electrons(
     geom = t_int * fill_factor * (pixel_pitch_um * 1e-6) ** 2
     weights = spectral_electron_weights(lam, qe.T, w, irr_per_lambda, geom)
     par_cfg = pixel_angular_response_cfg(model)
+    ir_shift = par_cfg.get("ircf_angle_shift") or {}
+    if ir_shift.get("enabled") and not ir_shift.get("ircf_csv") and qe_cfg.get("ircf_csv"):
+        par_cfg = {**par_cfg, "ircf_angle_shift": {**ir_shift, "ircf_csv": qe_cfg["ircf_csv"]}}
     par_meta: dict = {"enabled": False}
     if par_cfg.get("enabled", False):
         electrons, par_meta = apply_pixel_angular_response(

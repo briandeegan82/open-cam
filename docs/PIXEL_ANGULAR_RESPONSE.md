@@ -69,7 +69,15 @@ sensor_forward:
       microlens_shift: {mode: linear, max_cra_deg: 20.0}
       stack: {stack_height_um: 2.0, stack_index: 1.55, window_fraction: 0.8, collection_depth_um: 3.0}
       crosstalk: {enabled: false, cfa_pattern: RGGB}
+      ircf_angle_shift: {enabled: false, n_eff: 1.8}  # ircf_csv defaults to quantum_efficiency.ircf_csv
 ```
+
+`ircf_angle_shift` (opt-in) models the IR-cut interference filter's blue shift with incidence
+angle, λ(θ) = λ(0)·√(1 − (sin θ / n_eff)²), averaged over each pixel's incidence cone. With the
+bundled `QE_IRCF.csv` (50 % cut-off 650 nm) and `n_eff: 1.8`, the cut-off sits at 644 nm for 15°,
+632 nm for 25° and 625 nm for 30°, so red falls off toward the corners of wide-CRA lenses.
+`n_eff` is illustrative; set it from the filter's angle data. Where the filter already blocks
+at normal incidence (T < 1e-3) the factor is held at 1.
 
 Scene manifests from `build_*_scene.py` record `lensfile`, `aperture_diameter_mm`,
 `film_diagonal_mm` and `fov_deg`, and these are forwarded automatically (`camera_geometry`).

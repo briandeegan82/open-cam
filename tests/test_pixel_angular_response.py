@@ -193,6 +193,42 @@ class TestIncidence(unittest.TestCase):
         self.assertTrue(np.all(out["none"] < 0.7))
 
 
+class TestIrcfAngleShift(unittest.TestCase):
+    IRCF = "spectra/QE/interpolated/QE_IRCF.csv"
+
+    def test_factor_matches_shifted_edge(self):
+        wl = np.linspace(380.0, 800.0, 421)
+        t = np.clip((700.0 - wl) / 100.0, 0.0, 1.0)  # linear red edge 600-700 nm
+        lam = np.array([550.0, 620.0, 660.0])
+        one = np.ones(1)
+        np.testing.assert_allclose(par.ircf_angle_factor(np.zeros(1), np.zeros(1), one, lam, wl, t, 1.8), 1.0)
+        th, n_eff = math.radians(30.0), 1.8
+        s = math.sqrt(1.0 - (math.sin(th) / n_eff) ** 2)
+        got = par.ircf_angle_factor(np.array([math.sin(th)]), np.zeros(1), one, lam, wl, t, n_eff)
+        expect = np.clip((700.0 - lam / s) / 100.0, 0.0, 1.0) / np.clip((700.0 - lam) / 100.0, 0.0, 1.0)
+        np.testing.assert_allclose(got, expect, rtol=1e-6)
+
+    def test_corner_red_falloff_only_with_shift(self):
+        lam = np.array([550.0, 640.0, 650.0])
+        lens = {"chief_ray_angle_table": [[0.0, 0.0], [1.0, 30.0]]}
+        base = {"incidence": "table", "field_grid": [3, 3], "microlens_shift": {"mode": "matched"}}
+        off = par.compute_maps(64, 64, lam, base, pitch_um=1.4, f_number=2.0, lens_cfg=lens, repo=REPO)
+        cfg = {**base, "ircf_angle_shift": {"enabled": True, "ircf_csv": self.IRCF}}
+        on = par.compute_maps(64, 64, lam, cfg, pitch_um=1.4, f_number=2.0, lens_cfg=lens, repo=REPO)
+        ratio = on.own / off.own
+        np.testing.assert_allclose(ratio[:, :, 0], 1.0, atol=2e-3)  # 550 nm: flat passband everywhere
+        self.assertGreater(float(ratio[1, 1, 1]), 0.99)  # 640 nm: f/2 cone at the centre barely reaches the edge
+        self.assertLess(float(ratio[0, 0, 1]), 0.2)  # 30 deg corner: the edge moves below 640 nm
+        # 650 nm sits on the steep edge, so even the centre's f/2 cone (up to ~14 deg) cuts it.
+        self.assertLess(float(ratio[0, 0, 2]), float(ratio[1, 1, 2]))
+        self.assertLess(on.meta["ircf_angle_shift"]["min_factor"], 0.01)
+
+    def test_requires_ircf_curve(self):
+        cfg = {"incidence": "pinhole", "fov_deg": 60.0, "field_grid": [3, 3], "ircf_angle_shift": {"enabled": True}}
+        with self.assertRaises(ValueError):
+            par.compute_maps(32, 32, np.array([550.0]), cfg, pitch_um=1.4, f_number=2.8, repo=REPO)
+
+
 class TestPipelineHook(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
