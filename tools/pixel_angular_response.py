@@ -59,6 +59,15 @@ Model, in three parts:
    (CRA rises linearly to ``max_cra_deg`` at the frame corner, as sensor datasheets specify),
    and ``table``.
 
+4. **IR-cut filter angle shift** (opt-in, ``ircf_angle_shift``). The IR-cut filter is a thin-film
+   interference stack in front of the sensor. Tilting the incidence angle θ (in air) moves its
+   edges to shorter wavelengths, λ(θ) = λ(0)·√(1 − (sin θ / n_eff)²) (Macleod, *Thin-Film Optical
+   Filters*, ch. on tilted filters), so T_θ(λ) = T_0(λ / s(θ)). The factor
+   ⟨T_θ(λ)⟩ / T_0(λ), averaged over each pixel's incidence distribution, multiplies the response.
+   That gives the red fall-off toward the corners of wide-CRA lenses. Where T_0 < 1e-3 the factor
+   is 1 (light the filter cuts at normal incidence stays cut). ``n_eff`` (default 1.8) is the
+   stack's effective index; it is illustrative, so set it from the filter's angle data.
+
 Responses are normalised to normal incidence on an unshifted pixel, which is the condition the
 QE curve represents (``normalize: normal_incidence``). ``normalize: center`` instead makes the
 centre pixel 1. The result is a per-pixel, per-wavelength weight ``R(x, y, λ)``. It multiplies
@@ -86,6 +95,7 @@ from pathlib import Path
 
 import numpy as np
 from lens_prescription import load_lens_file, paraxial_focal_lengths_mm
+from qe_curves import read_csv_curve
 from scipy.special import ndtr
 
 SILICON_NK_CSV = "spectra/silicon/si_green2008_nk.csv"
@@ -431,6 +441,16 @@ def film_size_mm(diagonal_mm: float, xres: int, yres: int) -> tuple[float, float
     return x, aspect * x
 
 
+def ircf_angle_factor(a, b, w, lambdas_nm, ircf_wl, ircf_t, n_eff: float) -> np.ndarray:
+    """IR-cut transmittance averaged over directions (a, b) with weights w, relative to normal incidence [K]."""
+    lam = np.asarray(lambdas_nm, dtype=np.float64)
+    s = np.sqrt(np.clip(1.0 - (np.hypot(a, b) / float(n_eff)) ** 2, 0.0, 1.0))
+    t_theta = np.interp(lam[None, :] / np.maximum(s[:, None], 1e-6), ircf_wl, ircf_t, left=0.0, right=0.0)
+    t_avg = np.average(t_theta, axis=0, weights=w)
+    t0 = np.interp(lam, ircf_wl, ircf_t, left=0.0, right=0.0)
+    return np.where(t0 > 1e-3, t_avg / np.maximum(t0, 1e-3), 1.0)
+
+
 def _design_cra_deg(mode: str, cfg: dict, h_norm: float, lens_cra_deg: float) -> float:
     if mode == "none":
         return 0.0
@@ -514,6 +534,15 @@ def compute_maps(
     else:
         raise ValueError(f"pixel_angular_response.incidence must be auto|traced|table|pinhole, got {source!r}")
     na = 1.0 / (2.0 * float(f_number))
+    ir_cfg = dict(cfg.get("ircf_angle_shift") or {})
+    ircf_curve = None
+    ir_min = 1.0
+    if ir_cfg.get("enabled", False):
+        csv = ir_cfg.get("ircf_csv")
+        if not csv:
+            raise ValueError("pixel_angular_response.ircf_angle_shift needs ircf_csv (the IR-cut transmittance)")
+        ircf_curve = read_csv_curve(Path(csv) if Path(csv).is_absolute() else repo / str(csv))
+        n_eff = float(ir_cfg.get("n_eff", 1.8))
 
     own = np.zeros((gy, gx, lam.size))
     nb = np.zeros((gy, gx, 3, 3, lam.size))
@@ -545,6 +574,10 @@ def compute_maps(
             tdx, tdy = stack_tangents(np.array([s_air * az[0]]), np.array([s_air * az[1]]), stack.stack_index)
             shift = (-stack.stack_height_um * float(tdx[0]), -stack.stack_height_um * float(tdy[0]))
             resp = pixel_response(a, b, w, shift, lam, stack, repo=repo)
+            if ircf_curve is not None:
+                fac = ircf_angle_factor(a, b, w, lam, *ircf_curve, n_eff)
+                ir_min = min(ir_min, float(fac.min()))
+                resp = resp * fac
             own[iy, ix] = resp[1, 1]
             nb[iy, ix] = resp
     norm_mode = str(cfg.get("normalize", "normal_incidence")).lower()
@@ -569,6 +602,8 @@ def compute_maps(
             "own_max": float(own.max()),
         }
     )
+    if ircf_curve is not None:
+        meta["ircf_angle_shift"] = {"n_eff": n_eff, "ircf_csv": str(ir_cfg["ircf_csv"]), "min_factor": ir_min}
     return AngularResponseMaps(rows_px, cols_px, own, nb, cra, design, psa, hn, meta)
 
 
