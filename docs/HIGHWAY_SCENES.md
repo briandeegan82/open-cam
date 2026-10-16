@@ -644,3 +644,12 @@ edges of all emitters and renders every sub-interval with the matching on/off in
 the phase and the row (bands across the sign). A plain `pbrt` render of the same scene uses the
 exposure-averaged level instead (no row dependence). Samples per pixel are split in
 proportion to slice duration, so the composite has the same total spp as a plain render.
+
+**Static scenes: `--linear`.** With no ego or traffic motion, radiance is linear in each
+emitter's on/off state, so `render_time_slices.py --linear` renders one frame with every PWM
+emitter off (B) and one per emitter with only that emitter on (E_e), then composes
+`L(row) = B + sum_e f_e(row) (E_e - B)` with each row's exact on-fraction `f_e(row)`. That is
+1 + N_emitters full-frame renders at the full spp, independent of `--bands` and the number of
+PWM edges, with no band timing error. It refuses scenes whose manifest records any camera or car
+velocity. All renders share one `--seed`, so B and E_e are correlated and most of the path noise
+cancels in the difference.

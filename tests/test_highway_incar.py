@@ -218,3 +218,44 @@ class TestBuilderHooks(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_linear_plan_matches_per_row_slices():
+    exposure = {"integration_time_s": 0.004, "shutter_open_s": 0.001, "rolling_shutter_line_time_s": 30e-6}
+    emitters = [
+        {"id": "vms", "pwm": {"frequency_hz": 90.0, "duty": 0.3, "phase_s": 0.002}},
+        {"id": "tail", "pwm": {"frequency_hz": 400.0, "duty": 0.5}},
+        {"id": "steady", "pwm": None},
+    ]
+    ids, frac = rts.linear_plan(exposure, emitters, 40)
+    assert ids == ["vms", "tail"] and frac.shape == (2, 40)
+    slices = rts.plan_slices(exposure, emitters, 40, bands=40, spp=16)
+    for k, eid in enumerate(ids):
+        on = np.zeros(40)
+        for s in slices:
+            if s.states[eid] == "on":
+                on[s.y0 : s.y1] += s.weight
+        np.testing.assert_allclose(frac[k], on, atol=1e-9)
+    assert 0.0 < frac[0].min() < frac[0].max() < 1.0  # the window slides across the VMS pulse
+
+
+def test_linear_mode_refuses_moving_scene(tmp_path):
+    import json
+
+    import pytest
+
+    (tmp_path / "highway_manifest.json").write_text(
+        json.dumps(
+            {
+                "exposure": {"integration_time_s": 0.004},
+                "film": {"xresolution": 4, "yresolution": 4},
+                "ego_motion": {"speed_kmh": 0.0, "yaw_rate_deg_s": 0.0, "velocity_world_mps": [0.0, 0.0, 0.0]},
+                "cars": [{"id": "car00", "velocity_world_mps": [0.0, 0.0, 30.0]}],
+            }
+        )
+    )
+    assert rts.scene_is_static({"ego_motion": {"velocity_world_mps": [0, 0, 0]}, "cars": []}, "TransformTimes 0 1")
+    assert not rts.scene_is_static({}, "TransformTimes 0 1")
+    (tmp_path / "highway.pbrt").write_text("TransformTimes 0 0.004\nActiveTransform EndTime\n")
+    with pytest.raises(ValueError, match="static scene"):
+        rts.render_linear(tmp_path, pbrt=Path("pbrt"), spp=1, out=tmp_path / "o.exr")
