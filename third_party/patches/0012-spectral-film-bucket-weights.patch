@@ -1,0 +1,90 @@
+--- a/src/pbrt/util/spectrum.h
++++ b/src/pbrt/util/spectrum.h
+@@ -305,6 +305,26 @@
+         return swl;
+     }
+ 
++    // open-cam: as SampleUniformJittered, but each stratum is mapped through the CDF of a
++    // tabulated distribution over the film range (spectral film "float bucketweights").
++    template <typename Distrib>
++    PBRT_CPU_GPU static SampledWavelengths SampleTabulatedJittered(Float u, const Distrib &d) {
++        SampledWavelengths swl;
++        Float us = u * NSpectrumSamples;
++        int s0 = std::min<int>(int(us), NSpectrumSamples - 1);
++        uint64_t bits = uint64_t(FloatToBits(u)) * 0x9e3779b97f4a7c15ull;
++        for (int i = 0; i < NSpectrumSamples; ++i) {
++            Float v = i == 0 ? us - s0 : Float(MixBits(bits + i) >> 40) * 0x1p-24f;
++            v = std::min<Float>(v, OneMinusEpsilon);
++            Float uc = std::min<Float>(((s0 + i) % NSpectrumSamples + v) / NSpectrumSamples,
++                                       OneMinusEpsilon);
++            Float pdf = 0;
++            swl.lambda[i] = d.Sample(uc, &pdf);
++            swl.pdf[i] = pdf;
++        }
++        return swl;
++    }
++
+     PBRT_CPU_GPU
+     static SampledWavelengths SampleUniform(Float u, Float lambda_min = Lambda_min,
+                                             Float lambda_max = Lambda_max) {
+--- a/src/pbrt/film.h
++++ b/src/pbrt/film.h
+@@ -406,6 +406,8 @@
+ 
+     PBRT_CPU_GPU
+     SampledWavelengths SampleWavelengths(Float u) const {
++        if (lambdaDistrib)
++            return SampledWavelengths::SampleTabulatedJittered(u, *lambdaDistrib);
+         return jitterWavelengths
+                    ? SampledWavelengths::SampleUniformJittered(u, lambdaMin, lambdaMax)
+                    : SampledWavelengths::SampleUniform(u, lambdaMin, lambdaMax);
+@@ -445,7 +447,8 @@
+         // but take advantage of the fact that we know that it is uniform
+         // in SampleWavelengths(), the fact that the buckets all have the
+         // same extend, and can then just average radiance in buckets
+-        // below.
++        // below. (open-cam: with "bucketweights" the pdf is constant within each bucket, so
++        // the per-bucket average is still unbiased; only the sample count per bucket changes.)
+         L *= weight * CIE_Y_integral;
+ 
+         // Accumulate contributions in spectral buckets.
+@@ -467,6 +470,11 @@
+                  const RGBColorSpace *colorSpace, Float maxComponentValue = Infinity,
+                  bool writeFP16 = true, Allocator alloc = {});
+ 
++    // open-cam: importance-sample wavelengths with one weight per bucket (all > 0).
++    void SetBucketWeights(pstd::span<const Float> w, Allocator alloc) {
++        lambdaDistrib = PiecewiseConstant1D(w, lambdaMin, lambdaMax, alloc);
++    }
++
+     static SpectralFilm *Create(const ParameterDictionary &parameters, Float exposureTime,
+                                 Filter filter, const RGBColorSpace *colorSpace,
+                                 const FileLoc *loc, Allocator alloc);
+@@ -548,6 +556,7 @@
+     bool writeFP16;
+     // open-cam "bool jitterwavelengths" (default true): see SampleUniformJittered.
+     bool jitterWavelengths = true;
++    pstd::optional<PiecewiseConstant1D> lambdaDistrib;
+     Float filterIntegral;
+     Array2D<Pixel> pixels;
+     SquareMatrix<3> outputRGBFromSensorRGB;
+--- a/src/pbrt/film.cpp
++++ b/src/pbrt/film.cpp
+@@ -1063,6 +1063,17 @@
+         filmBaseParameters, lambdaMin, lambdaMax, nBuckets, colorSpace, maxComponentValue,
+         writeFP16, alloc);
+     film->jitterWavelengths = parameters.GetOneBool("jitterwavelengths", true);
++    std::vector<Float> bucketWeights = parameters.GetFloatArray("bucketweights");
++    if (!bucketWeights.empty()) {
++        if (int(bucketWeights.size()) != nBuckets)
++            ErrorExit(loc, "\"bucketweights\" needs %d values (one per bucket), got %d.",
++                      nBuckets, int(bucketWeights.size()));
++        for (Float w : bucketWeights)
++            if (!(w > 0))
++                ErrorExit(loc, "\"bucketweights\" must all be > 0 (a bucket that is never "
++                               "sampled would be biased).");
++        film->SetBucketWeights(bucketWeights, alloc);
++    }
+     return film;
+ }
+ 
