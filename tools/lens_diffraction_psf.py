@@ -50,10 +50,16 @@ choice that keeps pbrt's depth-dependent defocus, occlusion and per-pixel vignet
 applied to a geometrically perfect image, giving the exact wave-optics PSF at one object
 distance (``object_distance_m``), but no depth-dependent blur and no distortion.
 
-Not modelled: dispersion (pbrt lens files have one index per glass, so there is no chromatic
-aberration; the PSF still varies with wavelength through lambda N and W/lambda), polarisation
-and vector (high-NA) effects, Fresnel losses, coatings, scatter, multiple reflections (ghosts),
-sensor microlens / crosstalk, and diffraction at element edges other than the pupil boundary.
+Dispersion: when the lens file has a glass sidecar (``<lens>.glass.yaml``, see
+``lens_glass.glass_map_path``) and ``dispersion`` is not false (default true), W is traced with
+n(lambda) per bucket, so the PSF carries the lens's longitudinal and lateral colour. Without a
+sidecar every glass uses its single pbrt index (n_d) and the PSF varies with wavelength only
+through lambda N and W/lambda.
+
+Not modelled here: polarisation and vector (high-NA) effects, and diffraction at element edges
+other than the pupil boundary. Handled by other stages: coatings, Fresnel losses, glass
+absorption and ghosts (``tools/lens_ghosts.py``), surface scatter (``tools/lens_scatter.py``),
+and sensor microlens / crosstalk (``tools/pixel_angular_response.py``).
 
 References
 ----------
