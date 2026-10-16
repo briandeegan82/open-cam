@@ -29,3 +29,20 @@ What the evidence shows:
 Consequences: the per-bucket MTF of this prescription should be read as flat. To report a per-wavelength MTF, either render narrow-band images, which avoids sharing samples between buckets, or use many more spp. A dispersive prescription with per-element Abbe numbers would be needed to model real longitudinal chromatic aberration.
 
 The bias in the old edge estimator is a separate problem. On the green-integrated render, the old `|derivative|` centroid (`row_edge_positions_legacy`) reports -2.31 deg. The ISO 12233 estimator (`fit_edge`) reports -4.957 deg, and the paper's workaround reported -4.962 deg. MTF50 is 0.2094 cy/px with `flatfield=True` and 0.1997 cy/px without it; the paper workaround gave 0.2093 cy/px.
+
+## Sensor-response-weighted wavelengths (opt-in)
+
+Patch `0012-spectral-film-bucket-weights.patch` adds `Film "spectral" "float bucketweights" [w_1 ... w_n]`
+(one weight per bucket, all > 0). Wavelengths are then drawn per bucket in proportion to `w_b` and
+uniformly inside each bucket, with the same per-stratum jitter as above, so each bucket's average
+radiance stays unbiased and only its sample count changes. `tools/wavelength_importance.py` writes
+the weights from a camera model's QE × IRCF (photon weighted, mixed with a 25 % uniform share):
+
+    venv/bin/python tools/wavelength_importance.py scene/colorchecker.pbrt --camera-model config/camera_models/sony_alpha_6100.yaml
+
+Measured on the ColorChecker (pinhole, 240×160, 32 buckets over 360–830 nm, Sony a6100 QE): bucket
+and channel means match uniform sampling within 0.06 % at 1024 spp. At 64 spp the R/G/B electron
+noise variance falls to 0.57 / 0.42 / 0.29 of uniform. The cost is in the buckets the sensor does not
+see: above 780 nm they get about 2 samples per pixel at 64 spp, and their error variance rises ~39×
+(often no sample at all). Use it only when the spectral EXR feeds the sensor the weights were built
+for, not for NIR or RGB-IR sensors or spectral analysis.
