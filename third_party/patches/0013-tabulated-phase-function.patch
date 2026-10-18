@@ -1,0 +1,143 @@
+--- a/src/pbrt/media.h
++++ b/src/pbrt/media.h
+@@ -51,18 +51,43 @@
+     // ("float rayleighfraction" on homogeneous/uniformgrid media; 0 = plain HG).
+     void SetRayleighFraction(Float w) { wr = Clamp(w, 0, 1); }
+ 
++    // open-cam: optional tabulated phase function (e.g. Mie for fog droplets) that replaces HG
++    // and the Rayleigh lobe: "float phasetheta" = bin edges in scattering angle [deg], 0..180
++    // ascending (0 = forward), "float phasevalues" = one value per bin, constant in cos(theta)
++    // inside each bin. Stored as versine edges s = 1 - cos(theta) for precision near forward.
++    void SetTable(const std::vector<Float> &thetaDeg, const std::vector<Float> &values,
++                  Allocator alloc);
++
++    PBRT_CPU_GPU
++    Float TableP(Float s) const {
++        int i = FindInterval(tabN + 1, [&](int k) { return tabS[k] <= s; });
++        return tabVal[i];
++    }
++
+     PBRT_CPU_GPU
+     static Float Rayleigh(Float cosTheta) { return 3 * Inv4Pi / 4 * (1 + Sqr(cosTheta)); }
+ 
+     PBRT_CPU_GPU
+     Float p(Vector3f wo, Vector3f wi) const {
+         Float c = Dot(wo, wi);
++        if (tabN > 0)
++            return TableP(1 + c);  // pbrt's wo points back along the ray: forward is c = -1
+         Float hg = HenyeyGreenstein(c, g);
+         return wr > 0 ? wr * Rayleigh(c) + (1 - wr) * hg : hg;
+     }
+ 
+     PBRT_CPU_GPU
+     pstd::optional<PhaseFunctionSample> Sample_p(Vector3f wo, Point2f u) const {
++        if (tabN > 0) {
++            Float u0 = std::min<Float>(u[0], OneMinusEpsilon);
++            int i = FindInterval(tabN + 1, [&](int k) { return tabCdf[k] <= u0; });
++            Float t = Clamp((u0 - tabCdf[i]) / std::max<Float>(tabCdf[i + 1] - tabCdf[i], 1e-30f), 0, 1);
++            Float s = Clamp(Lerp(t, tabS[i], tabS[i + 1]), 0, 2);
++            Float sinTheta = SafeSqrt(s * (2 - s)), phi = 2 * Pi * u[1];
++            Vector3f wi = Frame::FromZ(-wo).FromLocal(SphericalDirection(sinTheta, 1 - s, phi));
++            Float pdf = tabVal[i];
++            return PhaseFunctionSample{pdf, wi, pdf};
++        }
+         if (wr > 0 && u[0] < wr) {
+             // Rayleigh lobe: invert the CDF (3mu + mu^3 + 4) / 8 = v (Cardano).
+             Float v = std::min<Float>(u[0] / wr, OneMinusEpsilon);
+@@ -92,6 +117,8 @@
+     // HGPhaseFunction Private Members
+     Float g;
+     Float wr = 0;
++    const Float *tabS = nullptr, *tabVal = nullptr, *tabCdf = nullptr;
++    int tabN = 0;
+ };
+ 
+ // MediumProperties Definition
+@@ -287,6 +314,9 @@
+ 
+   public:
+     void SetRayleighFraction(Float w) { phase.SetRayleighFraction(w); }
++    void SetPhaseTable(const std::vector<Float> &th, const std::vector<Float> &v, Allocator alloc) {
++        phase.SetTable(th, v, alloc);
++    }
+ 
+   private:
+ };
+@@ -376,6 +406,9 @@
+ 
+   public:
+     void SetRayleighFraction(Float w) { phase.SetRayleighFraction(w); }
++    void SetPhaseTable(const std::vector<Float> &th, const std::vector<Float> &v, Allocator alloc) {
++        phase.SetTable(th, v, alloc);
++    }
+ 
+   private:
+     pstd::optional<SampledGrid<Float>> temperatureGrid;
+--- a/src/pbrt/media.cpp
++++ b/src/pbrt/media.cpp
+@@ -68,7 +68,46 @@
+ 
+ // HenyeyGreenstein Method Definitions
+ std::string HGPhaseFunction::ToString() const {
+-    return StringPrintf("[ HGPhaseFunction g: %f ]", g);
++    return StringPrintf("[ HGPhaseFunction g: %f table bins: %d ]", g, tabN);
++}
++
++void HGPhaseFunction::SetTable(const std::vector<Float> &th, const std::vector<Float> &v,
++                               Allocator alloc) {
++    if (th.empty() && v.empty())
++        return;
++    if (v.empty() || th.size() != v.size() + 1)
++        ErrorExit("\"phasetheta\" needs exactly one more value than \"phasevalues\" (%d vs %d).",
++                  th.size(), v.size());
++    int n = v.size();
++    if (th[0] != 0 || th[n] != 180)
++        ErrorExit("\"phasetheta\" must run from 0 to 180 degrees.");
++    Float *s = alloc.allocate_object<Float>(n + 1), *val = alloc.allocate_object<Float>(n),
++          *cdf = alloc.allocate_object<Float>(n + 1);
++    std::vector<double> sd(n + 1), acc(n + 1, 0.);
++    for (int i = 0; i <= n; ++i) {
++        double h = std::sin(0.5 * double(th[i]) * Pi / 180);
++        sd[i] = 2 * h * h;  // 1 - cos(theta)
++        s[i] = Float(sd[i]);
++    }
++    for (int i = 0; i < n; ++i) {
++        if (!(th[i + 1] > th[i]))
++            ErrorExit("\"phasetheta\" must be strictly increasing.");
++        if (v[i] < 0)
++            ErrorExit("\"phasevalues\" must be non-negative.");
++        acc[i + 1] = acc[i] + double(v[i]) * (sd[i + 1] - sd[i]);
++    }
++    double sum = acc[n];
++    if (!(sum > 0))
++        ErrorExit("\"phasevalues\" integrate to zero.");
++    for (int i = 0; i < n; ++i)
++        val[i] = Float(v[i] / (2 * Pi * sum));
++    for (int i = 0; i <= n; ++i)
++        cdf[i] = Float(acc[i] / sum);
++    cdf[n] = 1;
++    tabS = s;
++    tabVal = val;
++    tabCdf = cdf;
++    tabN = n;
+ }
+ 
+ struct MeasuredSS {
+@@ -199,6 +238,8 @@
+     HomogeneousMedium *medium = alloc.new_object<HomogeneousMedium>(sig_a, sig_s, sigmaScale, Le, LeScale, g,
+                                                alloc);
+     medium->SetRayleighFraction(parameters.GetOneFloat("rayleighfraction", 0.f));
++    medium->SetPhaseTable(parameters.GetFloatArray("phasetheta"),
++                          parameters.GetFloatArray("phasevalues"), alloc);
+     return medium;
+ }
+ 
+@@ -330,6 +371,8 @@
+         std::move(densityGrid), std::move(temperatureGrid), temperatureScale,
+         temperatureOffset, Le, std::move(LeGrid), alloc);
+     medium->SetRayleighFraction(parameters.GetOneFloat("rayleighfraction", 0.f));
++    medium->SetPhaseTable(parameters.GetFloatArray("phasetheta"),
++                          parameters.GetFloatArray("phasevalues"), alloc);
+     return medium;
+ }
+ 

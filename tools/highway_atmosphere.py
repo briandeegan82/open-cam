@@ -55,6 +55,7 @@ import argparse
 import math
 from dataclasses import asdict, dataclass, replace
 
+import fog_mie
 import numpy as np
 
 VISIBILITY_CONTRAST = {"mor": 0.05, "koschmieder": 0.02}  # -ln(C) = 2.996 (WMO MOR), 3.912
@@ -78,6 +79,7 @@ class HazeParams:
     description: str = ""
     phase: str = "effective"  # "effective" (one HG lobe) or "mixed" (Rayleigh + HG)
     visibility_definition: str = "mor"  # "mor" (WMO, 5 %) or "koschmieder" (2 % visual range)
+    droplets: str = "none"  # "none" (Angstrom + HG) or a fog_mie.DROPLETS size distribution (Mie)
 
 
 PRESETS = {
@@ -108,6 +110,14 @@ def add_cli_args(ap: argparse.ArgumentParser) -> None:
         choices=("effective", "mixed"),
         default=None,
         help="effective: one HG lobe with the scattering-weighted g (default); mixed: Rayleigh + HG mixture.",
+    )
+    g.add_argument(
+        "--fog-droplets",
+        choices=("none", *fog_mie.DROPLETS),
+        default=None,
+        help="Opt-in Mie droplet model: spectral extinction, albedo and a tabulated phase function from a "
+        "droplet-size distribution (advection: modal radius 10 um, radiation: 4 um). Replaces "
+        "--haze-angstrom/--haze-g/--haze-albedo/--haze-phase. Default none.",
     )
     g.add_argument("--haze-albedo", type=float, default=None, help="Aerosol single-scattering albedo.")
     g.add_argument("--haze-profile", choices=("exponential", "layer"), default=None)
@@ -140,8 +150,11 @@ def params_from_args(args: argparse.Namespace) -> HazeParams | None:
         "height_m": args.haze_height_m,
         "phase": getattr(args, "haze_phase", None),
         "visibility_definition": getattr(args, "visibility_definition", None),
+        "droplets": getattr(args, "fog_droplets", None),
     }
     p = replace(p, **{k: v for k, v in over.items() if v is not None})
+    if p.droplets != "none" and p.droplets not in fog_mie.DROPLETS:
+        raise ValueError(f"fog droplets must be none|{'|'.join(fog_mie.DROPLETS)}")
     if p.visibility_definition not in VISIBILITY_CONTRAST:
         raise ValueError(f"visibility definition must be one of {tuple(VISIBILITY_CONTRAST)}")
     if p.visibility_m <= 0 or not 0.0 < p.albedo <= 1.0 or not -1.0 < p.g < 1.0 or p.height_m <= 0:
@@ -171,10 +184,15 @@ def coefficients(p: HazeParams, wl_nm) -> tuple[np.ndarray, np.ndarray, np.ndarr
     wl = np.asarray(wl_nm, dtype=np.float64)
     sig550 = extinction_550(p)
     aer550 = max(sig550 - RAYLEIGH_550_PER_M, 0.0)
-    aer = aer550 * (wl / 550.0) ** (-p.angstrom)
     ray = RAYLEIGH_550_PER_M * (wl / 550.0) ** (-RAYLEIGH_EXPONENT)
-    sa = (1.0 - p.albedo) * aer
-    ss = p.albedo * aer + ray
+    if p.droplets != "none":
+        rel, albedo = fog_mie.extinction_shape(p.droplets, wl)
+        aer = aer550 * rel
+    else:
+        aer = aer550 * (wl / 550.0) ** (-p.angstrom)
+        albedo = p.albedo
+    sa = (1.0 - albedo) * aer
+    ss = albedo * aer + ray
     return sa, ss, sa + ss
 
 
@@ -192,7 +210,13 @@ def rayleigh_fraction(p: HazeParams) -> float:
 
 
 def phase_params(p: HazeParams) -> tuple[float, float]:
-    """(HG g, Rayleigh fraction) passed to pbrt for this phase mode."""
+    """(HG g, Rayleigh fraction) passed to pbrt for this phase mode.
+
+    With droplets the tabulated Mie phase function replaces both lobes; g is its asymmetry
+    (manifest only) and the molecular share is dropped (w_R <= 0.01 at V <= 2 km).
+    """
+    if p.droplets != "none":
+        return fog_mie.asymmetry(*fog_mie.phase_table(p.droplets)), 0.0
     if p.phase == "mixed":
         return p.g, rayleigh_fraction(p)
     if p.phase != "effective":
@@ -258,6 +282,17 @@ def pbrt_camera_lines() -> list[str]:
     return ['MediumInterface "haze" "haze"']
 
 
+def _phase_table_lines(p: HazeParams) -> list[str]:
+    if p.droplets == "none":
+        return []
+    th, vals = fog_mie.pbrt_table(p.droplets)
+    return [
+        f"    # Mie phase function, {p.droplets} fog droplets ({fog_mie.DROPLETS[p.droplets].description})",
+        '    "float phasetheta" [ ' + " ".join(f"{v:.9g}" for v in th) + " ]",
+        '    "float phasevalues" [ ' + " ".join(f"{v:.7g}" for v in vals) + " ]",
+    ]
+
+
 def pbrt_medium_lines(p: HazeParams, sigma_a_spd: str, sigma_s_spd: str) -> list[str]:
     """After ``Camera`` and before ``WorldBegin`` (pbrt resolves the camera medium at WorldBegin)."""
     y0, y1, _ = grid_y(p)
@@ -272,7 +307,12 @@ def pbrt_medium_lines(p: HazeParams, sigma_a_spd: str, sigma_s_spd: str) -> list
         'MakeNamedMedium "haze" "string type" "uniformgrid"',
         f'    "spectrum sigma_a" "{sigma_a_spd}" "spectrum sigma_s" "{sigma_s_spd}" "float scale" [1]',
         f'    "float g" [{phase_params(p)[0]:.6g}]',
-        *([f'    "float rayleighfraction" [{phase_params(p)[1]:.6g}]'] if p.phase == "mixed" else []),
+        *(
+            [f'    "float rayleighfraction" [{phase_params(p)[1]:.6g}]']
+            if p.phase == "mixed" and p.droplets == "none"
+            else []
+        ),
+        *_phase_table_lines(p),
         f'    "integer nx" [{GRID_NXZ}] "integer ny" [{GRID_NY}] "integer nz" [{GRID_NXZ}]',
         f'    "point3 p0" [{-w:.6g} {y0:.6g} {-w:.6g}] "point3 p1" [{w:.6g} {y1:.6g} {w:.6g}]',
         '    "float density" [ ' + " ".join(f"{v:.6g}" for v in vals) + " ]",
@@ -280,6 +320,13 @@ def pbrt_medium_lines(p: HazeParams, sigma_a_spd: str, sigma_s_spd: str) -> list
 
 
 # ---- road illuminance (plane-parallel Monte Carlo, same medium as pbrt)
+
+
+def _rotate(mu: np.ndarray, cos_t: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+    """New direction cosines after scattering by cos_t with a uniform azimuth."""
+    phi = 2.0 * np.pi * rng.random(mu.size)
+    sin_t = np.sqrt(np.clip(1.0 - cos_t**2, 0.0, None))
+    return np.clip(mu * cos_t + np.sqrt(np.clip(1.0 - mu * mu, 0.0, None)) * sin_t * np.cos(phi), -1.0, 1.0)
 
 
 def _sample_hg(g: float, mu: np.ndarray, rng: np.random.Generator) -> np.ndarray:
@@ -323,6 +370,7 @@ def slab_flux_mc(
     sa, ss, se = (float(v) for v in coefficients(p, wl_nm))
     omega = ss / se
     g, w_r = phase_params(p)
+    table = fog_mie.phase_table(p.droplets) if p.droplets != "none" else None
     yc, rho = grid_profile(p)
     top = float(yc[-1])
     sig_maj = se * float(rho.max())
@@ -350,7 +398,11 @@ def slab_flux_mc(
         if real.any():
             idx = np.flatnonzero(real)
             ray = rng.random(idx.size) < w_r
-            mu[idx[~ray]] = _sample_hg(g, mu[idx[~ray]], rng)
+            if table is not None:
+                k = idx[~ray]
+                mu[k] = _rotate(mu[k], fog_mie.sample_cos(*table, rng.random(k.size)), rng)
+            else:
+                mu[idx[~ray]] = _sample_hg(g, mu[idx[~ray]], rng)
             if ray.any():
                 mu[idx[ray]] = _sample_rayleigh(mu[idx[ray]], rng)
         scattered = scattered | hit | real
@@ -440,6 +492,7 @@ def manifest_entry(p: HazeParams, wl_nm: np.ndarray) -> dict:
         "hg_g_effective": effective_g(p),
         "phase_hg_g": phase_params(p)[0],
         "phase_rayleigh_fraction_550": phase_params(p)[1],
+        "phase_mie_table_bins": int(fog_mie.phase_table(p.droplets)[1].size) if p.droplets != "none" else 0,
         "medium_top_m": medium_top_m(p),
         "vertical_optical_depth_550": optical_depth_vertical(p, 550.0),
         "pbrt_medium": "uniformgrid 'haze' (camera, lights and surfaces inside), integrator volpath",
