@@ -238,11 +238,18 @@ class TestHighwayAtmosphere(unittest.TestCase):
         for p in atm.PRESETS.values():
             sa, ss, _ = atm.coefficients(p, wl)
             ext = sa + ss
-            self.assertAlmostEqual(ext[1], 3.912 / p.visibility_m, delta=1e-4 * ext[1])
+            self.assertAlmostEqual(ext[1], 2.996 / p.visibility_m, delta=1e-4 * ext[1])  # WMO MOR, 5 %
             aer = ext - atm.RAYLEIGH_550_PER_M * (wl / 550.0) ** -atm.RAYLEIGH_EXPONENT
             self.assertAlmostEqual(aer[0] / aer[2], (450.0 / 650.0) ** -p.angstrom, places=6)
             self.assertTrue(np.all(sa >= 0) and np.all(ss > 0))
             self.assertAlmostEqual(float(atm.profile_density(p, 1.35)), 1.0, delta=0.02)  # V holds at the road
+
+    def test_visibility_definition(self) -> None:
+        p = atm.params_from_args(hw.parse_args(["--haze", "fog", "--visibility-definition", "koschmieder"]))
+        self.assertAlmostEqual(atm.extinction_550(p), 3.912 / p.visibility_m, delta=1e-4 / p.visibility_m)
+        mor = atm.params_from_args(hw.parse_args(["--haze", "fog"]))
+        self.assertEqual(mor.visibility_definition, "mor")
+        self.assertAlmostEqual(atm.extinction_550(p) / atm.extinction_550(mor), 3.912 / 2.996, places=3)
 
     def test_presets_order_and_depth(self) -> None:
         names = ["clear", "hazy", "mist", "fog"]
