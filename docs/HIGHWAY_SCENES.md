@@ -728,3 +728,28 @@ emitter off (B) and one per emitter with only that emitter on (E_e), then compos
 PWM edges, with no band timing error. It refuses scenes whose manifest records any camera or car
 velocity. All renders share one `--seed`, so B and E_e are correlated and most of the path noise
 cancels in the difference.
+
+## Winter / snow (`--snow`, `--snowfall-mmh`; `tools/highway_snow.py`)
+
+    venv/bin/python tools/build_highway_scene.py --snow slush --snowfall-mmh 1 --sky hosek --sun-elevation 10
+
+Off by default. `--snow verges` covers the verges and distant terrain with snow and adds plough
+banks (0.30–0.45 m, between the paved edge and the guard rail; `--no-snowbanks` removes them),
+leaving the road clear. `slush` adds grey slush everywhere except two wheel tracks per lane
+(lane centre ± 0.85 m, 0.6 m wide, jittered) and sets `--road-wetness wet` so the tracks are wet
+asphalt. `packed` covers the whole road with compacted snow, hiding the markings.
+
+* **Reflectance:** spherical albedo of a deep snow layer from asymptotic radiative transfer
+  (Kokhanovsky & Zege 2004), r = exp(−√(α · 13 d)), with α from the ice absorption index of
+  Warren & Brandt (2008) (`spectra/ice/warren_brandt_2008.csv`, 350–1200 nm) plus an impurity term
+  ∝ λ⁻¹. Fresh 0.25 mm verge snow is 0.99 in the visible and drops in the NIR (0.74 at 1030 nm);
+  `--snow-grain-mm` and `--snow-dirt clean|light|heavy` change it. Road slush (1.5 mm, heavy dirt)
+  is about 0.6 and carries a smooth water film. Impurity levels are nominal. Snow is Lambertian:
+  the forward-scattering BRDF of snow and its sub-surface blur are not modelled.
+* **Falling snow:** `--snowfall-mmh R` (melted rate) scatters static spherical flakes in the view
+  pyramid out to `--snowfall-range-m` (default 15 m), with the Gunn & Marshall (1958) size
+  distribution and flake bulk density `--snowflake-density` (0.1 g/cm³). The manifest gives the
+  equivalent extinction (2 × geometric cross-section) and visibility (≈ 900 m at 1 mm/h); add
+  `--haze mist --visibility-m <that>` for the snowfall beyond the flake range. Flakes are static
+  (no motion streaks) and the count grows with range³ (≈ 0.34 M at 1 mm/h, 15 m, 31° fov).
+* **Not modelled:** snow on trees, cars and signs; snow-covered markings in `slush`.
