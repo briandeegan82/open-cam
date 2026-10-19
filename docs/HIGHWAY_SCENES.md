@@ -728,3 +728,23 @@ emitter off (B) and one per emitter with only that emitter on (E_e), then compos
 PWM edges, with no band timing error. It refuses scenes whose manifest records any camera or car
 velocity. All renders share one `--seed`, so B and E_e are correlated and most of the path noise
 cancels in the difference.
+
+## Falling rain (`--rain-mmh`; `tools/highway_rain.py`)
+
+    venv/bin/python tools/build_highway_scene.py --rain-mmh 10 --time-of-day night --exposure-s 0.01
+
+Off by default. Places water drops (`dielectric`, η = 1.333) in the camera's view pyramid from
+0.5 m out to `--rain-range-m` (default 12 m) and lets each fall at terminal velocity during the
+pbrt shutter, so drops render as motion-blurred streaks whose length and faintness follow from
+the exposure (Garg & Nayar 2007). Rain needs a shutter: without `--exposure-s` it uses 4 ms. It
+also sets `--road-wetness wet` when the road is dry or damp.
+
+* **Drop sizes:** Marshall & Palmer (1948), N(D) = 8000 e^(−ΛD) m⁻³ mm⁻¹, Λ = 4.1 R^−0.21 mm⁻¹;
+  only drops above `--rain-dmin-mm` (0.5 mm) are placed (≈ 0.26 M drops at 10 mm/h, 12 m, 31° fov).
+* **Fall speed:** Atlas, Srivastava & Sekhon (1973), v = 9.65 − 10.3 e^(−0.6 D) m/s, so a 2 mm drop
+  streaks 2.6 cm in 4 ms; `--rain-wind-ms` adds a crosswind drift.
+* **Visibility:** the manifest gives the geometric extinction (2 × cross-section) of the full
+  distribution and the equivalent visibility (≈ 1.9 km at 10 mm/h). For rain beyond the drop range
+  add `--haze mist --visibility-m <that>`.
+* **Not modelled:** oblate or oscillating drops, splashes and ripples on the road, rain on the
+  windscreen (see `--windscreen-rain`).
