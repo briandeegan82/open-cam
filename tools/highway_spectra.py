@@ -37,6 +37,9 @@ SURFACES = {
     "sheeting_green": lambda wl: 0.035 + 0.17 * _g(wl, 520.0, 32.0) + 0.04 * _sig(wl, 690.0, 20.0),
     "sheeting_black": lambda wl: np.full_like(wl, 0.04),
     "sheeting_red": lambda wl: 0.05 + 0.62 * _sig(wl, 600.0, 12.0),
+    # Analytic shapes for the sign artwork colours (yellow ~ road-paint yellow, blue ~ cobalt-type pigment).
+    "sheeting_yellow": lambda wl: 0.06 + 0.60 * _sig(wl, 508.0, 13.0),
+    "sheeting_blue": lambda wl: 0.04 + 0.26 * _g(wl, 465.0, 32.0) + 0.05 * _sig(wl, 700.0, 22.0),
     # Automotive basecoats (under the clearcoat interface added by coateddiffuse).
     "carpaint_white": lambda wl: 0.10 + 0.72 * _sig(wl, 418.0, 12.0),
     "carpaint_black": lambda wl: np.full_like(wl, 0.025),

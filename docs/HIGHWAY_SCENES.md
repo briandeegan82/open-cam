@@ -631,6 +631,33 @@ measured asphalt BRDF exists in RGL, so the asphalt keeps the analytic coated-di
 lobe is not fitted to CIE 144 road reflection tables. USGS spectra are lab bidirectional
 (ASD, 350-2500 nm) reflectances of single samples.
 
+## Traffic signs with real artwork (`--sign-set`, `tools/highway_signs.py`)
+
+Opt-in row of real traffic signs on posts beside the right shoulder; the default scene is unchanged.
+
+```bash
+python tools/fetch_highway_assets.py $(python -c "import yaml; d=yaml.safe_load(open('config/highway_assets.yaml')); print(' '.join(k for k, a in d['assets'].items() if a['kind'] == 'sign_svg'))")
+python tools/build_highway_scene.py --sign-set stvo --time-of-day night --out-dir out/signs_night
+```
+
+- *Artwork:* public-domain SVGs from Wikimedia Commons (asset kind `sign_svg`, pinned SHA-256): 8 German StVO
+  signs (101, 138, 205, 206, 267, 274-60, 306, 350) and 4 US MUTCD signs (R1-1, R2-1, W1-1R, W11-2). Preparing them
+  needs `cairosvg`. Each SVG becomes an alpha cutout (so octagons, triangles and discs keep their outline) and one
+  mask per sheeting colour (nearest of white/red/yellow/blue/green/black; colours under 1 % of the face are
+  merged into their nearest neighbour to drop anti-aliasing fringes).
+- *Materials:* each colour region is its own spectral material, chained with `mix`. By day the sheeting is diffuse
+  (`sheeting_*` analytic reflectances). At night/dusk with retroreflection on, every colour is the `retroreflective`
+  sheeting of the night model (ASTM D4956 Type III minima x margin). Blue has no D4956 entry in the model and uses
+  8 % of white, a nominal value. `--sign-sheeting type1|type3|type11` scales R_A by the white-minimum ratios
+  (70/250, 1, 580/250); these are nominal, not checked against the standard.
+- *Layout:* first sign at `--sign-start-m` (25 m), then every `--sign-spacing-m` (15 m), `--sign-offset-m` (1 m) beyond
+  the paved edge, lower edge at `--sign-bottom-m` (2 m). Sizes are nominal (StVO size class 2, MUTCD conventional
+  road) and stored per asset as `width_m`.
+- *Ground truth:* `highway_manifest.json` -> `signs` lists each sign's code, distance, world bounding box, size,
+  colour fractions, source and licence.
+- *Not modelled:* sheeting ageing and dirt, embossed legends, sign-face sheen, sign-specific observation-angle
+  tables.
+
 ## Known approximations
 
 - Daytime markings use a glass-bead-like rough clear coat over a spectral binder and sign
