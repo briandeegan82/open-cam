@@ -761,5 +761,7 @@ venv/bin/python tools/build_highway_scene.py --vru cyclist --vru-motion along --
   subsurface scattering, no fluorescence.
 - *Ground truth:* `highway_manifest.json` → `vru` has the target's world-space bounding box, anchor
   point, distance, pose and obstruction cars.
+- *Traffic:* same-direction traffic cars within 12 m of the target are dropped so a moving car
+  does not hide it; the manifest lists them under `vru.removed_traffic`. Use `--traffic` to set traffic yourself.
 - *Not modelled:* target motion (the scene is static; use `--vehicle-speed-kmh` for ego motion blur),
   bicycle retroreflectors, the soft EPT target's fabric texture.
