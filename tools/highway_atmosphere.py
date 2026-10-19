@@ -3,16 +3,21 @@
 
 The medium is parameterised the way visibility is reported in meteorology:
 
-* Meteorological optical range / visibility ``V`` [m] fixes the extinction coefficient at
-  550 nm through Koschmieder's law ``sigma_ext = -ln(0.02) / V = 3.912 / V`` (2 % contrast
-  threshold; WMO-No. 8, Guide to Meteorological Instruments, ch. 9; Middleton 1952).
+* Visibility ``V`` [m] fixes the extinction coefficient at 550 nm through Koschmieder's law
+  ``sigma_ext = -ln(C) / V``. The default (``--visibility-definition mor``) is the
+  meteorological optical range used in weather reports, METAR and fog-chamber tests: the
+  path that reduces a collimated beam to 5 % (C = 0.05, ``sigma_ext = 2.996 / V``; WMO-No. 8,
+  Guide to Instruments and Methods of Observation, ch. 9; ICAO Annex 3; NOAA Federal
+  Meteorological Handbook No. 1). ``koschmieder`` is the classic visual range of a black
+  object with a 2 % contrast threshold (C = 0.02, ``3.912 / V``; Koschmieder 1924, Middleton
+  1952), the convention open-cam used before; it is 1.31x more extinction for the same V.
 * Wavelength dependence of the aerosol part follows the Angstrom law
   ``sigma_aer(lambda) = sigma_aer(550) (lambda / 550 nm)^-alpha`` (Angstrom 1929; alpha ~1.3
   for continental haze, ~0.5 in humid mist, ~0 for fog droplets of 5-20 um; Seinfeld & Pandis,
   Atmospheric Chemistry and Physics, ch. 15).
 * Molecular (Rayleigh) scattering of sea-level air is included in the same total
   (1.16e-5 /m at 550 nm, lambda^-4.08; Bucholtz 1995, Appl. Opt. 34, 2765), so ``V`` is the
-  total visibility; the aerosol part is ``3.912/V - sigma_R(550)``.
+  total visibility; the aerosol part is ``sigma_ext(550) - sigma_R(550)``.
 * Phase function: Henyey-Greenstein for the aerosol, g ~0.7 for haze (d'Almeida et al. 1991,
   continental models g = 0.64-0.72), ~0.85 for fog droplets (Mie, 5-15 um water drops).
   ``--haze-phase effective`` (default) folds molecular scattering into one HG lobe with the
@@ -52,7 +57,7 @@ from dataclasses import asdict, dataclass, replace
 
 import numpy as np
 
-KOSCHMIEDER = -math.log(0.02)  # 3.912
+VISIBILITY_CONTRAST = {"mor": 0.05, "koschmieder": 0.02}  # -ln(C) = 2.996 (WMO MOR), 3.912
 RAYLEIGH_550_PER_M = 1.16e-5
 RAYLEIGH_EXPONENT = 4.08
 GRID_HALF_WIDTH_M = 200_000.0
@@ -72,6 +77,7 @@ class HazeParams:
     height_m: float
     description: str = ""
     phase: str = "effective"  # "effective" (one HG lobe) or "mixed" (Rayleigh + HG)
+    visibility_definition: str = "mor"  # "mor" (WMO, 5 %) or "koschmieder" (2 % visual range)
 
 
 PRESETS = {
@@ -87,7 +93,14 @@ PRESETS = {
 def add_cli_args(ap: argparse.ArgumentParser) -> None:
     g = ap.add_argument_group("haze / fog (participating medium, see docs/HIGHWAY_SCENES.md)")
     g.add_argument("--haze", choices=("none", *PRESETS), default="none", help="Atmosphere preset.")
-    g.add_argument("--visibility-m", type=float, default=None, help="Meteorological visibility V [m].")
+    g.add_argument("--visibility-m", type=float, default=None, help="Visibility V [m] (see --visibility-definition).")
+    g.add_argument(
+        "--visibility-definition",
+        choices=tuple(VISIBILITY_CONTRAST),
+        default=None,
+        help="mor: WMO meteorological optical range, 5 %% threshold, sigma = 2.996/V (default); "
+        "koschmieder: 2 %% visual range, sigma = 3.912/V (open-cam before this option).",
+    )
     g.add_argument("--haze-angstrom", type=float, default=None, help="Angstrom exponent alpha.")
     g.add_argument("--haze-g", type=float, default=None, help="Henyey-Greenstein asymmetry g.")
     g.add_argument(
@@ -126,8 +139,11 @@ def params_from_args(args: argparse.Namespace) -> HazeParams | None:
         "profile": args.haze_profile,
         "height_m": args.haze_height_m,
         "phase": getattr(args, "haze_phase", None),
+        "visibility_definition": getattr(args, "visibility_definition", None),
     }
     p = replace(p, **{k: v for k, v in over.items() if v is not None})
+    if p.visibility_definition not in VISIBILITY_CONTRAST:
+        raise ValueError(f"visibility definition must be one of {tuple(VISIBILITY_CONTRAST)}")
     if p.visibility_m <= 0 or not 0.0 < p.albedo <= 1.0 or not -1.0 < p.g < 1.0 or p.height_m <= 0:
         raise ValueError(f"invalid haze parameters: {p}")
     return p
@@ -145,10 +161,15 @@ def integrator_maxdepth(p: HazeParams, base: int, override: int | None = None) -
 # ---- optical properties
 
 
+def extinction_550(p: HazeParams) -> float:
+    """Total extinction at 550 nm [1/m] at road level: -ln(C) / V."""
+    return -math.log(VISIBILITY_CONTRAST[p.visibility_definition]) / p.visibility_m
+
+
 def coefficients(p: HazeParams, wl_nm) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """(sigma_a, sigma_s, sigma_ext) [1/m] at ground level (density 1)."""
     wl = np.asarray(wl_nm, dtype=np.float64)
-    sig550 = KOSCHMIEDER / p.visibility_m
+    sig550 = extinction_550(p)
     aer550 = max(sig550 - RAYLEIGH_550_PER_M, 0.0)
     aer = aer550 * (wl / 550.0) ** (-p.angstrom)
     ray = RAYLEIGH_550_PER_M * (wl / 550.0) ** (-RAYLEIGH_EXPONENT)
@@ -244,7 +265,7 @@ def pbrt_medium_lines(p: HazeParams, sigma_a_spd: str, sigma_s_spd: str) -> list
     vals = np.tile(np.repeat(rho, GRID_NXZ)[None, :], (GRID_NXZ, 1)).ravel()  # index (z*ny + y)*nx + x
     w = GRID_HALF_WIDTH_M
     return [
-        f"# Atmosphere: {p.name} (V = {p.visibility_m:g} m, alpha = {p.angstrom:g}, g = {phase_params(p)[0]:.3f},"
+        f"# Atmosphere: {p.name} (V = {p.visibility_m:g} m {p.visibility_definition}, alpha = {p.angstrom:g}, g = {phase_params(p)[0]:.3f},"
         f" Rayleigh fraction = {phase_params(p)[1]:.3f},"
         f" omega = {p.albedo:g}, {p.profile} {p.height_m:g} m)",
         "Identity",  # medium in world space (the CTM still holds the LookAt here)
@@ -412,7 +433,8 @@ def manifest_entry(p: HazeParams, wl_nm: np.ndarray) -> dict:
     sa, ss, se = coefficients(p, np.array([450.0, 550.0, 650.0]))
     return {
         **asdict(p),
-        "koschmieder_sigma_ext_550_per_m": KOSCHMIEDER / p.visibility_m,
+        "sigma_ext_550_per_m": extinction_550(p),
+        "visibility_contrast_threshold": VISIBILITY_CONTRAST[p.visibility_definition],
         "sigma_ext_per_m_450_550_650": [float(v) for v in se],
         "single_scattering_albedo_550": float(ss[1] / se[1]),
         "hg_g_effective": effective_g(p),

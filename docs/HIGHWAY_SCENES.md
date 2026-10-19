@@ -395,31 +395,36 @@ venv/bin/python tools/build_highway_scene.py --haze fog --visibility-m 80     # 
 venv/bin/python tools/build_highway_scene.py --haze hazy --haze-angstrom 1.3 --haze-g 0.7
 ```
 
-**Optical model.** The medium is parameterised by the meteorological visibility V at road level.
-Koschmieder's law with the WMO 2 % contrast threshold gives the total extinction at 550 nm,
-sigma_ext = -ln(0.02)/V = 3.912/V (Koschmieder 1924; WMO-No. 8, 2018). It is split into
+**Optical model.** The medium is parameterised by the visibility V at road level. By default
+(`--visibility-definition mor`) V is the meteorological optical range (MOR) used in weather
+reports, METAR and fog-chamber tests: the path that reduces a collimated beam to 5 %, so the total
+extinction at 550 nm is sigma_ext = -ln(0.05)/V = 2.996/V (WMO-No. 8, ch. 9; ICAO Annex 3; NOAA
+Federal Meteorological Handbook No. 1). `--visibility-definition koschmieder` uses the classic
+2 % visual range of a black object instead, sigma_ext = -ln(0.02)/V = 3.912/V (Koschmieder 1924;
+Middleton 1952). That was open-cam's convention before this option and gives 1.31x the
+extinction for the same V; use it to reproduce older scenes. sigma_ext is split into
 Rayleigh scattering, sigma_R = 1.16e-5 /m x (lambda/550)^-4.08 (sea-level air; Bucholtz 1995), and
-aerosol, sigma_aer(lambda) = (3.912/V - sigma_R(550)) x (lambda/550)^-alpha with the Ångström
+aerosol, sigma_aer(lambda) = (sigma_ext - sigma_R(550)) x (lambda/550)^-alpha with the Ångström
 exponent alpha (Ångström 1929): ~1.3 continental haze, ~0.5 mist, 0 for fog whose droplets are
 much larger than the wavelength (grey fog). The aerosol single-scattering albedo omega sets
 sigma_a/sigma_s. The phase function is Henyey-Greenstein; pbrt takes one g per medium, so g is
 the scattering-weighted mean of the aerosol g and Rayleigh (g = 0), recorded as `hg_g_effective`.
 Haze aerosol g ~ 0.7 (Shettle & Fenn 1979), fog droplets ~0.85 (Mie, Deirmendjian 1969).
 
-| preset | V | alpha | g | omega | vertical profile | tau_550 (vertical) | volpath maxdepth |
+| preset | V (MOR) | alpha | g | omega | vertical profile | tau_550 (vertical) | volpath maxdepth |
 |---|---|---|---|---|---|---|---|
-| `clear` | 30 km | 1.3 | 0.70 | 0.95 | exponential, H = 1.2 km | 0.16 | 8 |
-| `hazy` | 8 km | 1.0 | 0.70 | 0.90 | exponential, H = 1.0 km | 0.49 | 8 |
-| `mist` | 2 km | 0.5 | 0.75 | 0.98 | 300 m layer | 0.68 | 24 |
-| `fog` | 150 m | 0 | 0.85 | 0.999 | 150 m radiation-fog layer | 4.5 | 64 |
+| `clear` | 30 km | 1.3 | 0.70 | 0.95 | exponential, H = 1.2 km | 0.12 | 8 |
+| `hazy` | 8 km | 1.0 | 0.70 | 0.90 | exponential, H = 1.0 km | 0.37 | 8 |
+| `mist` | 2 km | 0.5 | 0.75 | 0.98 | 300 m layer | 0.52 | 24 |
+| `fog` | 150 m | 0 | 0.85 | 0.999 | 150 m radiation-fog layer | 3.45 | 64 |
 
-All parameters can be overridden (`--visibility-m`, `--haze-angstrom`, `--haze-g`,
+All parameters can be overridden (`--visibility-m`, `--visibility-definition`, `--haze-angstrom`, `--haze-g`,
 `--haze-albedo`, `--haze-profile exponential|layer`, `--haze-height-m`, `--haze-maxdepth`).
 
 `--haze-phase mixed` (opt-in) replaces the single effective Henyey-Greenstein lobe with the
 physical mixture `p = w_R p_Rayleigh + (1 - w_R) p_HG(g)`, `w_R = sigma_R / sigma_s` at 550 nm
 (pbrt patch 0011, medium parameter `"float rayleighfraction"`). Both modes have the same mean
-cosine; the mixture puts more light into side and back scatter in clear air (w_R 0.09 for
+cosine; the mixture puts more light into side and back scatter in clear air (w_R 0.12 for
 `clear`, 0.03 `hazy`, ~0 in `mist`/`fog`). pbrt's phase function is wavelength-independent, so
 w_R is fixed at its 550 nm value. The
 medium is a `uniformgrid` that is horizontally uniform over +-200 km and varies only with height:
@@ -439,7 +444,7 @@ over 400-700 nm; sun at its elevation, sky with the sky map's angular distributi
 it to `lighting.reference_illuminance_lux` (and `_exr_lux` with the same 683 x Y-integral scale as
 without medium). Everything about the calculation is in the manifest's `atmosphere` block
 (`road_illuminance`: top-of-layer sun/sky, direct and total transmittances, diffuse fraction,
-and `no_medium_horizontal_illuminance_lux`). `TestPbrtHighwayHaze` checks it against pbrt: a Lambertian ground probe (±5 km quad, camera 0.2 m) rendered with `volpath` under each preset and under no medium gives the same illuminance ratio as the manifest within 5 % (measured: clear 0.955 vs 0.959, hazy 0.841 vs 0.854, mist 0.883 vs 0.888, fog 0.680 vs 0.688). Keep such probes ≲10 km across: on a 300 km float32 quad the hit-point error biases the shadow rays by tens of percent. With `--haze-light-reference road` the lights
+and `no_medium_horizontal_illuminance_lux`). `TestPbrtHighwayHaze` checks it against pbrt: a Lambertian ground probe (±5 km quad, camera 0.2 m) rendered with `volpath` under each preset and under no medium gives the same illuminance ratio as the manifest within 5 % (measured, manifest vs pbrt: clear 0.967 vs 0.963, hazy 0.886 vs 0.874, mist 0.912 vs 0.911, fog 0.744 vs 0.745). Keep such probes ≲10 km across: on a 300 km float32 quad the hit-point error biases the shadow rays by tens of percent. With `--haze-light-reference road` the lights
 are instead rescaled so the road receives the no-medium illuminance (useful to isolate the
 contrast loss of fog from the change in exposure); the manifest then records the scale applied.
 
