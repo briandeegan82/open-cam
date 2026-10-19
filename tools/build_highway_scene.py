@@ -825,10 +825,10 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         'MakeNamedMaterial "speed_sign" "string type" "mix" "string materials" ["sheet_white" "sheet_black"]',
         '    "texture amount" "speed_legend"',
     ]
-    for mat, cx, cz, w, h, y0 in (
-        ("guide_sign", gx, gz, gw, gh, gy),
-        ("speed_sign", Layout.rail_right + 1.6, 60.0, 0.9, 1.2, 1.6),
-    ):
+    plates = [("guide_sign", gx, gz, gw, gh, gy), ("speed_sign", Layout.rail_right + 1.6, 60.0, 0.9, 1.2, 1.6)]
+    if sign_scene.enabled(args):  # the --sign-set row replaces the procedural speed sign
+        plates = plates[:1]
+    for mat, cx, cz, w, h, y0 in plates:
         p = np.array([(cx - w / 2, y0, cz), (cx + w / 2, y0, cz), (cx + w / 2, y0 + h, cz), (cx - w / 2, y0 + h, cz)])
         uv = np.array([(0, 0), (1, 0), (1, 1), (0, 1)])
         L += [f'NamedMaterial "{mat}"', *mesh(p, np.array([(0, 2, 1), (0, 3, 2)]), uv)]
@@ -1099,6 +1099,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
     manifest.update(fx.manifest())
     manifest.update(mats.manifest())
     if sign_meta:
+        sign_meta["replaced"] = ["procedural speed_sign plate at 60 m"]
         manifest["signs"] = sign_meta
     (out_dir / "highway_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     print(

@@ -653,6 +653,7 @@ python tools/build_highway_scene.py --sign-set stvo --time-of-day night --out-di
 - *Layout:* first sign at `--sign-start-m` (25 m), then every `--sign-spacing-m` (15 m), `--sign-offset-m` (1 m) beyond
   the paved edge, lower edge at `--sign-bottom-m` (2 m). Sizes are nominal (StVO size class 2, MUTCD conventional
   road) and stored per asset as `width_m`.
+  The row replaces the procedural "SPEED LIMIT 65" plate at 60 m; the green guide sign stays.
 - *Ground truth:* `highway_manifest.json` -> `signs` lists each sign's code, distance, world bounding box, size,
   colour fractions, source and licence.
 - *Not modelled:* sheeting ageing and dirt, embossed legends, sign-face sheen, sign-specific observation-angle

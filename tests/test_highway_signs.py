@@ -115,6 +115,8 @@ class TestSignScene(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             txt, man = build(Path(td))
             self.assertIn('MakeNamedMaterial "sign:red" "string type" "diffuse"', txt)
+            self.assertNotIn('\nNamedMaterial "speed_sign"', txt)
+            self.assertIn('\nNamedMaterial "guide_sign"', txt)
             n = len(man["signs"]["signs"])
             self.assertGreaterEqual(n, 6)
             self.assertEqual(txt.count('"texture alpha"'), 2 * n)
