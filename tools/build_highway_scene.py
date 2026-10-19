@@ -40,6 +40,7 @@ import highway_backdrop as backdrop  # noqa: E402
 import highway_incar  # noqa: E402
 import highway_materials as hmat  # noqa: E402
 import highway_night as night  # noqa: E402
+import highway_signs as sign_scene  # noqa: E402
 import highway_variety as variety  # noqa: E402
 import highway_vru as vru  # noqa: E402
 import highway_wet as wet  # noqa: E402
@@ -498,11 +499,13 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     wet.add_args(ap)
     hmat.add_arguments(ap)
     vru.add_args(ap)
+    sign_scene.add_args(ap)
     return ap.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene assembly)
     args = parse_args(argv)
+    sign_scene.check_args(args)
     repo = args.repo_root.resolve()
     out_dir = (args.out_dir or repo / "scenes" / "generated" / "highway").resolve()
     spd = out_dir / "spd"
@@ -753,6 +756,8 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
     ]
     if nopts["retroreflective"]:
         L = night.replace_named_materials(L, night.retro_material_lines(spd, out_dir, wl))
+    if sign_scene.enabled(args):
+        L += sign_scene.material_lines(args, spd, out_dir, wl, nopts["retroreflective"])
     if nopts["dark"]:
         L = night.strip_normal_map(L)
         for name in ("rw:asphaltA", "rw:asphaltB") if wear is not None else ():
@@ -823,10 +828,10 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         'MakeNamedMaterial "speed_sign" "string type" "mix" "string materials" ["sheet_white" "sheet_black"]',
         '    "texture amount" "speed_legend"',
     ]
-    for mat, cx, cz, w, h, y0 in (
-        ("guide_sign", gx, gz, gw, gh, gy),
-        ("speed_sign", Layout.rail_right + 1.6, 60.0, 0.9, 1.2, 1.6),
-    ):
+    plates = [("guide_sign", gx, gz, gw, gh, gy), ("speed_sign", Layout.rail_right + 1.6, 60.0, 0.9, 1.2, 1.6)]
+    if sign_scene.enabled(args):  # the --sign-set row replaces the procedural speed sign
+        plates = plates[:1]
+    for mat, cx, cz, w, h, y0 in plates:
         p = np.array([(cx - w / 2, y0, cz), (cx + w / 2, y0, cz), (cx + w / 2, y0 + h, cz), (cx - w / 2, y0 + h, cz)])
         uv = np.array([(0, 0), (1, 0), (1, 1), (0, 1)])
         L += [f'NamedMaterial "{mat}"', *mesh(p, np.array([(0, 2, 1), (0, 3, 2)]), uv)]
@@ -835,6 +840,18 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
             L += mesh(*box(px, -0.1, cz + 0.08, 0.12, y0 + h * 0.9, 0.12))
     L.append("")
     L += mats.sign_lines(Layout.rail_right + 1.6, 95.0, mesh, box)
+    sign_lines, sign_meta = sign_scene.scene_lines(
+        args,
+        amanifest,
+        asset,
+        aroot,
+        out_dir,
+        Layout.right_paved,
+        mesh,
+        box,
+        lambda q: q if variety.WARP is None else variety.WARP.warp(q),
+    )
+    L += sign_lines
 
     # ---- verges + terrain (finely tessellated from the paved edge; no long thin triangles)
     L.append('NamedMaterial "grass"')
@@ -1110,6 +1127,9 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
     manifest.update(mats.manifest())
     if vru_meta is not None:
         manifest["vru"] = vru_meta
+    if sign_meta:
+        sign_meta["replaced"] = ["procedural speed_sign plate at 60 m"]
+        manifest["signs"] = sign_meta
     (out_dir / "highway_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     print(
         f"wrote {_rel(repo, scene_path)} (+ highway_manifest.json); horizontal illuminance "
