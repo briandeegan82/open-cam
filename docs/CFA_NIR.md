@@ -128,3 +128,37 @@ Limits: single field samples (not population means); the curves are hemispherica
 reflectance used as Lambertian albedo; none of the materials is a colour reference like the
 ColorChecker, so ΔE-type colour metrics still use `spectra/xrite`.
 
+
+## In-cabin driver monitoring at 940 nm (`tools/build_cabin_scene.py`)
+
+A night-time DMS scene: camera on the steering column ~0.65 m from the driver, looking up at the
+face, lit only by a 940 nm (or `--led-nm 850`) LED next to the lens. It needs the NIR pbrt build
+(`PBRT_LAMBDA_MAX_NM=1100`); the film is spectral, 400–1100 nm.
+
+```bash
+python tools/build_cabin_scene.py --out-dir scenes/cabin_dms --skin light --gaze-yaw-deg 10 --glasses
+cd scenes/cabin_dms && ../../third_party/pbrt-v4/build-nir/pbrt cabin.pbrt
+```
+
+- **LED:** Lambertian disc (`--led-radius-mm`, default 2.5) with on-axis radiant intensity
+  `--led-w-sr` (default 0.5 W/sr, nominal) in absolute units. Patch 0015 lets `diffuse` area
+  lights take `"bool photometric" false`; without it pbrt divides by the ~0 photometric integral.
+  A disc rather than a point light is needed so the cornea can mirror it.
+- **Skin:** measured ColorChecker skin (`--skin light|dark`) up to 730 nm, then the measurement
+  times the relative shape of `tools/nir_skin.py` (two-layer melanin/blood/water model after
+  Jacques, OMLC; water: Hale & Querry 1973; haemoglobin: Prahl). The model's own absolute level is
+  too dark against the measured patches in the red (≈0.48 vs 0.73 at 730 nm), so only its shape is
+  used. Result: R(940) ≈ 0.66 (light), ≈ 0.24 (dark), with the water dip at 970 nm.
+- **Eyes:** sclera sphere, iris and pupil discs (`--pupil-mm`, default 6 mm at night) and a
+  dielectric cornea cap (η = 1.376, radius 7.8 mm). `--gaze-yaw-deg/--gaze-pitch-deg` rotate the
+  eyes; `--glasses` adds flat η = 1.5 spectacle lenses. The manifest lists eye, cornea and pupil
+  centres (world space) as gaze ground truth.
+- **Corneal glint is under-sampled.** The virtual image of a 2.5 mm LED in the cornea is ~0.015 mm,
+  far below a pixel (~0.5 mm on the face), and it can only be reached by BSDF sampling through the
+  specular cornea. At 128–1024 spp it shows as a few scattered bright samples or not at all.
+  A larger emitter (e.g. `--led-radius-mm 15`) makes hits frequent enough to see, at the cost of a
+  less realistic source. A deterministic glint (analytic splat at the predicted position) is not
+  implemented.
+- **Nominal / not modelled:** head and eye geometry, sclera/iris/pupil reflectances and LED output
+  are nominal. No sunlight, no bright-pupil retinal retroreflection, no eyelids/brows/hair, no
+  subsurface blur in skin.
