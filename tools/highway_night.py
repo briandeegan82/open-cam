@@ -251,9 +251,25 @@ def flux_lm(intensity_map: np.ndarray) -> float:
     return float(4.0 * math.pi * intensity_map.mean())
 
 
-def headlamp_map(n: int, kind: str) -> np.ndarray:
+# Driving (high) beam added on top of the passing beam. ECE R112/R113 require >= 48 lux at 25 m on
+# H-V (30 kcd) and R48 caps the sum of all driving beams at 430 kcd; 70 kcd per lamp is nominal.
+HIGH_BEAM_PEAK_CD = 70_000.0
+
+
+def high_beam_cd(h_deg: np.ndarray, v_deg: np.ndarray, peak_cd: float = HIGH_BEAM_PEAK_CD) -> np.ndarray:
+    """Analytic driving beam centred on H-V (no cut-off): narrow core plus a wide spread."""
+    h = np.asarray(h_deg, dtype=np.float64)
+    v = np.asarray(v_deg, dtype=np.float64)
+    core = np.exp(-((h / 4.0) ** 2) - (v / 2.0) ** 2)
+    spread = 0.12 * np.exp(-((h / 15.0) ** 2) - (v / 5.0) ** 2)
+    housing = np.clip((v + 70.0) / 30.0, 0.0, 1.0) * np.clip((95.0 - np.abs(h)) / 30.0, 0.0, 1.0)
+    return peak_cd * (core + spread) * housing
+
+
+def headlamp_map(n: int, kind: str, beam: str = "low") -> np.ndarray:
     h, v = beam_angles(equal_area_directions(n))
-    return low_beam_cd(h, v, HEADLAMP_PEAK_CD[kind])
+    m = low_beam_cd(h, v, HEADLAMP_PEAK_CD[kind])
+    return m + high_beam_cd(h, v) if beam == "high" else m
 
 
 # Street luminaire: full-cutoff IES Type III medium. Image frame: x = street side (towards the
@@ -650,7 +666,7 @@ def _quad_light(center, right, up, spd_rel: str, luminance: float) -> list[str]:
     ]
 
 
-def write_light_assets(out_dir: Path, spd_dir: Path, opts: dict, n: int = 1024) -> dict:
+def write_light_assets(out_dir: Path, spd_dir: Path, opts: dict, n: int = 1024, high_beam: bool = False) -> dict:
     """Write lamp spectra and goniometric maps; returns their relative paths and fluxes."""
     for name, fn in LAMP_SPECTRA.items():
         _write_spd(spd_dir / f"lamp_{name}.spd", LIGHT_WL, fn(LIGHT_WL))
@@ -660,6 +676,16 @@ def write_light_assets(out_dir: Path, spd_dir: Path, opts: dict, n: int = 1024) 
         f = out_dir / "textures" / f"lowbeam_{kind}.exr"
         write_y_exr(f, m * (1.0 - HEADLAMP_LENS_FRACTION))
         info[kind] = {"map": os.path.relpath(f, out_dir), "flux_lm": flux_lm(m), "peak_cd": float(m.max())}
+    if high_beam:
+        for kind in ("halogen", "led"):
+            m = headlamp_map(n, kind, "high")
+            f = out_dir / "textures" / f"highbeam_{kind}.exr"
+            write_y_exr(f, m * (1.0 - HEADLAMP_LENS_FRACTION))
+            info[f"{kind}_high"] = {
+                "map": os.path.relpath(f, out_dir),
+                "flux_lm": flux_lm(m),
+                "peak_cd": float(m.max()),
+            }
     if opts["streetlights"] != "none":
         sl = STREETLIGHT[opts["streetlights"]]
         m = streetlight_map(n, sl["flux_lm"] * (1.0 - LENS_FLUX_FRACTION))
@@ -707,7 +733,7 @@ def vehicle_light_lines(
     def lamp_kind(k: int) -> str:
         return mode if mode in ("led", "halogen") else ("led" if k % 2 == 0 else "halogen")
 
-    if mode != "off":
+    if mode != "off" and opts.get("ego_lamps", True):
         kind = lamp_kind(0)
         for sx in (-1, 1):
             p = (ego[0] + sx * EGO_LAMP_OFFSET[0], EGO_LAMP_OFFSET[1], ego[1] + EGO_LAMP_OFFSET[2])
