@@ -73,7 +73,12 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     ap.add_argument("--deer", choices=("none", *DEER), default="roe")
     ap.add_argument("--deer-distance-m", type=float, default=55.0)
     ap.add_argument("--deer-offset-m", type=float, default=1.2, help="Lateral position (+ = right of centre line).")
-    ap.add_argument("--deer-heading-deg", type=float, default=-90.0, help="-90 = walking right-to-left.")
+    ap.add_argument(
+        "--deer-heading-deg",
+        type=float,
+        default=180.0,
+        help="Rotation about +y: 180 = walking right-to-left, -90 = away.",
+    )
     add_camera_args(ap, fov=30.0, focus_distance=40.0)
     ap.add_argument("--cam-height", type=float, default=1.3)
     ap.add_argument("--cam-pitch", type=float, default=-0.5)
@@ -172,7 +177,8 @@ def deer_lines(kind: str, x: float, z: float, heading_deg: float) -> tuple[list[
     ext = np.array([[length / 2 + 0.2 * s, 0.0, 0.0], [0.0, 0.0, 0.2 * s]])
     hx = abs(ext[0, 0] * fx) + abs(ext[1, 2] * fz)
     hz = abs(ext[0, 0] * fz) + abs(ext[1, 2] * fx)
-    world_eyes = [[x + e[0] * fx + e[2] * fz, e[1], z + e[0] * fz - e[2] * fx] for e in eyes]
+    sn = math.sin(th)
+    world_eyes = [[x + e[0] * fx + e[2] * sn, e[1], z + e[0] * fz + e[2] * fx] for e in eyes]
     meta = {
         "kind": kind,
         "shoulder_height_m": sh,
