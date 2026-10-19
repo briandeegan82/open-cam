@@ -444,7 +444,6 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         f'Integrator "volpath" "integer maxdepth" [{args.maxdepth}] "bool regularize" true',
         'PixelFilter "box" "float xradius" [0.5] "float yradius" [0.5]',
         *film_lines(args, film_out),
-        "Scale -1 1 1",
         f"LookAt {_pts(eye)} {_pts(target)} 0 1 0",
         *camera_lines(args, repo, out_dir),
         "",
