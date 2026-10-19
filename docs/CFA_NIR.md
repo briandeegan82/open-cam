@@ -151,7 +151,10 @@ cd scenes/cabin_dms && ../../third_party/pbrt-v4/build-nir/pbrt cabin.pbrt
   used. Result: R(940) ≈ 0.66 (light), ≈ 0.24 (dark), with the water dip at 970 nm.
 - **Eyes:** sclera sphere, iris and pupil discs (`--pupil-mm`, default 6 mm at night) and a
   dielectric cornea cap (η = 1.376, radius 7.8 mm). `--gaze-yaw-deg/--gaze-pitch-deg` rotate the
-  eyes; `--glasses` adds flat η = 1.5 spectacle lenses. The manifest lists eye, cornea and pupil
+  eyes; `--glasses` adds flat η = 1.5 spectacle lenses. Behind the lenses the eyes render dark
+  and noisy: shadow rays cannot pass a specular dielectric, so the eye region is lit only by
+  BSDF-sampled paths that happen to hit the small LED. Real lenses transmit ~92 %; treat
+  `--glasses` renders as showing the lens reflections, not the eye behind them. The manifest lists eye, cornea and pupil
   centres (world space) as gaze ground truth.
 - **Corneal glint is under-sampled.** The virtual image of a 2.5 mm LED in the cornea is ~0.015 mm,
   far below a pixel (~0.5 mm on the face), and it can only be reached by BSDF sampling through the
