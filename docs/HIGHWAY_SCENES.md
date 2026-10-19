@@ -421,6 +421,34 @@ Haze aerosol g ~ 0.7 (Shettle & Fenn 1979), fog droplets ~0.85 (Mie, Deirmendjia
 All parameters can be overridden (`--visibility-m`, `--visibility-definition`, `--haze-angstrom`, `--haze-g`,
 `--haze-albedo`, `--haze-profile exponential|layer`, `--haze-height-m`, `--haze-maxdepth`).
 
+**Droplet (Mie) fog, opt-in: `--fog-droplets advection|radiation`.** Henyey-Greenstein with
+g = 0.85 has the right mean cosine for fog but the wrong shape. `tools/fog_mie.py` computes
+Lorenz-Mie scattering (Bohren & Huffman BHMIE) of liquid water (Hale & Querry 1973 index) for
+the Shettle & Fenn (1979) modified-gamma droplet distributions: `advection` (heavy advection
+fog, modal radius 10 um) and `radiation` (moderate radiation fog, 4 um). The size-averaged
+phase function (450-650 nm, weighted by scattering) goes to pbrt as a 700-bin table
+(`"float phasetheta"`/`"float phasevalues"`, pbrt patch 0013; bins down to 0.01 deg near the
+forward direction), and the spectral extinction and albedo replace the Ångström law,
+`--haze-g`, `--haze-albedo` and `--haze-phase`. V still fixes sigma_ext(550). Compared with
+HG of the same g:
+
+| | advection (g = 0.872) | radiation (g = 0.853) | HG g = 0.85 |
+|---|---|---|---|
+| share of scattered light within 1 deg / 5 deg / 20 deg | 0.40 / 0.50 / 0.67 | 0.16 / 0.46 / 0.65 | 0.006 / 0.13 / 0.63 |
+| 4 pi p(90 deg) (side scatter) | 0.020 | 0.037 | 0.123 |
+| 4 pi p(180 deg) (back scatter, glory) | 0.41 | 0.63 | 0.044 |
+| sigma_ext(1000 nm) / sigma_ext(550 nm) | 1.014 | 1.033 | (alpha = 0: 1) |
+
+So Mie fog puts much more light into a sub-degree diffraction spike (a tighter core round
+lamps), much less into side scatter, and about 10x more straight back (the veil from your own
+headlamps). It is also grey: for 4-10 um droplets the extinction rises by only 1-3 % from 400 to
+1000 nm, so the model gives NIR no visibility advantage in fog (that needs sub-micron haze
+droplets). pbrt's phase function is wavelength-independent, so the diffraction peak width is
+the visible average. The Rayleigh lobe is dropped (w_R <= 0.01 at V <= 2 km). The road
+illuminance MC samples the same table. `tests/test_fog_droplets.py` checks the Mie code against
+the BHMIE reference case, the table sampler, and pbrt single-scatter ratios at 30/90/170 deg
+plus a white furnace.
+
 `--haze-phase mixed` (opt-in) replaces the single effective Henyey-Greenstein lobe with the
 physical mixture `p = w_R p_Rayleigh + (1 - w_R) p_HG(g)`, `w_R = sigma_R / sigma_s` at 550 nm
 (pbrt patch 0011, medium parameter `"float rayleighfraction"`). Both modes have the same mean
