@@ -748,6 +748,6 @@ verges and procedural trees, no street lighting. Night or dusk only (`--time-of-
   Leitpfosten layout). Reflectors use the retroreflective sheeting model (nominal, not measured
   cube-corner data).
 * **Deer:** `--deer roe|red|none` (default roe, 0.70 m shoulder height; red 1.20 m) at
-  `--deer-distance-m`, `--deer-offset-m`, `--deer-heading-deg` (180 = crossing right-to-left).
+  `--deer-distance-m` (default 40 m), `--deer-offset-m`, `--deer-heading-deg` (180 = crossing right-to-left).
   Procedural ellipsoids; analytic brown fur reflectance rising into the NIR; retroreflective eyes
   for tapetum eyeshine. The manifest records the world-space box and eye positions.

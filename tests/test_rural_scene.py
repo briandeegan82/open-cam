@@ -41,7 +41,7 @@ def test_default_scene_unlit_glare_posts_deer(tmp_path):
     assert 'MakeNamedMaterial "sheet_white" "string type" "retroreflective"' in scene
     assert 'MakeNamedMaterial "deer_eye" "string type" "retroreflective"' in scene
     d = m["deer"]
-    assert d["kind"] == "roe" and d["bbox_world"]["min"][2] < 55.0 < d["bbox_world"]["max"][2]
+    assert d["kind"] == "roe" and d["bbox_world"]["min"][2] < 40.0 < d["bbox_world"]["max"][2]
     for e in d["eyes_world"]:  # head forward = -x when crossing right-to-left
         assert e[0] < d["position_world"][0]
         assert d["bbox_world"]["min"][0] <= e[0] <= d["bbox_world"]["max"][0]

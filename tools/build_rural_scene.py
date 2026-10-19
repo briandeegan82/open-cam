@@ -71,7 +71,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     ap.add_argument("--oncoming-beam", choices=("low", "high"), default="high")
     ap.add_argument("--oncoming-distance-m", type=float, default=120.0)
     ap.add_argument("--deer", choices=("none", *DEER), default="roe")
-    ap.add_argument("--deer-distance-m", type=float, default=55.0)
+    ap.add_argument("--deer-distance-m", type=float, default=40.0)
     ap.add_argument("--deer-offset-m", type=float, default=1.2, help="Lateral position (+ = right of centre line).")
     ap.add_argument(
         "--deer-heading-deg",
