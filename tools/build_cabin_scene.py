@@ -95,10 +95,14 @@ def build(args) -> dict:
         '  "float lambdamin" [400] "float lambdamax" [1100]',
         "WorldBegin",
         f"# {args.led_nm} nm LED: {args.led_w_sr:g} W/sr peak-band radiant intensity on axis",
-        f'LightSource "spot" "spectrum I" {_spd(WL, led)} "float scale" [{args.led_w_sr / led_int:.6g}]',
-        '  "bool photometric" false',
-        f'  "point3 from" [{led_pos[0]:g} {led_pos[1]:g} {led_pos[2]:g}] "point3 to" [{HEAD[0]:g} {HEAD[1]:g} {HEAD[2]:g}]',
-        f'  "float coneangle" [{args.led_cone_deg:g}] "float conedeltaangle" [10]',
+        f"AttributeBegin Translate {led_pos[0]:g} {led_pos[1]:g} {led_pos[2]:g}",
+        f"Rotate {math.degrees(math.atan2(HEAD[1] - led_pos[1], HEAD[2] - led_pos[2])):.3f} -1 0 0",
+        # Lambertian disc emitter (finite size so the cornea can mirror it: a point light gives no glint)
+        f'AreaLightSource "diffuse" "spectrum L" {_spd(WL, led)} "bool photometric" false',
+        f'  "float scale" [{args.led_w_sr / (led_int * math.pi * (args.led_radius_mm * 1e-3) ** 2):.6g}]',
+        'Material "diffuse" "rgb reflectance" [0 0 0]',
+        f'Shape "disk" "float radius" [{args.led_radius_mm * 1e-3:g}]',
+        "AttributeEnd",
         mat("skin", skin_spectrum(args.skin)),
         mat("sclera", np.full_like(WL, EYE_REFL["sclera"])),
         mat("iris", np.full_like(WL, EYE_REFL["iris"])),
@@ -180,7 +184,8 @@ def build(args) -> dict:
             "peak_nm": args.led_nm,
             "position": led_pos.round(4).tolist(),
             "radiant_intensity_w_sr": args.led_w_sr,
-            "cone_deg": args.led_cone_deg,
+            "emitter": "Lambertian disc",
+            "radius_mm": args.led_radius_mm,
             "photometric": False,
         },
         "driver": {
@@ -216,7 +221,7 @@ def main(argv=None) -> None:
     ap.add_argument("--led-nm", type=int, choices=(850, 940), default=940)
     ap.add_argument("--led-w-sr", type=float, default=0.5, help="Radiant intensity [W/sr], nominal.")
     ap.add_argument("--led-offset-m", type=float, default=0.04, help="LED offset from the lens (+x).")
-    ap.add_argument("--led-cone-deg", type=float, default=30.0)
+    ap.add_argument("--led-radius-mm", type=float, default=2.5, help="Emitting disc radius (Lambertian).")
     ap.add_argument("--skin", choices=sorted(SKIN), default="light")
     ap.add_argument("--shirt", default="11_cotton_white", help="USGS splib07a chart material name.")
     ap.add_argument("--gaze-yaw-deg", type=float, default=0.0)
