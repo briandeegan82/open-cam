@@ -80,6 +80,12 @@ class HazeParams:
     phase: str = "effective"  # "effective" (one HG lobe) or "mixed" (Rayleigh + HG)
     visibility_definition: str = "mor"  # "mor" (WMO, 5 %) or "koschmieder" (2 % visual range)
     droplets: str = "none"  # "none" (Angstrom + HG) or a fog_mie.DROPLETS size distribution (Mie)
+    bank: tuple[float, float] | None = None  # fog bank [z0, z1] m along the road (camera z = 0)
+    bank_ramp_m: float = 40.0  # 10-90 % entry/exit transition length
+    bank_outside: float = 0.05  # relative density outside the bank
+    patchiness: float = 0.0  # 0..1 depth of random horizontal density holes
+    patch_scale_m: float = 60.0  # correlation length of the patches
+    patch_seed: int = 0
 
 
 PRESETS = {
@@ -111,6 +117,27 @@ def add_cli_args(ap: argparse.ArgumentParser) -> None:
         default=None,
         help="effective: one HG lobe with the scattering-weighted g (default); mixed: Rayleigh + HG mixture.",
     )
+    g.add_argument(
+        "--fog-bank",
+        default=None,
+        metavar="Z0:Z1",
+        help="Opt-in fog bank: full density between Z0 and Z1 m along the road ahead of the camera "
+        "(Z1 may be inf), --fog-bank-outside elsewhere. V is the visibility inside the bank.",
+    )
+    g.add_argument(
+        "--fog-bank-ramp-m", type=float, default=None, help="Bank edge transition (10-90 %%) [m]. Default 40."
+    )
+    g.add_argument(
+        "--fog-bank-outside", type=float, default=None, help="Relative density outside the bank (0..1). Default 0.05."
+    )
+    g.add_argument(
+        "--fog-patchiness",
+        type=float,
+        default=None,
+        help="Opt-in random horizontal patches: 0 (uniform, default) .. 1 (density holes reach zero).",
+    )
+    g.add_argument("--fog-patch-scale-m", type=float, default=None, help="Patch correlation length [m]. Default 60.")
+    g.add_argument("--fog-patch-seed", type=int, default=None, help="Patch noise seed. Default 0.")
     g.add_argument(
         "--fog-droplets",
         choices=("none", *fog_mie.DROPLETS),
@@ -151,15 +178,76 @@ def params_from_args(args: argparse.Namespace) -> HazeParams | None:
         "phase": getattr(args, "haze_phase", None),
         "visibility_definition": getattr(args, "visibility_definition", None),
         "droplets": getattr(args, "fog_droplets", None),
+        "bank": _parse_bank(getattr(args, "fog_bank", None)),
+        "bank_ramp_m": getattr(args, "fog_bank_ramp_m", None),
+        "bank_outside": getattr(args, "fog_bank_outside", None),
+        "patchiness": getattr(args, "fog_patchiness", None),
+        "patch_scale_m": getattr(args, "fog_patch_scale_m", None),
+        "patch_seed": getattr(args, "fog_patch_seed", None),
     }
     p = replace(p, **{k: v for k, v in over.items() if v is not None})
     if p.droplets != "none" and p.droplets not in fog_mie.DROPLETS:
         raise ValueError(f"fog droplets must be none|{'|'.join(fog_mie.DROPLETS)}")
+    if p.bank is not None and not (p.bank[1] > p.bank[0] and p.bank_ramp_m > 0 and 0.0 <= p.bank_outside <= 1.0):
+        raise ValueError(f"invalid fog bank: {p.bank}, ramp {p.bank_ramp_m}, outside {p.bank_outside}")
+    if not (0.0 <= p.patchiness <= 1.0 and p.patch_scale_m > 0):
+        raise ValueError(f"invalid fog patchiness {p.patchiness} / scale {p.patch_scale_m}")
     if p.visibility_definition not in VISIBILITY_CONTRAST:
         raise ValueError(f"visibility definition must be one of {tuple(VISIBILITY_CONTRAST)}")
     if p.visibility_m <= 0 or not 0.0 < p.albedo <= 1.0 or not -1.0 < p.g < 1.0 or p.height_m <= 0:
         raise ValueError(f"invalid haze parameters: {p}")
     return p
+
+
+def _parse_bank(s: str | None) -> tuple[float, float] | None:
+    if s is None:
+        return None
+    z0, z1 = s.split(":")
+    return float(z0), float(z1)
+
+
+MOD_X_M = (-400.0, 400.0)  # horizontal modulation lattice (clamped outside) [m]
+MOD_Z_M = (-200.0, 2000.0)
+MOD_STEP_M = (10.0, 5.0)
+
+
+def horizontal_modulation(p: HazeParams) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+    """(x nodes, z nodes, m[z, x] in [0, 1]) for pbrt patch 0014, or None if fog is uniform."""
+    if p.bank is None and p.patchiness <= 0.0:
+        return None
+    x = np.arange(MOD_X_M[0], MOD_X_M[1] + 1e-9, MOD_STEP_M[0])
+    z = np.arange(MOD_Z_M[0], MOD_Z_M[1] + 1e-9, MOD_STEP_M[1])
+    m = np.ones((z.size, x.size))
+    if p.bank is not None:
+        # Logistic edges: 10-90 % over ramp_m (the scale is ramp / (2 ln 9)).
+        s = p.bank_ramp_m / (2.0 * math.log(9.0))
+        inside = 1.0 / (1.0 + np.exp(-(z - p.bank[0]) / s))
+        if math.isfinite(p.bank[1]):
+            inside = inside / (1.0 + np.exp((z - p.bank[1]) / s))
+        m *= (p.bank_outside + (1.0 - p.bank_outside) * inside)[:, None]
+    if p.patchiness > 0.0:
+        rng = np.random.default_rng(p.patch_seed)
+        white = rng.standard_normal(m.shape)
+        kz = np.fft.fftfreq(z.size, MOD_STEP_M[1])[:, None]
+        kx = np.fft.fftfreq(x.size, MOD_STEP_M[0])[None, :]
+        smooth = np.fft.ifft2(np.fft.fft2(white) * np.exp(-2.0 * (np.pi * p.patch_scale_m) ** 2 * (kx**2 + kz**2))).real
+        smooth = (smooth - smooth.mean()) / smooth.std()
+        holes = np.clip(0.5 + 0.25 * smooth, 0.0, 1.0)  # mean 0.5, +-2 sigma spans 0..1
+        m *= 1.0 - p.patchiness * holes
+    return x, z, np.clip(m, 0.0, 1.0)
+
+
+def _modulation_lines(p: HazeParams) -> list[str]:
+    mod = horizontal_modulation(p)
+    if mod is None:
+        return []
+    x, z, m = mod
+    return [
+        f"    # horizontal density modulation: bank {p.bank}, patchiness {p.patchiness:g} (pbrt patch 0014)",
+        f'    "integer modnx" [{x.size}] "integer modnz" [{z.size}]',
+        f'    "point2 modp0" [{x[0]:.6g} {z[0]:.6g}] "point2 modp1" [{x[-1]:.6g} {z[-1]:.6g}]',
+        '    "float modulation" [ ' + " ".join(f"{v:.4g}" for v in m.ravel()) + " ]",
+    ]
 
 
 def integrator_maxdepth(p: HazeParams, base: int, override: int | None = None) -> int:
@@ -313,6 +401,7 @@ def pbrt_medium_lines(p: HazeParams, sigma_a_spd: str, sigma_s_spd: str) -> list
             else []
         ),
         *_phase_table_lines(p),
+        *_modulation_lines(p),
         f'    "integer nx" [{GRID_NXZ}] "integer ny" [{GRID_NY}] "integer nz" [{GRID_NXZ}]',
         f'    "point3 p0" [{-w:.6g} {y0:.6g} {-w:.6g}] "point3 p1" [{w:.6g} {y1:.6g} {w:.6g}]',
         '    "float density" [ ' + " ".join(f"{v:.6g}" for v in vals) + " ]",
@@ -492,6 +581,8 @@ def manifest_entry(p: HazeParams, wl_nm: np.ndarray) -> dict:
         "hg_g_effective": effective_g(p),
         "phase_hg_g": phase_params(p)[0],
         "phase_rayleigh_fraction_550": phase_params(p)[1],
+        # The illuminance reference below is for the full-density slab (inside the bank).
+        "fog_bank_m": list(p.bank) if p.bank is not None else None,
         "phase_mie_table_bins": int(fog_mie.phase_table(p.droplets)[1].size) if p.droplets != "none" else 0,
         "medium_top_m": medium_top_m(p),
         "vertical_optical_depth_550": optical_depth_vertical(p, 550.0),

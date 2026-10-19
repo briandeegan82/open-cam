@@ -449,6 +449,20 @@ illuminance MC samples the same table. `tests/test_fog_droplets.py` checks the M
 the BHMIE reference case, the table sampler, and pbrt single-scatter ratios at 30/90/170 deg
 plus a white furnace.
 
+**Fog banks and patchy fog, opt-in: `--fog-bank Z0:Z1`, `--fog-patchiness A`.** By default the
+medium is horizontally uniform. pbrt patch 0014 multiplies the uniformgrid density by a horizontal
+map m(x, z) in [0, 1]. The map is bilinear on a 10 m x 5 m lattice over x = -400..400 m and
+z = -200..2000 m (z = distance ahead of the camera), and is clamped beyond it.
+`--fog-bank Z0:Z1` gives full density between Z0 and Z1 (Z1 may be `inf`), with logistic edges
+that rise from 10 % to 90 % over `--fog-bank-ramp-m` (default 40 m), and `--fog-bank-outside`
+(default 0.05) elsewhere. `--fog-patchiness A` cuts smoothed Gaussian-noise holes of depth up to
+A into the map (`--fog-patch-scale-m` correlation length, default 60 m; `--fog-patch-seed`).
+`--visibility-m` is the visibility where m = 1 (inside the bank). The manifest's road-illuminance
+reference is still the full-density slab. Because m <= 1, pbrt's density majorant stays valid
+and the transport is unbiased. Thin regions only cost extra null collisions.
+`tests/test_fog_patchy.py` checks the map and a pbrt transmittance through a bank against
+exp(-sigma * integral of m).
+
 `--haze-phase mixed` (opt-in) replaces the single effective Henyey-Greenstein lobe with the
 physical mixture `p = w_R p_Rayleigh + (1 - w_R) p_HG(g)`, `w_R = sigma_R / sigma_s` at 550 nm
 (pbrt patch 0011, medium parameter `"float rayleighfraction"`). Both modes have the same mean

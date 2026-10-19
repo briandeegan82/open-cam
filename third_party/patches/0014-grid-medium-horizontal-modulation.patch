@@ -1,0 +1,88 @@
+--- a/src/pbrt/media.h
++++ b/src/pbrt/media.h
+@@ -351,8 +351,9 @@
+ 
+         // Scale scattering coefficients by medium density at _p_
+         p = renderFromMedium.ApplyInverse(p);
++        Float mod = Modulation(p);
+         p = Point3f(bounds.Offset(p));
+-        Float d = densityGrid.Lookup(p);
++        Float d = mod * densityGrid.Lookup(p);
+         sigma_a *= d;
+         sigma_s *= d;
+ 
+@@ -417,6 +418,29 @@
+     bool isEmissive;
+     Float temperatureScale, temperatureOffset;
+     MajorantGrid majorantGrid;
++    const Float *modVals = nullptr;
++    int modNx = 0, modNz = 0;
++    Float modX0 = 0, modX1 = 1, modZ0 = 0, modZ1 = 1;
++
++  public:
++    // open-cam: optional horizontal density modulation m(x, z) in [0, 1] (fog banks/patches):
++    // "float modulation" node values (index z * modnx + x) on a regular modnx x modnz lattice
++    // spanning "point2 modp0".."modp1" = (x, z) in medium space, bilinear, clamped outside.
++    // m <= 1 keeps the density majorant grid valid.
++    void SetHorizontalModulation(const std::vector<Float> &v, int nx, int nz, Point2f p0,
++                                 Point2f p1, Allocator alloc);
++
++    PBRT_CPU_GPU
++    Float Modulation(Point3f p) const {
++        if (!modVals)
++            return 1;
++        Float fx = Clamp((p.x - modX0) / (modX1 - modX0) * (modNx - 1), 0, modNx - 1);
++        Float fz = Clamp((p.z - modZ0) / (modZ1 - modZ0) * (modNz - 1), 0, modNz - 1);
++        int ix = std::min<int>(int(fx), modNx - 2), iz = std::min<int>(int(fz), modNz - 2);
++        Float tx = fx - ix, tz = fz - iz;
++        const Float *r0 = modVals + iz * modNx + ix, *r1 = r0 + modNx;
++        return (1 - tz) * ((1 - tx) * r0[0] + tx * r0[1]) + tz * ((1 - tx) * r1[0] + tx * r1[1]);
++    }
+ };
+ 
+ // RGBGridMedium Definition
+--- a/src/pbrt/media.cpp
++++ b/src/pbrt/media.cpp
+@@ -71,6 +71,30 @@
+     return StringPrintf("[ HGPhaseFunction g: %f table bins: %d ]", g, tabN);
+ }
+ 
++void GridMedium::SetHorizontalModulation(const std::vector<Float> &v, int nx, int nz,
++                                         Point2f p0, Point2f p1, Allocator alloc) {
++    if (v.empty())
++        return;
++    if (nx < 2 || nz < 2 || int(v.size()) != nx * nz)
++        ErrorExit("\"modulation\" needs modnx * modnz = %d x %d values, got %d.", nx, nz,
++                  v.size());
++    if (!(p1.x > p0.x) || !(p1.y > p0.y))
++        ErrorExit("\"modp1\" must exceed \"modp0\" in both coordinates.");
++    Float *m = alloc.allocate_object<Float>(v.size());
++    for (size_t i = 0; i < v.size(); ++i) {
++        if (!(v[i] >= 0 && v[i] <= 1))
++            ErrorExit("\"modulation\" values must lie in [0, 1] (the density majorant assumes it).");
++        m[i] = v[i];
++    }
++    modVals = m;
++    modNx = nx;
++    modNz = nz;
++    modX0 = p0.x;
++    modX1 = p1.x;
++    modZ0 = p0.y;
++    modZ1 = p1.y;
++}
++
+ void HGPhaseFunction::SetTable(const std::vector<Float> &th, const std::vector<Float> &v,
+                                Allocator alloc) {
+     if (th.empty() && v.empty())
+@@ -373,6 +397,11 @@
+     medium->SetRayleighFraction(parameters.GetOneFloat("rayleighfraction", 0.f));
+     medium->SetPhaseTable(parameters.GetFloatArray("phasetheta"),
+                           parameters.GetFloatArray("phasevalues"), alloc);
++    medium->SetHorizontalModulation(parameters.GetFloatArray("modulation"),
++                                    parameters.GetOneInt("modnx", 0),
++                                    parameters.GetOneInt("modnz", 0),
++                                    parameters.GetOnePoint2f("modp0", Point2f(0, 0)),
++                                    parameters.GetOnePoint2f("modp1", Point2f(1, 1)), alloc);
+     return medium;
+ }
+ 
