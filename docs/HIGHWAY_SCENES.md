@@ -639,7 +639,8 @@ lobe is not fitted to CIE 144 road reflection tables. USGS spectra are lab bidir
 - By default the sky radiance is RGB, upsampled by pbrt; only the sun is spectral (see
   [Spectral sky](#spectral-sky) for the opt-in spectral sky).
 - Texture colour maps only modulate luminance. Wet road: flat puddles (no depression, no
-  ripples/raindrop impacts on the water), no rain streaks, no tyre-track drying, spray density
+  ripples/raindrop impacts on the water; falling rain is opt-in, see
+  [Falling rain](#falling-rain---rain-mmh-toolshighway_rainpy)), no tyre-track drying, spray density
   scaling (car factor, flooded ×2, linear speed) assumed; wet markings use EN 1436 class
   minima, not a measured wet retroreflection function.
 - Haze: one HG phase function per medium (Rayleigh folded into g), horizontally uniform
@@ -746,5 +747,10 @@ also sets `--road-wetness wet` when the road is dry or damp.
 * **Visibility:** the manifest gives the geometric extinction (2 × cross-section) of the full
   distribution and the equivalent visibility (≈ 1.9 km at 10 mm/h). For rain beyond the drop range
   add `--haze mist --visibility-m <that>`.
+* **How visible the streaks are:** a real drop is far thinner than a pixel beyond about 1 m
+  (a 1.5 mm drop at 7 m covers ~0.3 px width and ~4 % of the shutter time per pixel), so most
+  streaks change a pixel by about 1 %, below the render noise at a few hundred spp; at 256 spp they show
+  up mostly as fine speckle rather than lines. Only drops within 1–2 m, or a long exposure,
+  give clear streaks. Raise `--pixelsamples` to resolve them.
 * **Not modelled:** oblate or oscillating drops, splashes and ripples on the road, rain on the
   windscreen (see `--windscreen-rain`).
