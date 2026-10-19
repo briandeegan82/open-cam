@@ -728,3 +728,25 @@ emitter off (B) and one per emitter with only that emitter on (E_e), then compos
 PWM edges, with no band timing error. It refuses scenes whose manifest records any camera or car
 velocity. All renders share one `--seed`, so B and E_e are correlated and most of the path noise
 cancels in the difference.
+
+## Parking garage / surround-view fisheye (`tools/build_garage_scene.py`)
+
+    venv/bin/python tools/build_garage_scene.py --out-dir scenes/generated/garage --view front
+    cd scenes/generated/garage && pbrt garage.pbrt        # writes out/garage_spectral.exr
+
+An enclosed concrete deck (no daylight): a 6.5 m aisle, 16 perpendicular 2.5 × 5.0 m bays a side,
+pillars every three bays with a hazard band, painted walls, a 2.6 m ceiling and green exit signs.
+`--occupancy` (default 0.7) fills bays with the highway car assets (or `--proxy-cars`), nose to
+the wall. The manifest records every bay's floor corners and occupancy (slot-detection ground
+truth) and the pillar positions.
+
+* **Camera:** `--view front|rear|left|right` mounts the camera on the ego car's bumper or mirror
+  (pitched down 20°, 25°, 45°, 45°). The default is the realistic `config/lenses/fisheye.10mm.dat`
+  (155.9° Muller fisheye, no glass sidecar so no dispersion) on a 34 mm-diagonal 4:3 film, so the
+  image circle is cropped top and bottom. `--camera pinhole --fov N` is available for quick tests.
+* **Lighting:** ceiling rows over the aisle and both bay rows, every 5 m. `--lighting mixed`
+  (default) puts LED battens (CIE LED-B4, 4400 lm) over the aisle and twin-T8 fluorescent fittings
+  (`--fluorescent-type f2|f11`, 8300 lm) over the bays; `fluorescent` or `led` uses one type
+  throughout. `--lights-off-fraction` (default 0.15) leaves fittings dead. Fittings are flat
+  Lambertian diffusers (luminance = flux / (π × area)); fluxes are nominal catalogue values and
+  mains flicker is not modelled.
