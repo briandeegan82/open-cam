@@ -793,3 +793,34 @@ venv/bin/python tools/build_highway_scene.py --vru cyclist --vru-motion along --
   does not hide it; the manifest lists them under `vru.removed_traffic`. Use `--traffic none` for an empty road.
 - *Not modelled:* target motion (the scene is static; use `--vehicle-speed-kmh` for ego motion blur),
   bicycle retroreflectors, the soft EPT target's fabric texture.
+
+## Urban intersection, night and wet (`tools/build_urban_scene.py`)
+
+    venv/bin/python tools/build_urban_scene.py --out-dir scenes/generated/urban [--sign-set stvo] [--vru pedestrian]
+    cd scenes/generated/urban && pbrt urban.pbrt          # writes out/urban_spectral.exr
+
+A signalised four-way crossing of two-lane streets (3.5 m lanes, 2.3 m parking lanes, 3 m
+sidewalks on 0.15 m kerbs), right-hand traffic, ego camera waiting on the near approach. Defaults:
+`--time-of-day night --road-wetness wet`; `--time-of-day day --road-wetness dry` gives the daytime
+counterpart. The builder reuses the highway modules rather than duplicating them: spectra, cars and
+camera/film options (`build_highway_scene`), night sky, moon, headlamps and retroreflection
+(`highway_night`), wet asphalt and markings (`highway_wet`; `--puddles`/`--spray` are highway-only),
+sign artwork (`--sign-set`, row placed beyond the junction) and AEB targets (`--vru`, placed on the
+near zebra crossing by default).
+
+* **Traffic signals:** five 3-aspect 200 mm heads (two primaries and one secondary for the ego,
+  two for the cross arms showing the opposite phase). `--signal-state red|amber|green`. Each lit
+  aspect is an LED area light (analytic LED spectra 626/592/505 nm) whose time-averaged luminance
+  times lens area equals a nominal 300 cd on-axis intensity (EN 12368 order of magnitude, not a
+  measured value). Signals are DC by default; `--signal-pwm-hz/--signal-duty` make them PWM.
+* **Shop LED signs:** `--shop-signs` (default 4) red/blue/green panels on the ground floors,
+  400 cd/m² time-averaged, PWM at `--shop-pwm-hz 100 --shop-duty 0.3` (nominal).
+* **Facades:** seeded 3–6 storey lots with window grids; at dusk/night `--lit-windows` (default
+  0.35) of them are 15 cd/m² 3000 K diffuse emitters.
+* **Street lights:** single-arm 8 m columns on both kerbs, 25 m apart, staggered, with the same
+  full-cutoff luminaire model as the highway (`--streetlights led_4000k|hps|none`).
+* **Cars:** parked cars along both kerbs (unlit), one oncoming and one waiting on the cross street
+  (both with headlamps at night).
+* **Flicker:** every signal aspect and shop sign is in `manifest["emitters"]`, so
+  `tools/render_time_slices.py scenes/generated/urban --linear` renders LED flicker / rolling
+  shutter (pass `--exposure-s` to record the exposure in the manifest).

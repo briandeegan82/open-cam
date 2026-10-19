@@ -115,7 +115,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         time_of_day="night",
         road_wetness="wet",
         brake_lights="none",
-        vru_distance_m=Z_INT - 8.0 - ZEBRA_SET - ZEBRA_W / 2,
+        vru_distance_m=Z_INT - HALF - ZEBRA_SET - ZEBRA_W / 2,
         vru_offset_m=0.5,
         sign_start_m=Z_INT + 12.0,
         sign_spacing_m=9.0,
