@@ -58,7 +58,7 @@ def test_slush_sets_wet_and_leaves_tracks(tmp_path):
     geo = {"paved": [(0.0, 10.0)], "lane_centres": [1.8, 5.4, 9.0]}
     rects = snow.road_rects(geo, "slush", np.random.default_rng(0), 0.0, 3.0)
     covered = sum((b - a) for a, b, za, zb in rects if za == 0.0)
-    assert 10.0 - 6 * 1.25 * snow.TRACK_W < covered < 10.0 - 6 * 0.8 * snow.TRACK_W + 1e-9
+    assert 10.0 - 6 * 1.3 * snow.TRACK_W < covered < 10.0 - 6 * 0.75 * snow.TRACK_W + 1e-9
     for c in (1.8 + 0.85, 5.4 - 0.85):  # track centres stay clear
         assert not any(a < c < b for a, b, za, zb in rects if za == 0.0)
 

@@ -160,20 +160,28 @@ def road_rects(geo: dict, state: str, rng: np.random.Generator, z0: float, z1: f
         return [(a, b, z0, z1) for a, b in geo["paved"]]
     rects = []
     tracks = sorted(c + s * TRACK_HALF_SEP for c in geo["lane_centres"] for s in (-1, 1))
-    zs = list(np.arange(z0, 120.0, 1.5)) + list(np.arange(120.0, z1, 6.0)) + [z1]
-    for za, zb in zip(zs[:-1], zs[1:], strict=True):
+    zs = np.concatenate([np.arange(z0, 60.0, 0.5), np.arange(60.0, 200.0, 2.0), np.arange(200.0, z1, 8.0), [z1]])
+    n = len(zs) - 1
+    k = np.exp(-0.5 * (np.arange(-12, 13) / 4.0) ** 2)  # smooth wander along the road (~2 m at 0.5 m steps)
+    k /= np.sqrt((k**2).sum())
+
+    def wander(scale: float) -> np.ndarray:
+        return scale * np.convolve(rng.standard_normal(n + len(k) - 1), k, mode="valid")
+
+    offs = [(wander(0.06), np.clip(1.0 + wander(0.12), 0.75, 1.3)) for _ in tracks]
+    for i, (za, zb) in enumerate(zip(zs[:-1], zs[1:], strict=True)):
         for a, b in geo["paved"]:
             x = a
-            for t in tracks:
+            for t, (dc, sw) in zip(tracks, offs, strict=True):
                 if not a < t < b:
                     continue
-                w = TRACK_W * rng.uniform(0.8, 1.25)
-                c = t + rng.uniform(-0.08, 0.08)
+                w = TRACK_W * sw[i]
+                c = t + dc[i]
                 if c - w / 2 > x:
-                    rects.append((x, c - w / 2, za, zb))
+                    rects.append((x, c - w / 2, float(za), float(zb)))
                 x = c + w / 2
             if x < b:
-                rects.append((x, b, za, zb))
+                rects.append((x, b, float(za), float(zb)))
     return rects
 
 
