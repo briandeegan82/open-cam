@@ -63,6 +63,9 @@ class TestScene(unittest.TestCase):
             self.assertLess(z0, 25.0)
             self.assertGreater(z1, 25.0)
             self.assertEqual(len(v["obstruction"]), 2)
+            self.assertTrue(v["removed_traffic"])
+            self.assertTrue(all(abs(c["distance_m"] - 25.0) < vru.CLEAR_M for c in v["removed_traffic"]))
+            self.assertFalse([c for c in m["cars"] if c["lane"] >= 0 and abs(c["distance_m"] - 25.0) < vru.CLEAR_M])
             zs = sorted(c["z_m"] for c in v["obstruction"])
             self.assertLess(zs[0] + 2.3, z0)  # cars either side of the target, clear of it
             self.assertGreater(zs[1] - 2.3, z1)

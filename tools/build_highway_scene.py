@@ -896,11 +896,13 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
     L.append("")
 
     # ---- traffic
+    vru_cleared: list[dict] = []
     cars_meta = []
     if args.traffic != "none":
         car_dir = out_dir / "cars"
         car_dir.mkdir(exist_ok=True)
         traffic = var.traffic or DEFAULT_TRAFFIC
+        traffic, vru_cleared = vru.clear_traffic(args, traffic)
         speeds = fx.car_speeds_kmh([c[0] for c in traffic])
         for k, (lane, z, model, paint, yaw) in enumerate(traffic):
             if paint not in CAR_PAINTS and paint not in var.paints:
@@ -980,6 +982,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         vru_spectra = vru.write_spectra(args, spd, wl, write_spd, reflectance)
         vru_lines, vru_meta = vru.scene_lines(args, Layout.right_edge, variety.place, parked_car)
         vru_meta["spectra"] = vru_spectra
+        vru_meta["removed_traffic"] = vru_cleared
         L += vru_lines
 
     median_x = Layout.median_l + MEDIAN_W / 2 + LEFT_SHOULDER / 2 - 0.6

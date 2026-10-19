@@ -349,6 +349,23 @@ def cyclist(height: float, phase: float) -> Parts:
 # ---------------------------------------------------------------- scene
 
 
+CLEAR_M = 12.0
+
+
+def clear_traffic(args, traffic: list[tuple]) -> tuple[list[tuple], list[dict]]:
+    """Drop same-direction traffic within CLEAR_M of the target so it is not hidden by a moving car."""
+    if not enabled(args):
+        return traffic, []
+    keep, removed = [], []
+    for c in traffic:
+        lane, z = c[0], c[1]
+        if lane >= 0 and abs(z - args.vru_distance_m) < CLEAR_M:
+            removed.append({"lane": lane, "distance_m": z, "model": c[2]})
+        else:
+            keep.append(c)
+    return keep, removed
+
+
 def scene_lines(args, road_edge_x: float, place, car_body) -> tuple[list[str], dict]:
     """pbrt lines for the target (+ obstruction cars) and manifest metadata.
 
