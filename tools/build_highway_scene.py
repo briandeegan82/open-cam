@@ -41,6 +41,7 @@ import highway_incar  # noqa: E402
 import highway_materials as hmat  # noqa: E402
 import highway_night as night  # noqa: E402
 import highway_signs as sign_scene  # noqa: E402
+import highway_snow as snow  # noqa: E402
 import highway_variety as variety  # noqa: E402
 import highway_vru as vru  # noqa: E402
 import highway_wet as wet  # noqa: E402
@@ -497,6 +498,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     highway_incar.add_args(ap)
     variety.add_arguments(ap)
     wet.add_args(ap)
+    snow.add_args(ap)
     hmat.add_arguments(ap)
     sign_scene.add_args(ap)
     vru.add_args(ap)
@@ -580,6 +582,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         e_dn, e_sky_h, e_ref = e_dn * k, e_sky_h * k, float(args.global_illuminance_lux)
     write_spd(spd / "sun.spd", wl, solar_direct_spectrum(wl, elev))
     haze = atmosphere.params_from_args(args)
+    snow_notes = snow.check_args(args)
     wet.check_args(args, args.road_wear != "none")
     vru.check_args(args)
     if args.road_rtable and (args.road_wear != "none" or wet.enabled(args)):
@@ -867,7 +870,12 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         write_spd(spd / "forest_canopy.spd", wl, backdrop.forest_canopy_reflectance(wl))
         L += [
             *backdrop.pbrt_lines(
-                mesh, cam_x, 0.0, 7 if args.seed is None else args.seed, "spd/forest_canopy.spd", "spd/grass.spd"
+                mesh,
+                cam_x,
+                0.0,
+                7 if args.seed is None else args.seed,
+                "spd/forest_canopy.spd",
+                "spd/snow_verge.spd" if args.snow != "none" else "spd/grass.spd",
             ),
             "",
         ]
@@ -1020,6 +1028,25 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
     )
     L += night_lines
 
+    snow_meta = None
+    if snow.enabled(args):
+        geo = {
+            "paved": [(Layout.median_l, Layout.right_paved), (Layout.opp_paved, Layout.median_l)],
+            "lane_centres": [Layout.lane_center(i) for i in (*range(N_LANES), *range(-N_LANES, 0))],
+            "banks": [(Layout.right_paved, 1.0), (Layout.opp_paved, -1.0)],
+            "z0": ROAD_Z0,
+            "z1": ROAD_Z1,
+            "fov_deg": args.fov if args.camera != "realistic" else 90.0,
+            "aspect": args.xres / args.yres,
+        }
+        smats, sgeom, snow_meta = snow.scene_lines(args, wl, spd, out_dir, geo, eye, mesh, quads_mesh, extrude_profile)
+        if args.snow != "none":
+            verge = '"string type" "diffuse" "spectrum reflectance" "spd/snow_verge.spd"'
+            L = snow.replace_materials(L, {g: f'MakeNamedMaterial "{g}" {verge}' for g in ("grass", "grass_far")})
+        w = L.index("WorldBegin")
+        L[w + 1 : w + 1] = smats
+        L += [*sgeom, ""]
+        snow_meta["notes"] = snow_notes
     L += fx.windscreen_lines(out_dir, wl, eye)
     wet_meta = None
     if wet.enabled(args):  # last: also wets the road-wear marking materials emitted with the geometry
@@ -1105,6 +1132,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         "cars": cars_meta,
         "vegetation": veg_meta,
         "atmosphere": atm["manifest"] if atm else None,
+        **({"snow": snow_meta} if snow_meta else {}),
         "distant_terrain": "hills (tools/highway_backdrop.py)" if backdrop.enabled(args) else None,
         "variety": var.manifest(),
         "assets": used_assets,
