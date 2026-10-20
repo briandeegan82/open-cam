@@ -585,6 +585,16 @@ fixed order, so the same N always gives the same `highway.pbrt` and manifest:
 - **Vegetation**: 1-3 tree species (Poly Haven island tree, Searsia lucida, fir and pine
   saplings) and 1-3 shrub species, scaled to plausible heights, with the per-species spacing
   stretched so the total density is unchanged.
+  `--vegetation-pool extended` adds 13 more Poly Haven CC0 species to the draw: jacaranda,
+  island tree 01, a small broadleaf tree, a fir tree (about 18 m) and a fir sapling, Searsia
+  burchellii, shrub 03, wild rooibos, three grass clumps, a fallen dead trunk and a stump
+  (`SPECIES_EXTENDED` in `tools/highway_variety.py`; trunks, stumps and grass count as
+  shrubs). Island tree 03 is left out: its mesh includes a sand and rock base. Without
+  `--seed` it uses a fixed mix of island tree 02, fir tree, small tree, shrub 02 and grass.
+  The default `classic` pool leaves every seed's draw unchanged. Fetch the extra assets with
+  `python tools/fetch_highway_assets.py` (about 870 MB at 1k; the fir tree alone is 460 MB
+  and 7.0 M triangles, the jacaranda 200 MB and 3.9 M; a 1280-px day frame with both peaks
+  at 6 GB in pbrt).
 
 Individual flags override the seeded draw: `--curve-radius` (m, + bends right, 0 straight),
 `--clothoid-length`, `--grade` (%), `--lamp-posts/--gantry/--overpass on|off`. Every draw is
