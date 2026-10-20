@@ -325,3 +325,177 @@ assets:
       - url: https://huggingface.co/datasets/allenai/objaverse/resolve/556637099bf4fa79ea7b239d0d9c328b8a2e9ac8/glbs/000-154/14fe03d792914d51b6c6250b393c44fd.glb
         path: 14fe03d792914d51b6c6250b393c44fd.glb
         sha256: a8750122cb211145706490e8fbd26ce821d6e8a4074f943974997b2331a02ab9
+
+  # --- Traffic signs (Wikimedia Commons SVG artwork; public domain) ---------
+  # StVO signs: German official works (Sec. 5 UrhG, amtliche Werke); MUTCD signs: US federal
+  # works (FHWA). Prepared into per-sheeting-colour masks + an alpha cutout (needs cairosvg).
+  # width_m = width of the artwork's bounding box at the nominal size noted in the title
+  # (StVO size class 2, MUTCD conventional road); nominal, not checked against the regulation text.
+  sign_stvo_101:
+    kind: sign_svg
+    title: "StVO Zeichen 101 Gefahrstelle (triangle, 900 mm side)"
+    source: https://commons.wikimedia.org/wiki/File:Zeichen_101_-_Gefahrstelle%2C_StVO_1970.svg
+    author: "Mediatus (after the official StVO drawings)"
+    license: public-domain
+    sign_set: stvo
+    code: "101"
+    width_m: 0.9
+    svg: "Zeichen_101_-_Gefahrstelle,_StVO_1970.svg"
+    files:
+      - url: https://upload.wikimedia.org/wikipedia/commons/0/02/Zeichen_101_-_Gefahrstelle%2C_StVO_1970.svg
+        path: "Zeichen_101_-_Gefahrstelle,_StVO_1970.svg"
+        sha256: 728923f5a7b952118aba2df6cbe41c6c76867a70c00aa4dc2c4335dd3ce6b343
+  sign_stvo_138:
+    kind: sign_svg
+    title: "StVO Zeichen 138 Radfahrer kreuzen (triangle, 900 mm side)"
+    source: https://commons.wikimedia.org/wiki/File:Zeichen_138_-_Radfahrer_kreuzen%2C_StVO_1970.svg
+    author: "Mediatus (after the official StVO drawings)"
+    license: public-domain
+    sign_set: stvo
+    code: "138"
+    width_m: 0.9
+    svg: "Zeichen_138_-_Radfahrer_kreuzen,_StVO_1970.svg"
+    files:
+      - url: https://upload.wikimedia.org/wikipedia/commons/e/ef/Zeichen_138_-_Radfahrer_kreuzen%2C_StVO_1970.svg
+        path: "Zeichen_138_-_Radfahrer_kreuzen,_StVO_1970.svg"
+        sha256: 07376d5c565ce2e19a1331d05cb19bea01d7d05b77f206d66f78ac3fd692c0fa
+  sign_stvo_205:
+    kind: sign_svg
+    title: "StVO Zeichen 205 Vorfahrt gewähren (inverted triangle, 900 mm side)"
+    source: https://commons.wikimedia.org/wiki/File:Zeichen_205_-_Vorfahrt_gew%C3%A4hren%21_StVO_1970.svg
+    author: "Andreas 06, Mediatus"
+    license: public-domain
+    sign_set: stvo
+    code: "205"
+    width_m: 0.9
+    svg: "Zeichen_205_-_Vorfahrt_gewähren!_StVO_1970.svg"
+    files:
+      - url: https://upload.wikimedia.org/wikipedia/commons/6/6f/Zeichen_205_-_Vorfahrt_gew%C3%A4hren%21_StVO_1970.svg
+        path: "Zeichen_205_-_Vorfahrt_gewähren!_StVO_1970.svg"
+        sha256: a541aca85c6bdfefe43df9e9d2dbe4dd2156b0d117ccb8eacb7e8094a36dd2a6
+  sign_stvo_206:
+    kind: sign_svg
+    title: "StVO Zeichen 206 Halt (octagon, 600 mm)"
+    source: https://commons.wikimedia.org/wiki/File:Zeichen_206_-_Halt%21_Vorfahrt_gew%C3%A4hren%21_StVO_1970.svg
+    author: "Wikimedia Commons contributors (after the official StVO drawings)"
+    license: public-domain
+    sign_set: stvo
+    code: "206"
+    width_m: 0.6
+    svg: "Zeichen_206_-_Halt!_Vorfahrt_gewähren!_StVO_1970.svg"
+    files:
+      - url: https://upload.wikimedia.org/wikipedia/commons/2/2f/Zeichen_206_-_Halt%21_Vorfahrt_gew%C3%A4hren%21_StVO_1970.svg
+        path: "Zeichen_206_-_Halt!_Vorfahrt_gewähren!_StVO_1970.svg"
+        sha256: 374a67d7fdaf91dc67c614e6087517a5048165cf2eac9787ebc7bee95a11f7b8
+  sign_stvo_267:
+    kind: sign_svg
+    title: "StVO Zeichen 267 Verbot der Einfahrt (round, 600 mm)"
+    source: https://commons.wikimedia.org/wiki/File:Zeichen_267_-_Verbot_der_Einfahrt%2C_StVO_1970.svg
+    author: "MarianSigler, Mediatus"
+    license: public-domain
+    sign_set: stvo
+    code: "267"
+    width_m: 0.6
+    svg: "Zeichen_267_-_Verbot_der_Einfahrt,_StVO_1970.svg"
+    files:
+      - url: https://upload.wikimedia.org/wikipedia/commons/7/77/Zeichen_267_-_Verbot_der_Einfahrt%2C_StVO_1970.svg
+        path: "Zeichen_267_-_Verbot_der_Einfahrt,_StVO_1970.svg"
+        sha256: b09e11b62e8aa0d6bb8e57379e77bb507a74099fbfe1d878644eb27121fb48dd
+  sign_stvo_274_60:
+    kind: sign_svg
+    title: "StVO Zeichen 274-60 Höchstgeschwindigkeit 60 (round, 600 mm)"
+    source: https://commons.wikimedia.org/wiki/File:Zeichen_274-60_-_Zul%C3%A4ssige_H%C3%B6chstgeschwindigkeit%2C_StVO_2017.svg
+    author: "Mediatus (after the official StVO drawings)"
+    license: public-domain
+    sign_set: stvo
+    code: "274-60"
+    width_m: 0.6
+    svg: "Zeichen_274-60_-_Zulässige_Höchstgeschwindigkeit,_StVO_2017.svg"
+    files:
+      - url: https://upload.wikimedia.org/wikipedia/commons/6/63/Zeichen_274-60_-_Zul%C3%A4ssige_H%C3%B6chstgeschwindigkeit%2C_StVO_2017.svg
+        path: "Zeichen_274-60_-_Zulässige_Höchstgeschwindigkeit,_StVO_2017.svg"
+        sha256: c0cd61317a03cca8d7d2746dc7f55e4100dfccf070f920882fa116f70e3cd620
+  sign_stvo_306:
+    kind: sign_svg
+    title: "StVO Zeichen 306 Vorfahrtstraße (diamond, 600 mm side)"
+    source: https://commons.wikimedia.org/wiki/File:Zeichen_306_-_Vorfahrtstra%C3%9Fe%2C_StVO_1970.svg
+    author: "Andreas 06, Mediatus"
+    license: public-domain
+    sign_set: stvo
+    code: "306"
+    width_m: 0.849
+    svg: "Zeichen_306_-_Vorfahrtstraße,_StVO_1970.svg"
+    files:
+      - url: https://upload.wikimedia.org/wikipedia/commons/f/ff/Zeichen_306_-_Vorfahrtstra%C3%9Fe%2C_StVO_1970.svg
+        path: "Zeichen_306_-_Vorfahrtstraße,_StVO_1970.svg"
+        sha256: 69a749cc80ceead4de5b68bd7952b9b9f7143b50cc30948f34ecdb336658c5d1
+  sign_stvo_350:
+    kind: sign_svg
+    title: "StVO Zeichen 350 Fußgängerüberweg (square, 600 mm)"
+    source: https://commons.wikimedia.org/wiki/File:Zeichen_350_-_Fu%C3%9Fg%C3%A4nger%C3%BCberweg%2C_StVO_1970.svg
+    author: "Mediatus (after the official StVO drawings)"
+    license: public-domain
+    sign_set: stvo
+    code: "350"
+    width_m: 0.6
+    svg: "Zeichen_350_-_Fußgängerüberweg,_StVO_1970.svg"
+    files:
+      - url: https://upload.wikimedia.org/wikipedia/commons/7/76/Zeichen_350_-_Fu%C3%9Fg%C3%A4nger%C3%BCberweg%2C_StVO_1970.svg
+        path: "Zeichen_350_-_Fußgängerüberweg,_StVO_1970.svg"
+        sha256: 502c776eb296fe94fc59553a61d4bb229cd6c33a690983de49156a2d38fc1fd2
+  sign_mutcd_r1_1:
+    kind: sign_svg
+    title: "MUTCD R1-1 Stop (octagon, 30 in)"
+    source: https://commons.wikimedia.org/wiki/File:MUTCD_R1-1.svg
+    author: "Federal Highway Administration (US DOT)"
+    license: public-domain
+    sign_set: mutcd
+    code: "R1-1"
+    width_m: 0.762
+    svg: "MUTCD_R1-1.svg"
+    files:
+      - url: https://upload.wikimedia.org/wikipedia/commons/c/c0/MUTCD_R1-1.svg
+        path: "MUTCD_R1-1.svg"
+        sha256: 39aa735cc38ec2e6647a6d35b0828abd8e4aa5b47ef6d89758e561d907cbb09a
+  sign_mutcd_r2_1:
+    kind: sign_svg
+    title: "MUTCD R2-1 Speed Limit 50 (24 x 30 in)"
+    source: https://commons.wikimedia.org/wiki/File:MUTCD_R2-1.svg
+    author: "Federal Highway Administration (US DOT)"
+    license: public-domain
+    sign_set: mutcd
+    code: "R2-1"
+    width_m: 0.61
+    svg: "MUTCD_R2-1.svg"
+    files:
+      - url: https://upload.wikimedia.org/wikipedia/commons/8/8b/MUTCD_R2-1.svg
+        path: "MUTCD_R2-1.svg"
+        sha256: 581a97297661903b9256f0c8252522c0bc3039b9478db95295fcd77adf8f6bc2
+  sign_mutcd_w1_1r:
+    kind: sign_svg
+    title: "MUTCD W1-1R Turn right (diamond, 30 in side)"
+    source: https://commons.wikimedia.org/wiki/File:MUTCD_W1-1R.svg
+    author: "Federal Highway Administration (US DOT); SVG by Fry1989"
+    license: public-domain
+    sign_set: mutcd
+    code: "W1-1R"
+    width_m: 1.078
+    svg: "MUTCD_W1-1R.svg"
+    files:
+      - url: https://upload.wikimedia.org/wikipedia/commons/6/6b/MUTCD_W1-1R.svg
+        path: "MUTCD_W1-1R.svg"
+        sha256: 66b8665b7dacd1e255b3caffe71be88d62107cc13b1943e2a5a0fd81f70351d4
+  sign_mutcd_w11_2:
+    kind: sign_svg
+    title: "MUTCD W11-2 Pedestrian crossing (diamond, 30 in side)"
+    source: https://commons.wikimedia.org/wiki/File:MUTCD_W11-2.svg
+    author: "Federal Highway Administration (US DOT)"
+    license: public-domain
+    sign_set: mutcd
+    code: "W11-2"
+    width_m: 1.078
+    svg: "MUTCD_W11-2.svg"
+    files:
+      - url: https://upload.wikimedia.org/wikipedia/commons/9/98/MUTCD_W11-2.svg
+        path: "MUTCD_W11-2.svg"
+        sha256: 3ae5b9f1605ebb7e87faf26610f5d8f7acb9fbdc8d3a76ff719032016c3a070a
