@@ -66,8 +66,29 @@ the pinhole lens: the glass lens models' transmission is not validated past 1.1 
   refractiveindex.info, CC0). `tools/fog_mie.py` uses it above 1100 nm; its 350-1100 nm table is unchanged.
 * **Ice** -- Warren & Brandt (2008) extended from 1200 to 2600 nm (`spectra/ice/warren_brandt_2008.csv`).
 
+## Highway scene in the SWIR (`tools/highway_swir.py`)
+
+```bash
+venv/bin/python tools/build_highway_scene.py --spectral-library usgs \
+    --spectral-lambda-max 1600 --film-lambda-min 900 --spectral-nbuckets 36
+third_party/pbrt-v4/build-swir/pbrt scenes/generated/highway/highway.pbrt
+venv/bin/python tools/apply_emva_noise.py --camera-model-config config/camera_recipes/swir_ingaas_vga_15um.yaml \
+    --linear-exr out/highway_spectral.exr --scene-manifest-json scenes/generated/highway/highway_manifest.json \
+    --auto-exposure --raw-out out/highway_swir.raw
+```
+
+`--spectral-lambda-max` > 830 nm switches on `--swir-spectra auto`: above 830 nm the sun follows the
+ASTM G173 direct shape (with the 1.13/1.38 um water-vapour bands), the sky's CIE daylight basis is
+extended with the G173 diffuse shape (an RGB sky map is switched to `--sky-spectrum daylight`, since
+pbrt's RGB upsampling is zero above 830 nm), and grass/leaves follow the measured USGS fresh oak
+leaf above 800 nm. Visible spectra are unchanged. `--film-lambda-min/max` set the rendered band (an
+ideal passband, here 900-1600 nm) while the spectra keep the visible part that the photometric
+`illuminance` normalisation needs. Car/road paint and sign sheeting stay analytic, flat above 830 nm.
+
+![Highway, visible vs SWIR 900-1600 nm](images/highway_vis_vs_swir_900_1600.jpg)
+
 ## Not yet SWIR-aware
 
-The CIE daylight sky stops at 830 nm (the Prague SWIR dataset, 280-2480 nm, is user-downloaded;
-see `tools/prague_sky.py`), atmospheric water-vapour absorption along scene paths, vehicle / road /
+The Prague SWIR sky (280-2480 nm, user-downloaded; see `tools/prague_sky.py`) is not wired in, and
+neither are atmospheric water-vapour absorption along scene paths, vehicle / road /
 skin / snow materials, lamp spectra in the highway scenes, and lens glass / coating transmission.
