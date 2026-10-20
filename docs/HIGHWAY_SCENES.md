@@ -268,9 +268,16 @@ rear) get generic layouts; trucks, the van and the bus have amber / red / clear 
   the same chamber (dual filament). Spectrum: 2856 K behind a 610 nm long-pass red lens.
 * *Unlit lenses:* glossy `coateddiffuse` with nominal red, amber or clear reflectances, so they
   reflect other cars' headlamps.
+* *Rear fog lamps* (`--rear-fog-lamps auto|on|none`; `auto` = on with `--haze fog`): one 200 cd
+  lamp (UN ECE R38: 150–300 cd) on the car's left side, as R48 requires when only one is fitted in
+  right-hand traffic. It's placed at least 100 mm from the stop lamp: low in the bumper (BMW,
+  proxy), beside the combination lamp (trucks, tractor), below the vertical cluster (van) or inboard
+  of it (bus). The Pontiac and the vintage car have none, as cars of their era weren't fitted with
+  them. StVO §17 only permits them below 50 m visibility; `auto` turns them on for any `--haze fog`
+  scene. The manifest gives `tail_lamps[*].rear_fog` (intensity, area, peak luminance) or `null`.
 * *Not modelled:* the lamps' angular intensity distribution (they are Lambertian, while R7 lets
   the intensity fall off away from H-V), the inner optics (pillow lenses, reflector facets) and
-  sparkle, rear reflex reflectors, indicators flashing, reversing and rear fog lamps lit. Heavy
+  sparkle, rear reflex reflectors, indicators flashing and reversing lamps lit. Heavy
   vehicles use the flat rear of their bounding box.
 
 `--tail-lamps simple` restores the old flat 0.30 × 0.10 m red quads at the bounding-box rear

@@ -90,6 +90,28 @@ class TestRearLamps(unittest.TestCase):
         # red chamber is the middle third, so it emits less area than the whole lens
         self.assertLess(meta["sides"][0]["emitting_area_m2"], 0.5 * meta["sides"][0]["lens_area_m2"])
 
+    def test_rear_fog_lamp_left_only(self) -> None:
+        lines, meta = tl.rear_lamp_lines(CAR, False, rear_fog=True)
+        fog = meta["rear_fog"]
+        self.assertEqual(fog["side"], "left")
+        self.assertAlmostEqual(fog["intensity_cd"], tl.FOG_CD, places=2)
+        self.assertAlmostEqual(_emitted_cd(lines), 2 * tl.TAIL_CD + tl.FOG_CD, delta=1e-3 * tl.FOG_CD)
+        fog_lines = lines[len(tl.rear_lamp_lines(CAR, False)[0]) :]
+        xs = [
+            float(v)
+            for ln in fog_lines
+            if "bilinearmesh" in ln
+            for v in re.search(r"\[([^\]]*)\]", ln).group(1).split()[0::3]
+        ]
+        self.assertTrue(xs and max(xs) < 0)  # car's left (-x) side only
+        self.assertIsNone(tl.rear_lamp_lines(CAR, False)[1]["rear_fog"])
+        old = {"id": "p", "model": "car_pontiac_gto", "length_m": 5.17, "width_m": 1.87, "height_m": 1.44}
+        self.assertIsNone(tl.rear_lamp_lines(old, False, rear_fog=True)[1]["rear_fog"])
+        truck = {"id": "t", "model": "truck_box", "length_m": 12.5, "width_m": 2.5, "height_m": 3.6}
+        self.assertAlmostEqual(
+            tl.rear_lamp_lines(truck, False, rear_fog=True)[1]["rear_fog"]["intensity_cd"], tl.FOG_CD, places=2
+        )
+
     def test_red_spectra_inside_ece_red_box(self) -> None:
         wl = night.LIGHT_WL
         for spd in (tl.red_incandescent_spectrum(wl), night.red_led_spectrum(wl)):
@@ -117,6 +139,15 @@ class TestBuilderHook(unittest.TestCase):
             scene = (Path(td) / "scene" / "highway.pbrt").read_text()
             self.assertNotIn("highway_taillamps.py", scene)
             self.assertNotIn("sides", m["lighting"]["artificial"]["tail_lamps"][0])
+
+    def test_rear_fog_auto_with_fog(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            m = build_without_assets(Path(td), "--time-of-day", "night")
+            self.assertTrue(all(t["rear_fog"] is None for t in m["lighting"]["artificial"]["tail_lamps"]))
+        with tempfile.TemporaryDirectory() as td:
+            m = build_without_assets(Path(td), "--time-of-day", "night", "--haze", "fog")
+            lamps = m["lighting"]["artificial"]["tail_lamps"]
+            self.assertTrue(all(t["rear_fog"]["intensity_cd"] == tl.FOG_CD for t in lamps))
 
 
 if __name__ == "__main__":
