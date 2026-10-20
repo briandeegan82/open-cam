@@ -326,6 +326,165 @@ assets:
         path: 14fe03d792914d51b6c6250b393c44fd.glb
         sha256: a8750122cb211145706490e8fbd26ce821d6e8a4074f943974997b2331a02ab9
 
+  # --- Passenger cars and small vans (Sketchfab CC-BY-4.0 via the public Objaverse mirror; glb -> PLY) --
+  # Scale / forward axis / paint and lamp materials: tools/highway_variety.py CARS_GLB.
+  car_tesla_model3:
+    kind: glb
+    title: "Tesla 2018 Model 3"
+    source: https://sketchfab.com/3d-models/5ef9b845aaf44203b6d04e2c677e444f
+    author: uchiha.321abc (Sketchfab)
+    license: CC-BY-4.0
+    license_note: "Attribution required: 'Tesla 2018 Model 3' by uchiha.321abc, https://sketchfab.com/3d-models/5ef9b845aaf44203b6d04e2c677e444f, CC BY 4.0. Mirror: Objaverse (allenai/objaverse, ODC-By)."
+    glb: 5ef9b845aaf44203b6d04e2c677e444f.glb
+    files:
+      - url: https://huggingface.co/datasets/allenai/objaverse/resolve/556637099bf4fa79ea7b239d0d9c328b8a2e9ac8/glbs/000-119/5ef9b845aaf44203b6d04e2c677e444f.glb
+        path: 5ef9b845aaf44203b6d04e2c677e444f.glb
+        sha256: d6d78c9bd1bd9c7ca87a07509a2e7b6585995fcbdec054f297167ba7c15cd878
+  car_renault_logan:
+    kind: glb
+    title: "Renault Logan 2004"
+    source: https://sketchfab.com/3d-models/e4f9463f6e004b90bb977d12f6375b9c
+    author: goooddenis (Sketchfab)
+    license: CC-BY-4.0
+    license_note: "Attribution required: 'Renault Logan 2004' by goooddenis, https://sketchfab.com/3d-models/e4f9463f6e004b90bb977d12f6375b9c, CC BY 4.0. Mirror: Objaverse (allenai/objaverse, ODC-By)."
+    glb: e4f9463f6e004b90bb977d12f6375b9c.glb
+    files:
+      - url: https://huggingface.co/datasets/allenai/objaverse/resolve/556637099bf4fa79ea7b239d0d9c328b8a2e9ac8/glbs/000-128/e4f9463f6e004b90bb977d12f6375b9c.glb
+        path: e4f9463f6e004b90bb977d12f6375b9c.glb
+        sha256: 370dae417d84388fa4af68d9b24e704146149d5d6bb18f92ca823a4647a0384e
+  car_daewoo_nexia:
+    kind: glb
+    title: "Daewoo - Nexia/Cielo"
+    source: https://sketchfab.com/3d-models/90006f59fd594d2b95f1469f651491f1
+    author: SevKa (Sketchfab)
+    license: CC-BY-4.0
+    license_note: "Attribution required: 'Daewoo - Nexia/Cielo' by SevKa, https://sketchfab.com/3d-models/90006f59fd594d2b95f1469f651491f1, CC BY 4.0. Mirror: Objaverse (allenai/objaverse, ODC-By)."
+    glb: 90006f59fd594d2b95f1469f651491f1.glb
+    files:
+      - url: https://huggingface.co/datasets/allenai/objaverse/resolve/556637099bf4fa79ea7b239d0d9c328b8a2e9ac8/glbs/000-028/90006f59fd594d2b95f1469f651491f1.glb
+        path: 90006f59fd594d2b95f1469f651491f1.glb
+        sha256: 2f3de1cadff315588a6dc0215b563cfd0c2429c0f2a258251cf76120d770ec6f
+  car_honda_civic_ek:
+    kind: glb
+    title: "Honda Civic Type R -98 (Free Asset)"
+    source: https://sketchfab.com/3d-models/b9604dd71c6546ec842702682019492a
+    author: tiedtke (Sketchfab)
+    license: CC-BY-4.0
+    license_note: "Attribution required: 'Honda Civic Type R -98 (Free Asset)' by tiedtke, https://sketchfab.com/3d-models/b9604dd71c6546ec842702682019492a, CC BY 4.0. Mirror: Objaverse (allenai/objaverse, ODC-By)."
+    glb: b9604dd71c6546ec842702682019492a.glb
+    files:
+      - url: https://huggingface.co/datasets/allenai/objaverse/resolve/556637099bf4fa79ea7b239d0d9c328b8a2e9ac8/glbs/000-066/b9604dd71c6546ec842702682019492a.glb
+        path: b9604dd71c6546ec842702682019492a.glb
+        sha256: 48d413b411e09ff502a8c46ce4a039bbcaa43bc11d673569e3464bf4c98f262e
+  car_crown_victoria_taxi:
+    kind: glb
+    title: "2001 Crown Victoria Taxi Game Prop"
+    source: https://sketchfab.com/3d-models/2429a825ff1646568e8e6e1453f9c501
+    author: haoliu95 (Sketchfab)
+    license: CC-BY-4.0
+    license_note: "Attribution required: '2001 Crown Victoria Taxi Game Prop' by haoliu95, https://sketchfab.com/3d-models/2429a825ff1646568e8e6e1453f9c501, CC BY 4.0. Mirror: Objaverse (allenai/objaverse, ODC-By)."
+    glb: 2429a825ff1646568e8e6e1453f9c501.glb
+    files:
+      - url: https://huggingface.co/datasets/allenai/objaverse/resolve/556637099bf4fa79ea7b239d0d9c328b8a2e9ac8/glbs/000-006/2429a825ff1646568e8e6e1453f9c501.glb
+        path: 2429a825ff1646568e8e6e1453f9c501.glb
+        sha256: c67595439490ab12e63de88b684a943a65eaf57ff57d77d9b248dca062a6d6bb
+  car_nissan_titan:
+    kind: glb
+    title: "Nissan Titan 4x4"
+    source: https://sketchfab.com/3d-models/6dcff056bc0f4d75abd0472f671ecb1d
+    author: David_Holiday (Sketchfab)
+    license: CC-BY-4.0
+    license_note: "Attribution required: 'Nissan Titan 4x4' by David_Holiday, https://sketchfab.com/3d-models/6dcff056bc0f4d75abd0472f671ecb1d, CC BY 4.0. Mirror: Objaverse (allenai/objaverse, ODC-By)."
+    glb: 6dcff056bc0f4d75abd0472f671ecb1d.glb
+    files:
+      - url: https://huggingface.co/datasets/allenai/objaverse/resolve/556637099bf4fa79ea7b239d0d9c328b8a2e9ac8/glbs/000-078/6dcff056bc0f4d75abd0472f671ecb1d.glb
+        path: 6dcff056bc0f4d75abd0472f671ecb1d.glb
+        sha256: 984f93ddf0eefb084700bd44e078b9f586e00627ceab5327287c3baf60c5fd2c
+  car_range_rover_evoque:
+    kind: glb
+    title: "Range Rover Evoque"
+    source: https://sketchfab.com/3d-models/e0bb09118ab84fe0a0530bd0df2fd74a
+    author: minghau (Sketchfab)
+    license: CC-BY-4.0
+    license_note: "Attribution required: 'Range Rover Evoque' by minghau, https://sketchfab.com/3d-models/e0bb09118ab84fe0a0530bd0df2fd74a, CC BY 4.0. Mirror: Objaverse (allenai/objaverse, ODC-By)."
+    glb: e0bb09118ab84fe0a0530bd0df2fd74a.glb
+    files:
+      - url: https://huggingface.co/datasets/allenai/objaverse/resolve/556637099bf4fa79ea7b239d0d9c328b8a2e9ac8/glbs/000-080/e0bb09118ab84fe0a0530bd0df2fd74a.glb
+        path: e0bb09118ab84fe0a0530bd0df2fd74a.glb
+        sha256: 16103c076a87afc43eabedae1834661b8cb9468be584bdec487bb7406dce9e56
+  car_audi_q7:
+    kind: glb
+    title: "2015 Audi Q7"
+    source: https://sketchfab.com/3d-models/65917c52e0b24f1289126128600ed7aa
+    author: razor24 (Sketchfab)
+    license: CC-BY-4.0
+    license_note: "Attribution required: '2015 Audi Q7' by razor24, https://sketchfab.com/3d-models/65917c52e0b24f1289126128600ed7aa, CC BY 4.0. Mirror: Objaverse (allenai/objaverse, ODC-By)."
+    glb: 65917c52e0b24f1289126128600ed7aa.glb
+    files:
+      - url: https://huggingface.co/datasets/allenai/objaverse/resolve/556637099bf4fa79ea7b239d0d9c328b8a2e9ac8/glbs/000-099/65917c52e0b24f1289126128600ed7aa.glb
+        path: 65917c52e0b24f1289126128600ed7aa.glb
+        sha256: 8f40bd0d2fc6028c8e20dc7ad23cb39084ecf97ac2d730262b95cd9518e87ec9
+  car_vw_passat_b6:
+    kind: glb
+    title: "Volkswagen Passat 3D Scan"
+    source: https://sketchfab.com/3d-models/c839fbd24faa4477b9fb7b3fc6f68fa4
+    author: zdenkoroman (Sketchfab)
+    license: CC-BY-4.0
+    license_note: "Attribution required: 'Volkswagen Passat 3D Scan' by zdenkoroman, https://sketchfab.com/3d-models/c839fbd24faa4477b9fb7b3fc6f68fa4, CC BY 4.0. Mirror: Objaverse (allenai/objaverse, ODC-By)."
+    glb: c839fbd24faa4477b9fb7b3fc6f68fa4.glb
+    files:
+      - url: https://huggingface.co/datasets/allenai/objaverse/resolve/556637099bf4fa79ea7b239d0d9c328b8a2e9ac8/glbs/000-110/c839fbd24faa4477b9fb7b3fc6f68fa4.glb
+        path: c839fbd24faa4477b9fb7b3fc6f68fa4.glb
+        sha256: dda57ed6c225d9aff97fba85bb981ab6811ce3b1ad2006f5aeac2692d195a4b6
+  car_hyundai_tucson:
+    kind: glb
+    title: "2015 Hyundai Tucson"
+    source: https://sketchfab.com/3d-models/7674a3bd168a451daf73fc0a33d39589
+    author: razor24 (Sketchfab)
+    license: CC-BY-4.0
+    license_note: "Attribution required: '2015 Hyundai Tucson' by razor24, https://sketchfab.com/3d-models/7674a3bd168a451daf73fc0a33d39589, CC BY 4.0. Mirror: Objaverse (allenai/objaverse, ODC-By)."
+    glb: 7674a3bd168a451daf73fc0a33d39589.glb
+    files:
+      - url: https://huggingface.co/datasets/allenai/objaverse/resolve/556637099bf4fa79ea7b239d0d9c328b8a2e9ac8/glbs/000-037/7674a3bd168a451daf73fc0a33d39589.glb
+        path: 7674a3bd168a451daf73fc0a33d39589.glb
+        sha256: 4011dfd49efe2735387b66d131975488b936a4f241c1bbfb621a685ec8fa16f7
+  car_mercedes_e63_estate:
+    kind: glb
+    title: "2018 Mercedes Benz E63 AMG S Wagon"
+    source: https://sketchfab.com/3d-models/da7dc289aeee4c8590762a1218b1bc6d
+    author: sinnik (Sketchfab)
+    license: CC-BY-4.0
+    license_note: "Attribution required: '2018 Mercedes Benz E63 AMG S Wagon' by sinnik, https://sketchfab.com/3d-models/da7dc289aeee4c8590762a1218b1bc6d, CC BY 4.0. Mirror: Objaverse (allenai/objaverse, ODC-By)."
+    glb: da7dc289aeee4c8590762a1218b1bc6d.glb
+    files:
+      - url: https://huggingface.co/datasets/allenai/objaverse/resolve/556637099bf4fa79ea7b239d0d9c328b8a2e9ac8/glbs/000-093/da7dc289aeee4c8590762a1218b1bc6d.glb
+        path: da7dc289aeee4c8590762a1218b1bc6d.glb
+        sha256: 48c6e7c846d926204c17518f63d88f067f4e6485a2be3f4c4610b80a5a986955
+  car_mazda_cx5:
+    kind: glb
+    title: "Mazda CX-5"
+    source: https://sketchfab.com/3d-models/0ca0354c7b2a41bbb84c835ff046e8e5
+    author: tnnv (Sketchfab)
+    license: CC-BY-4.0
+    license_note: "Attribution required: 'Mazda CX-5' by tnnv, https://sketchfab.com/3d-models/0ca0354c7b2a41bbb84c835ff046e8e5, CC BY 4.0. Mirror: Objaverse (allenai/objaverse, ODC-By)."
+    glb: 0ca0354c7b2a41bbb84c835ff046e8e5.glb
+    files:
+      - url: https://huggingface.co/datasets/allenai/objaverse/resolve/556637099bf4fa79ea7b239d0d9c328b8a2e9ac8/glbs/000-030/0ca0354c7b2a41bbb84c835ff046e8e5.glb
+        path: 0ca0354c7b2a41bbb84c835ff046e8e5.glb
+        sha256: dd683a90f09d1f20ee367db67b6022d6869f5e5324de84b223158d48cd33774c
+  car_vw_tiguan:
+    kind: glb
+    title: "VW Tiguan 2021"
+    source: https://sketchfab.com/3d-models/0a11d748fd8f4b3f9bc879aed8d6d208
+    author: source5525 (Sketchfab)
+    license: CC-BY-4.0
+    license_note: "Attribution required: 'VW Tiguan 2021' by source5525, https://sketchfab.com/3d-models/0a11d748fd8f4b3f9bc879aed8d6d208, CC BY 4.0. Mirror: Objaverse (allenai/objaverse, ODC-By)."
+    glb: 0a11d748fd8f4b3f9bc879aed8d6d208.glb
+    files:
+      - url: https://huggingface.co/datasets/allenai/objaverse/resolve/556637099bf4fa79ea7b239d0d9c328b8a2e9ac8/glbs/000-131/0a11d748fd8f4b3f9bc879aed8d6d208.glb
+        path: 0a11d748fd8f4b3f9bc879aed8d6d208.glb
+        sha256: f467d0511712dfe4dbd9a74733da1ae9d7a4f0ebd44fe065913a51e8f2cbf193
+
   # --- Traffic signs (Wikimedia Commons SVG artwork; public domain) ---------
   # StVO signs: German official works (Sec. 5 UrhG, amtliche Werke); MUTCD signs: US federal
   # works (FHWA). Prepared into per-sheeting-colour masks + an alpha cutout (needs cairosvg).
