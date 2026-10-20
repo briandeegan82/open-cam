@@ -91,6 +91,30 @@ SPECIES = {
     "veg_shrub_04": ("shrub", 3.0),
 }
 DEFAULT_SPECIES = [("veg_island_tree_02", "tree"), ("veg_shrub_02", "shrub")]
+# --vegetation-pool extended: more Poly Haven species. Multipliers give mean heights of about 12 m
+# (jacaranda), 18 m (fir), 6-11 m (broadleaf), 4.5 m (fir sapling); shrubs/grass 0.25-0.8 m.
+SPECIES_EXTENDED = {
+    "veg_jacaranda_tree": ("tree", 0.19),
+    "veg_island_tree_01": ("tree", 0.68),
+    "veg_tree_small_02": ("tree", 0.55),
+    "veg_fir_tree_01": ("tree", 0.30),
+    "veg_fir_sapling": ("tree", 1.1),
+    "veg_searsia_burchellii": ("tree", 0.58),
+    "veg_shrub_03": ("shrub", 1.6),
+    "veg_wild_rooibos_bush": ("shrub", 1.35),
+    "veg_grass_medium_01": ("shrub", 1.3),
+    "veg_grass_medium_02": ("shrub", 1.1),
+    "veg_grass_bermuda_01": ("shrub", 1.4),
+    "veg_dead_tree_trunk_02": ("shrub", 0.9),
+    "veg_tree_stump_01": ("shrub", 0.9),
+}
+DEFAULT_SPECIES_EXTENDED = [
+    ("veg_island_tree_02", "tree"),
+    ("veg_fir_tree_01", "tree"),
+    ("veg_tree_small_02", "tree"),
+    ("veg_shrub_02", "shrub"),
+    ("veg_grass_medium_01", "shrub"),
+]
 
 # Heavy/commercial vehicles (manifest kind "glb"): class, model forward axis, real length [m],
 # paintable materials and proxy box (width, height) for --allow-missing-assets.
@@ -101,12 +125,61 @@ HEAVY = {
     "trailer_box": {"cls": "trailer", "forward": "+x", "length_m": 9.9, "paint": []},
     "bus_town": {"cls": "bus", "forward": "+x", "length_m": 12.0, "paint": []},
 }
+# Passenger cars and small vans from the Objaverse mirror (config/highway_assets.yaml). length_m = nominal
+# manufacturer length (not checked against data sheets); paint = materials that take the scene paint;
+# lens = rear lamp lens materials for tools/highway_taillamps.py (empty = lamps on the body in a generic region).
+CARS_GLB = {
+    "car_tesla_model3": {"cls": "car", "forward": "-z", "length_m": 4.69, "paint": ["primary"], "lens": ["breaklight_l", "right_rear_light", "tembus_red.0"]},
+    "car_renault_logan": {"cls": "car", "forward": "+z", "length_m": 4.25, "paint": [], "lens": []},
+    "car_daewoo_nexia": {"cls": "car", "forward": "+z", "length_m": 4.48, "paint": ["Body"], "lens": []},
+    "car_honda_civic_ek": {"cls": "car", "forward": "+z", "length_m": 4.18, "paint": ["Body_MAT"], "lens": []},
+    "car_crown_victoria_taxi": {"cls": "car", "forward": "+z", "length_m": 5.39, "paint": [], "lens": []},
+    "car_nissan_titan": {"cls": "car", "forward": "-z", "length_m": 5.70, "paint": [], "lens": []},
+    "car_range_rover_evoque": {"cls": "car", "forward": "+z", "length_m": 4.36, "paint": ["Car_Body"], "lens": ["Ligths"]},
+    "car_audi_q7": {"cls": "car", "forward": "+z", "length_m": 5.05, "paint": ["metal"], "lens": ["brakelights_red"]},
+    "car_vw_passat_b6": {"cls": "car", "forward": "+z", "length_m": 4.77, "paint": [], "lens": []},
+    "car_hyundai_tucson": {"cls": "car", "forward": "+z", "length_m": 4.48, "paint": ["metal"], "lens": ["brakelights_red"]},
+    "car_mercedes_e63_estate": {"cls": "car", "forward": "+z", "length_m": 4.99, "paint": ["CAR_PAINT"], "lens": ["REAR_TAIL_LIGHT", "DARKEN_TAIL_LIGHT"]},
+    "car_mazda_cx5": {"cls": "car", "forward": "+z", "length_m": 4.54, "paint": ["Main"], "lens": ["BackLights"]},
+    "car_vw_tiguan": {"cls": "car", "forward": "+z", "length_m": 4.51, "paint": ["Car_Paint"], "lens": ["Red_Light"]},
+}  # fmt: skip
+
+
+def glb_spec(model: str) -> dict | None:
+    """Scale / orientation / material spec of a glb vehicle (heavy or passenger), or None."""
+    return HEAVY.get(model) or CARS_GLB.get(model)
+
+
+def is_glass_material(m: dict) -> bool:
+    """glTF material rendered as thin glass (blended alpha or a glass/window name)."""
+    name = m["name"].lower()
+    return m.get("alpha_mode") == "BLEND" or any(
+        w in name for w in ("glass", "vitre", "windglass", "window", "windshield")
+    )
+
+
+def glb_size(model: str, info: dict, prep: Path) -> tuple[float, float, float]:
+    """(length, width, height) [m] of a prepared glb vehicle after scaling to its nominal length."""
+    spec = glb_spec(model)
+    lo, hi = _robust_box(info, prep)
+    ax, other = (2, 0) if spec["forward"][1] == "z" else (0, 2)
+    s = spec["length_m"] / float(hi[ax] - lo[ax])
+    return spec["length_m"], float(hi[other] - lo[other]) * s, float(hi[1] - lo[1]) * s
+
+
 _PROXY_WH = {"van": (2.0, 2.5), "rigid": (2.5, 3.6), "tractor": (2.5, 3.2), "trailer": (2.5, 4.0), "bus": (2.55, 3.1)}
 _YAW = {"+z": 0.0, "-z": 180.0, "+x": -90.0, "-x": 90.0}
 
 
 def add_arguments(ap: argparse.ArgumentParser) -> None:
     g = ap.add_argument_group("scene variety (tools/highway_variety.py)")
+    g.add_argument(
+        "--car-pool",
+        choices=("classic", "extended"),
+        default="classic",
+        help="Car models for --seed traffic: classic = the 3 CC0 cars; extended = + the 16 Objaverse CC-BY cars"
+        " (CARS_GLB).",
+    )
     g.add_argument("--curve-radius", type=float, default=None, help="Arc radius [m], + = bends right, 0 = straight.")
     g.add_argument("--clothoid-length", type=float, default=None, help="Spiral transition length [m] (0 = none).")
     g.add_argument("--grade", type=float, default=None, help="Road grade [%%], + = uphill.")
@@ -114,6 +187,12 @@ def add_arguments(ap: argparse.ArgumentParser) -> None:
     g.add_argument("--gantry", choices=("on", "off"), default=None)
     g.add_argument("--overpass", choices=("on", "off"), default=None)
     g.add_argument("--barrier-materials", choices=("textured", "flat"), default="textured")
+    g.add_argument(
+        "--vegetation-pool",
+        choices=("classic", "extended"),
+        default="classic",
+        help="extended: add 6 trees and 7 shrubs/grass clumps/stumps (Poly Haven CC0) to the species mix.",
+    )
 
 
 # ---------------------------------------------------------------------------- alignment
@@ -248,7 +327,7 @@ class Variety:
     lamp_heads: list[dict] = field(default_factory=list)
 
     def species_scale(self, vid: str) -> float:
-        return SPECIES[vid][1]
+        return {**SPECIES, **SPECIES_EXTENDED}[vid][1]
 
     def species_spacing(self, kind: str) -> float:
         return float(sum(k == kind for _, k in self.species))
@@ -283,6 +362,9 @@ def _pick(rng: np.random.Generator, shares: dict[str, float]) -> str:
 
 def resolve(args: argparse.Namespace, car_models: tuple[str, ...], cam_lane: int) -> Variety:
     v = Variety(seed=args.seed, barrier_textured=args.barrier_materials == "textured")
+    extended_veg = getattr(args, "vegetation_pool", "classic") == "extended"
+    if extended_veg:
+        v.species = list(DEFAULT_SPECIES_EXTENDED)
     rng = np.random.default_rng(args.seed) if args.seed is not None else None
     r = rng.uniform if rng is not None else None
 
@@ -304,11 +386,14 @@ def resolve(args: argparse.Namespace, car_models: tuple[str, ...], cam_lane: int
     v.overpass = on[args.overpass] if args.overpass else bool(rng is not None and r() < 0.35)
     if rng is not None:
         v.gantry_s, v.overpass_s, v.lamp_spacing_m = r(90, 220), r(240, 480), r(36, 50)
-        trees = [k for k, (kind, _) in SPECIES.items() if kind == "tree"]
-        shrubs = [k for k, (kind, _) in SPECIES.items() if kind == "shrub"]
+        pool = {**SPECIES, **SPECIES_EXTENDED} if extended_veg else SPECIES
+        trees = [k for k, (kind, _) in pool.items() if kind == "tree"]
+        shrubs = [k for k, (kind, _) in pool.items() if kind == "shrub"]
         v.species = [(t, "tree") for t in rng.choice(trees, int(rng.integers(1, 4)), replace=False)]
         v.species += [(s, "shrub") for s in rng.choice(shrubs, int(rng.integers(1, 4)), replace=False)]
         v.species = [(str(a), b) for a, b in v.species]
+        if getattr(args, "car_pool", "classic") == "extended":
+            car_models = (*car_models, *CARS_GLB)
         v.traffic = random_traffic(rng, car_models, cam_lane, v.paints)
     return v
 
@@ -330,7 +415,8 @@ def random_traffic(rng: np.random.Generator, car_models, cam_lane: int, paints: 
             yaw = float(rng.normal(0.0, 0.6))
             sign = 1.0 if lane >= 0 else -1.0
             if cls == "car":
-                model, length = str(rng.choice(car_models)), 4.7
+                model = str(rng.choice(car_models))
+                length = CARS_GLB[model]["length_m"] if model in CARS_GLB else 4.7
                 paint = _pick(rng, PAINT_SHARES)
             else:
                 model = {
@@ -452,7 +538,7 @@ def _robust_box(info: dict, prep: Path) -> tuple[np.ndarray, np.ndarray]:
 def glb_vehicle_include(model: str, info: dict, prep: Path, raw: Path, out_dir: Path, inst: str, paint_spd: str,
                         luminance_texture) -> tuple[list[str], float]:  # fmt: skip
     """pbrt lines for a prepared glb vehicle (front -> +z after the returned yaw, ground at y=0)."""
-    spec = HEAVY[model]
+    spec = glb_spec(model)
     lines = []
     for k, m in enumerate(info["materials"]):
         mn, name = f"{inst}:{k}", m["name"].lower()
@@ -470,7 +556,7 @@ def glb_vehicle_include(model: str, info: dict, prep: Path, raw: Path, out_dir: 
                 ]
                 refl = f'"texture reflectance" "{mn}:c"'
             lines.append(f'MakeNamedMaterial "{mn}" "string type" "coateddiffuse" {refl} "float roughness" [0.01]')
-        elif m.get("alpha_mode") == "BLEND" or any(w in name for w in ("glass", "vitre", "windglass")):
+        elif is_glass_material(m):
             lines.append(f'MakeNamedMaterial "{mn}" "string type" "thindielectric" "float eta" [1.52]')
         elif any(w in name for w in ("pneu", "tyre", "tire", "rezina")):
             lines.append(
@@ -506,7 +592,7 @@ def proxy_vehicle(model: str, paint_spd: str, inst: str, mesh, box) -> list[str]
     """Box stand-in for a missing heavy vehicle (front +z, ground y=0); None for cars."""
     if model not in HEAVY:
         return None
-    spec = HEAVY[model]
+    spec = glb_spec(model)
     w, h = _PROXY_WH[spec["cls"]]
     ln = spec["length_m"]
     return [
