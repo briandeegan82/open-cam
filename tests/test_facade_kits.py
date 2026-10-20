@@ -97,3 +97,17 @@ def test_kits_build_keeps_cars_and_emitters_and_lights_rooms_at_night(tmp_path):
     assert b.count("ObjectInstance") > 500 and '"thindielectric"' in b
     for name in re.findall(r'ObjectInstance "([^"]+)"', b):
         assert f'ObjectBegin "{name}"' in b
+
+
+def test_kit_recess_is_not_covered_by_lot_or_back_block_boxes(tmp_path):
+    b, _ = _build(tmp_path, "--facade-style", "kits")
+    seen = 0
+    for seg in re.split(r'\nNamedMaterial "', b)[1:]:
+        if not seg.startswith(("facade_render", "facade_brick", "concrete")):
+            continue
+        for arr in re.findall(r'"point3 P" \[([^\]]*)\]', seg):
+            p = np.array(arr.split(), float).reshape(-1, 3)
+            ax = np.abs(p[p[:, 1] > 0.5, 0])
+            seen += ax.size
+            assert not np.any((ax > urban.BUILD_X - 0.01) & (ax < urban.BUILD_X + fk.RECESS - 0.01))
+    assert seen > 0
