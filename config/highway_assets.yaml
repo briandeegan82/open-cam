@@ -499,3 +499,123 @@ assets:
       - url: https://upload.wikimedia.org/wikipedia/commons/9/98/MUTCD_W11-2.svg
         path: "MUTCD_W11-2.svg"
         sha256: 3ae5b9f1605ebb7e87faf26610f5d8f7acb9fbdc8d3a76ff719032016c3a070a
+  tex_bricks059:
+    kind: texture
+    title: Bricks 059 (red brick, stretcher bond)
+    source: https://ambientcg.com/view?id=Bricks059
+    author: ambientCG (Lennart Demes)
+    license: CC0-1.0
+    tile_size_m: 1.05
+    spd: facade_brick
+    role: facade
+    files:
+      - url: https://ambientcg.com/get?file=Bricks059_2K-JPG.zip
+        path: Bricks059_2K-JPG.zip
+        sha256: de708a2a4519b1fa6041bfbbc4cecee38a9e90d43650c5933da1b4136147d334
+        extract: Bricks059
+    maps: {color: Bricks059/Bricks059_2K-JPG_Color.jpg, normal: Bricks059/Bricks059_2K-JPG_NormalGL.jpg, roughness: Bricks059/Bricks059_2K-JPG_Roughness.jpg}
+  tex_bricks085:
+    kind: texture
+    title: Bricks 085 (red factory brick)
+    source: https://ambientcg.com/view?id=Bricks085
+    author: ambientCG (Lennart Demes)
+    license: CC0-1.0
+    tile_size_m: 2.4
+    spd: facade_brick
+    role: facade
+    files:
+      - url: https://ambientcg.com/get?file=Bricks085_2K-JPG.zip
+        path: Bricks085_2K-JPG.zip
+        sha256: d27fbc435e459e29d74e5fe61b210addee2031ba57125dbb05ff51b7d3b179e4
+        extract: Bricks085
+    maps: {color: Bricks085/Bricks085_2K-JPG_Color.jpg, normal: Bricks085/Bricks085_2K-JPG_NormalGL.jpg, roughness: Bricks085/Bricks085_2K-JPG_Roughness.jpg}
+  tex_bricks092:
+    kind: texture
+    title: Bricks 092 (orange modern brick)
+    source: https://ambientcg.com/view?id=Bricks092
+    author: ambientCG (Lennart Demes)
+    license: CC0-1.0
+    tile_size_m: 1.1
+    spd: facade_brick
+    role: facade
+    files:
+      - url: https://ambientcg.com/get?file=Bricks092_2K-JPG.zip
+        path: Bricks092_2K-JPG.zip
+        sha256: 89c97575fa7f72a810bfbb93037b9cf43d922a218263d046f49eadd87baa80e4
+        extract: Bricks092
+    maps: {color: Bricks092/Bricks092_2K-JPG_Color.jpg, normal: Bricks092/Bricks092_2K-JPG_NormalGL.jpg, roughness: Bricks092/Bricks092_2K-JPG_Roughness.jpg}
+  tex_bricks060:
+    kind: texture
+    title: Bricks 060 (light painted brick)
+    source: https://ambientcg.com/view?id=Bricks060
+    author: ambientCG (Lennart Demes)
+    license: CC0-1.0
+    tile_size_m: 1.05
+    spd: facade_render
+    role: facade
+    files:
+      - url: https://ambientcg.com/get?file=Bricks060_2K-JPG.zip
+        path: Bricks060_2K-JPG.zip
+        sha256: a0dc1530f188b584aed1957a91007485ebdfa91f0028ecfcc254fa614398368b
+        extract: Bricks060
+    maps: {color: Bricks060/Bricks060_2K-JPG_Color.jpg, normal: Bricks060/Bricks060_2K-JPG_NormalGL.jpg, roughness: Bricks060/Bricks060_2K-JPG_Roughness.jpg}
+  tex_bricks093:
+    kind: texture
+    title: Bricks 093 (beige city brick)
+    source: https://ambientcg.com/view?id=Bricks093
+    author: ambientCG (Lennart Demes)
+    license: CC0-1.0
+    tile_size_m: 2.1
+    spd: facade_render
+    role: facade
+    files:
+      - url: https://ambientcg.com/get?file=Bricks093_2K-JPG.zip
+        path: Bricks093_2K-JPG.zip
+        sha256: 254a148779e299d82c5190bd82eb7f031cc6112678b1707436d731bae973265e
+        extract: Bricks093
+    maps: {color: Bricks093/Bricks093_2K-JPG_Color.jpg, normal: Bricks093/Bricks093_2K-JPG_NormalGL.jpg, roughness: Bricks093/Bricks093_2K-JPG_Roughness.jpg}
+  tex_concrete034:
+    kind: texture
+    title: Concrete 034 (smooth light concrete/plaster)
+    source: https://ambientcg.com/view?id=Concrete034
+    author: ambientCG (Lennart Demes)
+    license: CC0-1.0
+    tile_size_m: 1.1
+    spd: concrete
+    role: facade
+    files:
+      - url: https://ambientcg.com/get?file=Concrete034_2K-JPG.zip
+        path: Concrete034_2K-JPG.zip
+        sha256: fafd7cd3aee2b703abbb12b7810ef565ab76ac7ea3b1ea9a73b088e423e670b3
+        extract: Concrete034
+    maps: {color: Concrete034/Concrete034_2K-JPG_Color.jpg, normal: Concrete034/Concrete034_2K-JPG_NormalGL.jpg, roughness: Concrete034/Concrete034_2K-JPG_Roughness.jpg}
+  tex_paintedplaster017:
+    kind: texture
+    title: Painted Plaster 017 (white render)
+    source: https://ambientcg.com/view?id=PaintedPlaster017
+    author: ambientCG (Lennart Demes)
+    license: CC0-1.0
+    tile_size_m: 2.0  # ambientCG lists no size; nominal
+    spd: facade_render
+    role: facade
+    files:
+      - url: https://ambientcg.com/get?file=PaintedPlaster017_2K-JPG.zip
+        path: PaintedPlaster017_2K-JPG.zip
+        sha256: a61330b10b1aa58410f8b60632f667e7a6d84d521bbd85cec4c4de7136d282d2
+        extract: PaintedPlaster017
+    maps: {color: PaintedPlaster017/PaintedPlaster017_2K-JPG_Color.jpg, normal: PaintedPlaster017/PaintedPlaster017_2K-JPG_NormalGL.jpg, roughness: PaintedPlaster017/PaintedPlaster017_2K-JPG_Roughness.jpg}
+  tex_paintedplaster004:
+    kind: texture
+    title: Painted Plaster 004 (yellow render)
+    source: https://ambientcg.com/view?id=PaintedPlaster004
+    author: ambientCG (Lennart Demes)
+    license: CC0-1.0
+    tile_size_m: 2.0  # ambientCG lists no size; nominal
+    spd: facade_render
+    role: facade
+    files:
+      - url: https://ambientcg.com/get?file=PaintedPlaster004_2K-JPG.zip
+        path: PaintedPlaster004_2K-JPG.zip
+        sha256: 1bfce871832df77eafd4c76fcb473c2e856023b866224f5de4cb4383ae1fd0f0
+        extract: PaintedPlaster004
+    maps: {color: PaintedPlaster004/PaintedPlaster004_2K-JPG_Color.jpg, normal: PaintedPlaster004/PaintedPlaster004_2K-JPG_NormalGL.jpg, roughness: PaintedPlaster004/PaintedPlaster004_2K-JPG_Roughness.jpg}

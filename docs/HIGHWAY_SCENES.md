@@ -958,3 +958,26 @@ near zebra crossing by default).
 * **Flicker:** every signal aspect and shop sign is in `manifest["emitters"]`, so
   `tools/render_time_slices.py scenes/generated/urban --linear` renders LED flicker / rolling
   shutter (pass `--exposure-s` to record the exposure in the manifest).
+
+### Facade textures (`--facade-textures mixed`)
+
+Off by default (`none`, the plain spectral boxes). `mixed` puts one of eight
+ambientCG CC0 maps on each street lot: red, factory-red and orange brick
+(`facade_brick` spectrum), light-painted and beige brick, white and yellow
+render (`facade_render`), and smooth concrete (`concrete`). Fetch them with
+
+```bash
+python tools/fetch_highway_assets.py tex_bricks059 tex_bricks085 tex_bricks092 tex_bricks060 \
+    tex_bricks093 tex_concrete034 tex_paintedplaster017 tex_paintedplaster004
+```
+
+As for the road surfaces, each wall's reflectance is still its spectrum; the
+colour map only contributes its luminance, normalised to mean 1, plus a normal
+map. So brick and render keep the same mean brightness as the untextured
+boxes, but the yellow render and red brick are not tinted by their photo
+colours. UVs are metric (the manifest's `tile_size_m`; the two plaster maps
+have no published size and use a nominal 2 m). Lots draw their map from their
+own seeded RNG, so cars, windows and emitters match the default scene. The
+procedural windows and lit windows are unchanged; the manifest's
+`facades.textures` lists the map used on each lot. Cross-street lots stay
+untextured.
