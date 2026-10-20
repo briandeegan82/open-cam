@@ -273,10 +273,34 @@ def write_target_scene(args: argparse.Namespace, repo: Path, out_dir: Path, targ
     else:
         raise ValueError(f"unsupported target: {target}")
     scene_path.write_text("\n".join(lines) + "\n")
+    manifest_path = out_dir / f"{target}_manifest.json"
+    manifest_path.write_text(json.dumps(_target_manifest(args, repo, scene_path, film_output), indent=2) + "\n")
     return {
         "target": target,
         "scene": _rel(repo, scene_path),
         "film_output": film_output,
+        "manifest": _rel(repo, manifest_path),
+    }
+
+
+def _target_manifest(args: argparse.Namespace, repo: Path, scene_path: Path, film_output: str) -> dict:
+    """Per-target scene manifest (film size + camera) for pbrt_spectral_exr_to_electrons.py."""
+    cam: dict = {"type": "realistic" if args.camera == "realistic" else "perspective", "cam_dist": float(args.cam_dist)}
+    if args.camera == "realistic":
+        cam["lensfile"] = _rel(repo, resolve_lensfile(repo, args.lensfile))
+        cam["aperture_diameter_mm"] = float(args.aperture_diameter_mm)
+        cam["focus_distance"] = float(args.focus_distance) if args.focus_distance is not None else float(args.cam_dist)
+    else:
+        cam["fov_deg"] = float(args.fov)
+    return {
+        "scene": _rel(repo, scene_path),
+        "film": {
+            "type": str(args.film),
+            "xresolution": int(args.xres),
+            "yresolution": int(args.yres),
+            "output": film_output,
+        },
+        "camera": cam,
     }
 
 

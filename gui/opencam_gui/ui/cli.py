@@ -107,6 +107,7 @@ def build_parser() -> argparse.ArgumentParser:
     demo.add_argument("--list-scenarios", action="store_true", help="List scenarios for the topic and exit")
 
     sub.add_parser("topics", help="List the demos in teaching order and exit")
+    sub.add_parser("studio", help="Open Open Cam Studio, the web interface (same as `opencam-studio`)")
     return p
 
 
@@ -118,6 +119,11 @@ def _print_topics() -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["studio"]:
+        from opencam_gui.studio.__main__ import main as studio_main
+
+        return studio_main(argv[1:])
     args = build_parser().parse_args(argv)
 
     if args.command == "topics":

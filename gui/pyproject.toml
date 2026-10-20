@@ -16,17 +16,23 @@ dependencies = [
   "PyYAML>=6.0",
   "Pillow>=10.0",
   "dearpygui>=1.11",
+  "fastapi>=0.110",
+  "uvicorn>=0.29",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.4"]
+dev = ["pytest>=7.4", "httpx>=0.27"]
 
 [project.scripts]
 opencam-gui = "opencam_gui.ui.cli:main"
+opencam-studio = "opencam_gui.studio.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["opencam_gui*"]
+
+[tool.setuptools.package-data]
+"opencam_gui.studio" = ["static/*", "static/assets/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

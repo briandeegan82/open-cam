@@ -14,6 +14,10 @@ subprocesses. See `opencam_gui/core/` for the thin adapter layer and
 `tutorials/` in this directory for the full explanation of what each demo
 reuses.
 
+For a general-purpose browser interface to the pipeline (scene, camera, quality, run,
+results, run history), see **Open Cam Studio**: `opencam-studio` or `opencam-gui studio`,
+documented in [`../docs/STUDIO.md`](../docs/STUDIO.md). It links back to these demos.
+
 ## Learning path
 
 The seven demos form one graduate-course arc. Geometry forms the image, optics

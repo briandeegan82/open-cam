@@ -348,6 +348,14 @@ venv/bin/python tools/munsell_mat_to_sqlite.py --summary
 - Pipeline command mismatch: run with `--dry-run` and inspect generated command list.
 - Unexpected camera config behavior: ensure only one of `paths.camera_model_name` and `paths.camera_model_config` is set.
 
+## Open Cam Studio (web interface)
+
+`venv/bin/pip install -e gui && venv/bin/opencam-studio` opens a browser app
+for running simulations without writing YAML. You choose a scene, a camera and
+a quality level, then view the results. Every run saves the exact CLI commands
+it executed (`run.sh`), so GUI runs remain scriptable. See
+[`docs/STUDIO.md`](docs/STUDIO.md).
+
 ## Interactive GUI & Tutorials
 
 For an interactive seven-stage graduate course -- imaging geometry, PSF and

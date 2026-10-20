@@ -20,3 +20,7 @@ scenes/assets/
 *.tmp
 .ipynb_checkpoints/
 src/
+node_modules/
+
+# Open Cam Studio frontend sources (the bare src/ rule above is for build trees)
+!gui/studio_web/src/
