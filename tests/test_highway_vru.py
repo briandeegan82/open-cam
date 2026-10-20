@@ -91,5 +91,54 @@ class TestScene(unittest.TestCase):
             vru.check_args(a)
 
 
+class TestImportedRider(unittest.TestCase):
+    def test_contact_points_cover_every_rideable_model(self) -> None:
+        import two_wheelers as tw
+
+        self.assertEqual(set(tw.RIDER), set(tw.MODELS) - {"kickscooter_electric"})
+        for aid, ((sz, sy), (gz, gy, gw), (_fz, fy, fw)) in tw.RIDER.items():
+            half = tw.MODELS[aid][2] / 2
+            self.assertTrue(-half < sz < gz < half, aid)  # saddle behind the grips, both on the model
+            self.assertTrue(0.15 < fy < sy < gy + 0.25 < 1.5, aid)
+            self.assertTrue(0.1 < gw < 0.5 and 0.05 < fw < 0.25, aid)
+
+    def test_rider_sits_on_the_model(self) -> None:
+        import two_wheelers as tw
+
+        for aid in ("bike_road", "moto_yamaha_fz150", "scooter_vespa_yellow"):
+            (sz, sy), _, _ = tw.RIDER[aid]
+            lo, hi = vru.imported_rider(aid, 0.25).bounds()
+            self.assertGreater(lo[1], 0.0, aid)  # feet above the road
+            self.assertTrue(1.5 < hi[1] < 2.0, aid)  # seated 1.80 m rider
+            self.assertTrue(lo[2] < sz < hi[2], aid)
+            names = set(vru.imported_rider(aid, 0.25).parts)
+            self.assertNotIn("vru:tyre", names)  # no procedural bicycle under an imported one
+            self.assertEqual(
+                "vru:hair" in names, tw.MODELS[aid][0] == "bicycle", aid
+            )  # cycle helmet vs full-face helmet
+
+    def test_bike_args(self) -> None:
+        def ns(**kw):
+            return argparse.Namespace(**{"vru_distance_m": 30.0, "vru_gait_phase": 0.25, "vru_bike": None, **kw})
+
+        a = ns(vru="motorcyclist")
+        vru.check_args(a)
+        self.assertEqual(a.vru_bike, vru.DEFAULT_MOTO)
+        vru.check_args(ns(vru="cyclist", vru_bike="bike_bmx"))
+        for bad in (
+            ns(vru="cyclist", vru_bike="moto_80s"),
+            ns(vru="motorcyclist", vru_bike="bike_bmx"),
+            ns(vru="pedestrian", vru_bike="bike_bmx"),
+            ns(vru="none", vru_bike="bike_bmx"),
+        ):
+            with self.assertRaises(SystemExit):
+                vru.check_args(bad)
+
+    def test_procedural_cyclist_unchanged_without_vru_bike(self) -> None:
+        names = set(vru.cyclist(1.80, 0.25).parts)
+        self.assertIn("vru:tyre", names)
+        self.assertIn("vru:hair", names)
+
+
 if __name__ == "__main__":
     unittest.main()

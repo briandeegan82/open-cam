@@ -47,6 +47,34 @@ POWERED = tuple(a for a, m in MODELS.items() if m[0] in ("motorcycle", "moped", 
 KICK = tuple(a for a, m in MODELS.items() if m[0] == "kickscooter")
 
 
+# Rider contact points in the placed frame (metres; +z front, +y up, x = 0 on the centre line), read off
+# side and top point-cloud profiles of each prepared model: seat (z, y), grips (z, y, half-width),
+# feet (z, y, half-width). Bicycles: feet = bottom bracket (pedals on 0.17 m cranks); motorbikes: footpegs;
+# scooters and mopeds: floorboard or pedals. The kick e-scooter has no seat and is not rideable here.
+RIDER = {
+    "bike_roadster_old": ((-0.33, 0.93), (0.15, 0.97, 0.20), (-0.07, 0.30, 0.11)),
+    "bike_cruiser_red": ((-0.25, 0.86), (0.22, 1.02, 0.25), (-0.08, 0.28, 0.11)),
+    "bike_road": ((-0.18, 1.07), (0.45, 1.02, 0.21), (-0.05, 0.28, 0.11)),
+    "bike_beach_cruiser": ((-0.35, 0.88), (0.05, 1.00, 0.18), (-0.07, 0.30, 0.11)),
+    "bike_family_basket": ((-0.33, 0.97), (0.25, 1.08, 0.33), (-0.12, 0.28, 0.11)),
+    "bike_ardis_verona": ((-0.32, 0.93), (0.25, 1.12, 0.30), (-0.15, 0.28, 0.11)),
+    "bike_peugeot_retro": ((-0.22, 0.87), (0.25, 0.92, 0.20), (-0.05, 0.25, 0.11)),
+    "bike_bmx": ((-0.20, 0.72), (0.33, 1.02, 0.40), (-0.10, 0.30, 0.11)),
+    "moto_sarolea_vintage": ((-0.35, 0.88), (0.25, 1.00, 0.33), (0.00, 0.25, 0.15)),
+    "moped_puch_1978": ((-0.25, 0.80), (0.25, 1.02, 0.33), (-0.05, 0.25, 0.15)),
+    "moto_yamaha_fz150": ((-0.30, 0.85), (0.35, 1.05, 0.35), (-0.25, 0.35, 0.17)),
+    "moto_80s": ((-0.30, 0.80), (0.30, 1.05, 0.40), (-0.15, 0.35, 0.17)),
+    "moto_cruiser": ((-0.15, 0.75), (0.30, 1.15, 0.33), (0.45, 0.40, 0.20)),
+    "scooter_vespa_yellow": ((-0.35, 0.72), (0.25, 1.10, 0.25), (0.05, 0.25, 0.13)),
+    "scooter_vespa_orange": ((-0.35, 0.80), (0.35, 1.05, 0.30), (0.00, 0.30, 0.13)),
+    "scooter_honda_squash": ((-0.40, 0.75), (0.22, 1.12, 0.42), (-0.05, 0.30, 0.13)),
+    "scooter_vespa_ss180": ((-0.35, 0.73), (0.22, 1.05, 0.28), (0.00, 0.25, 0.13)),
+    "scooter_vespa_50_special": ((-0.35, 0.78), (0.25, 1.00, 0.33), (-0.05, 0.25, 0.13)),
+    "moped_solifer_export": ((-0.30, 0.78), (0.35, 0.98, 0.33), (0.00, 0.25, 0.13)),
+    "scooter_vespa_200_rally": ((-0.35, 0.75), (0.40, 1.05, 0.32), (0.05, 0.25, 0.13)),
+}
+
+
 def rot_y(deg: float) -> np.ndarray:
     """pbrt `Rotate deg 0 1 0`: maps +z to (sin deg, 0, cos deg)."""
     a = math.radians(deg)

@@ -1,6 +1,7 @@
 """Vulnerable road users for the highway scene: Euro NCAP-style AEB pedestrian / cyclist targets.
 
-Opt-in (``--vru pedestrian|child|cyclist``). The targets are procedural articulated meshes built to
+Opt-in (``--vru pedestrian|child|cyclist|motorcyclist``; ``--vru-bike`` puts the rider on an imported
+bicycle, motorbike, moped or scooter from ``tools/two_wheelers.py``). The targets are procedural articulated meshes built to
 nominal Euro NCAP / ISO 19206 test-target sizes (adult 1.80 m, child 1.154 m, bicycle ~1.8 m long
 with 0.70 m wheels); the standards are paywalled, so the sizes here are nominal and not checked
 against the standard text. Placement follows the AEB VRU nearside scenarios: the target stands at
@@ -28,11 +29,15 @@ import math
 from pathlib import Path
 
 import numpy as np
+import street_furniture as sf
+import two_wheelers as tw
 
 REPO = Path(__file__).resolve().parents[1]
 USGS = REPO / "spectra" / "usgs_nir"
 
-HEIGHT_M = {"pedestrian": 1.80, "child": 1.154, "cyclist": 1.80}
+HEIGHT_M = {"pedestrian": 1.80, "child": 1.154, "cyclist": 1.80, "motorcyclist": 1.80}
+RIDERS = ("cyclist", "motorcyclist")
+DEFAULT_MOTO = "moto_yamaha_fz150"
 WHEEL_D, WHEELBASE = 0.70, 1.05
 CLOTHING = {
     # preset: (top, trousers) USGS chart files
@@ -61,6 +66,13 @@ def add_args(ap: argparse.ArgumentParser) -> None:
         help="crossing: moving right-to-left across the road; along: moving away in the road direction.",
     )
     g.add_argument("--vru-gait-phase", type=float, default=0.25, help="Stride / pedal phase in [0, 1).")
+    g.add_argument(
+        "--vru-bike",
+        choices=sorted(tw.RIDER),
+        default=None,
+        help="Imported Objaverse CC-BY model under the rider: a bicycle for --vru cyclist (default: procedural "
+        f"bicycle), a motorbike, moped or scooter for --vru motorcyclist (default: {DEFAULT_MOTO}).",
+    )
     g.add_argument("--vru-obstruction", choices=("none", "parked-cars"), default="none")
     g.add_argument("--vru-clothing", choices=sorted(CLOTHING), default="ncap")
     g.add_argument("--vru-skin-tau", type=float, default=0.35, help="Melanin optical depth (iqlab.skin).")
@@ -71,6 +83,14 @@ def enabled(args: argparse.Namespace) -> bool:
 
 
 def check_args(args: argparse.Namespace) -> None:
+    args.vru_bike = getattr(args, "vru_bike", None)
+    if args.vru == "motorcyclist" and args.vru_bike is None:
+        args.vru_bike = DEFAULT_MOTO
+    if args.vru_bike is not None:
+        if args.vru not in RIDERS:
+            raise SystemExit("--vru-bike needs --vru cyclist or --vru motorcyclist")
+        if (tw.MODELS[args.vru_bike][0] == "bicycle") != (args.vru == "cyclist"):
+            raise SystemExit("--vru cyclist takes a bicycle model; --vru motorcyclist a motorbike, moped or scooter")
     if not enabled(args):
         return
     if args.vru_distance_m <= 2.0:
@@ -313,8 +333,18 @@ def cyclist(height: float, phase: float) -> Parts:
     # rider
     hip = seat + [0.0, 0.07, 0.0]
     a = 2 * math.pi * phase
-    for side, ph in ((-1.0, 0.0), (1.0, math.pi)):
-        pedal = bb + np.array([side * 0.11, -0.17 * math.cos(a + ph), 0.17 * math.sin(a + ph)])
+    pedals = [
+        bb + np.array([side * 0.11, -0.17 * math.cos(a + ph), 0.17 * math.sin(a + ph)])
+        for side, ph in ((-1.0, 0.0), (1.0, math.pi))
+    ]
+    grips = [bar + [side * 0.22, 0.0, 0.0] for side in (-1.0, 1.0)]
+    _seated_rider(parts, s, hip, pedals, grips, 40.0)
+    return parts
+
+
+def _seated_rider(parts: Parts, s: float, hip, feet, grips, lean_deg: float, helmet: bool = False) -> None:
+    """Rider seated at ``hip``: legs to ``feet`` (pedals or pegs), hands on ``grips`` (left, right)."""
+    for side, pedal in zip((-1.0, 1.0), feet):
         h = hip + [side * 0.1 * s, 0, 0]
         d = pedal - h
         L = float(np.linalg.norm(d))
@@ -327,13 +357,12 @@ def cyclist(height: float, phase: float) -> Parts:
         parts.tube("vru:trousers", h, knee, 0.07 * s, 0.055 * s)
         parts.tube("vru:trousers", knee, pedal + [0, 0.04, 0], 0.05 * s, 0.04 * s)
         parts.ellipsoid("vru:shoes", pedal + [0, 0.03, 0.04], (0.045 * s, 0.04 * s, 0.12 * s))
-    lean = math.radians(40.0)
+    lean = math.radians(lean_deg)
     torso_len = 0.55 * s
     shoulder = hip + torso_len * np.array([0.0, math.cos(lean), math.sin(lean)])
     parts.tube("vru:top", hip + [0, 0.05, 0], shoulder, 0.15 * s, 0.17 * s)
-    for side in (-1.0, 1.0):
+    for side, grip in zip((-1.0, 1.0), grips):
         sh_p = shoulder + [side * 0.18 * s, -0.03, 0.0]
-        grip = bar + [side * 0.22, 0.0, 0.0]
         elbow = (sh_p + grip) / 2 + [0.0, 0.04, -0.03]
         parts.tube("vru:top", sh_p, elbow, 0.05 * s, 0.045 * s)
         parts.tube("vru:top", elbow, grip, 0.04 * s, 0.035 * s)
@@ -342,7 +371,35 @@ def cyclist(height: float, phase: float) -> Parts:
     parts.tube("vru:skin", shoulder, neck, 0.05 * s)
     head_c = neck + np.array([0.0, 0.10 * s, 0.05 * s])
     parts.ellipsoid("vru:skin", head_c, (0.075 * s, 0.11 * s, 0.095 * s))
-    parts.ellipsoid("vru:hair", head_c + [0.0, 0.03 * s, -0.01], (0.085 * s, 0.09 * s, 0.11 * s))  # helmet-ish
+    if helmet:  # full-face motorcycle helmet, painted shell
+        parts.ellipsoid("vru:frame", head_c + [0.0, 0.01 * s, 0.0], (0.13 * s, 0.145 * s, 0.15 * s))
+    else:
+        parts.ellipsoid("vru:hair", head_c + [0.0, 0.03 * s, -0.01], (0.085 * s, 0.09 * s, 0.11 * s))  # helmet-ish
+
+
+def imported_rider(aid: str, phase: float) -> Parts:
+    """1.80 m rider posed on imported two-wheeler ``aid`` from its ``two_wheelers.RIDER`` contact points."""
+    s = 1.0
+    (sz, sy), (gz, gy, gw), (fz, fy, fw) = tw.RIDER[aid]
+    hip = np.array([0.0, sy + 0.07, sz])
+    if tw.MODELS[aid][0] == "bicycle":
+        a = 2 * math.pi * phase
+        bb = np.array([0.0, fy, fz])
+        feet = [
+            bb + np.array([side * fw, -0.17 * math.cos(a + ph), 0.17 * math.sin(a + ph)])
+            for side, ph in ((-1.0, 0.0), (1.0, math.pi))
+        ]
+    else:
+        feet = [np.array([side * fw, fy, fz]) for side in (-1.0, 1.0)]
+    grips = [np.array([side * gw, gy, gz]) for side in (-1.0, 1.0)]
+
+    def reach_error(lean: float) -> float:
+        sh = hip + 0.55 * s * np.array([0.0, math.cos(math.radians(lean)), math.sin(math.radians(lean))])
+        return abs(float(np.linalg.norm(sh + [0.18 * s, -0.03, 0.0] - grips[1])) - 0.5 * s)
+
+    lean = min(np.arange(5.0, 70.5, 1.0), key=reach_error)  # torso lean that lets the arms reach the grips
+    parts = Parts()
+    _seated_rider(parts, s, hip, feet, grips, float(lean), helmet=tw.MODELS[aid][0] != "bicycle")
     return parts
 
 
@@ -366,29 +423,53 @@ def clear_traffic(args, traffic: list[tuple]) -> tuple[list[tuple], list[dict]]:
     return keep, removed
 
 
-def scene_lines(args, road_edge_x: float, place, car_body) -> tuple[list[str], dict]:
+def scene_lines(args, road_edge_x: float, place, car_body, asset=None, out_dir=None) -> tuple[list[str], dict]:
     """pbrt lines for the target (+ obstruction cars) and manifest metadata.
 
     ``car_body(inst, model, paint) -> (include_rel, yaw_model_deg)`` builds a parked car include.
     """
     kind = args.vru
     height = HEIGHT_M[kind]
-    parts = (
-        cyclist(height, args.vru_gait_phase)
-        if kind == "cyclist"
-        else pedestrian(height, args.vru_gait_phase, child=kind == "child")
-    )
+    bike, bike_meta, defs = None, None, []
+    if kind in RIDERS and args.vru_bike and asset is not None:
+        placer = tw.Placer(asset, out_dir)
+        bike, defs = placer.variant(args.vru_bike), placer.lines
+        bike_meta = {
+            "asset": args.vru_bike,
+            "kind": tw.MODELS[args.vru_bike][0],
+            "length_m": tw.MODELS[args.vru_bike][2],
+            "scale": None if bike is None else round(float(bike["scale"]), 5),
+            "missing": bike is None,  # --allow-missing-assets: procedural bicycle instead
+        }
+    if bike is not None:
+        parts = imported_rider(args.vru_bike, args.vru_gait_phase)
+    elif kind in RIDERS:
+        parts = cyclist(height, args.vru_gait_phase)
+    else:
+        parts = pedestrian(height, args.vru_gait_phase, child=kind == "child")
     x, z = road_edge_x + args.vru_offset_m, args.vru_distance_m
     yaw = -90.0 if args.vru_motion == "crossing" else 0.0  # local +z -> world -x (towards the median)
     lo, hi = parts.bounds()
+    if bike is not None:
+        lo = np.minimum(lo, (bike["lo"] - bike["c"]) * bike["scale"])
+        hi = np.maximum(hi, (bike["hi"] - bike["c"]) * bike["scale"])
     c, s_ = math.cos(math.radians(yaw)), math.sin(math.radians(yaw))
     corners = np.array([[a, b, d] for a in (lo[0], hi[0]) for b in (lo[1], hi[1]) for d in (lo[2], hi[2])])
     world = np.stack(
         [c * corners[:, 0] + s_ * corners[:, 2], corners[:, 1], -s_ * corners[:, 0] + c * corners[:, 2]], -1
     )
     world += [x, 0.0, z]
-    L = ["# ---- vulnerable road user (tools/highway_vru.py)", *material_lines(), "AttributeBegin", *place(x, 0.0, z)]
-    L += [f"Rotate {yaw:.6g} 0 1 0", *parts.lines(), "AttributeEnd"]
+    L = [
+        "# ---- vulnerable road user (tools/highway_vru.py)",
+        *material_lines(),
+        *defs,
+        "AttributeBegin",
+        *place(x, 0.0, z),
+    ]
+    L += [f"Rotate {yaw:.6g} 0 1 0", *parts.lines()]
+    if bike is not None:
+        L += sf.instance_lines(bike["name"], (0.0, 0.0, 0.0), bike["yaw0"], bike["scale"], bike["origin"])
+    L += ["AttributeEnd"]
     obstruction = []
     if args.vru_obstruction == "parked-cars":
         # Two parked cars on the shoulder, 1.0 m gap around the target, inner side 0.25 m outside the edge.
@@ -419,4 +500,11 @@ def scene_lines(args, road_edge_x: float, place, car_body) -> tuple[list[str], d
         "static": True,
         "geometry": "procedural, nominal Euro NCAP/ISO 19206 target sizes (not checked against the standard)",
     }
+    if bike_meta is not None:
+        meta["bike"] = bike_meta
+        if bike is not None:
+            meta["geometry"] = (
+                "procedural rider on an imported Objaverse CC-BY two-wheeler (tools/two_wheelers.py); "
+                "rider contact points read off the model's point-cloud profiles"
+            )
     return L, meta

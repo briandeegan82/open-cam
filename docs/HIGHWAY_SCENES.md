@@ -847,7 +847,7 @@ cancels in the difference.
 
 ## Vulnerable road users: AEB pedestrian / cyclist targets (`tools/highway_vru.py`, opt-in)
 
-`--vru pedestrian|child|cyclist` adds one Euro NCAP-style AEB test target; the default (`none`) leaves
+`--vru pedestrian|child|cyclist|motorcyclist` adds one Euro NCAP-style AEB test target; the default (`none`) leaves
 the scene unchanged.
 
 ```bash
@@ -881,6 +881,20 @@ venv/bin/python tools/build_highway_scene.py --vru cyclist --vru-motion along --
   does not hide it; the manifest lists them under `vru.removed_traffic`. Use `--traffic none` for an empty road.
 - *Not modelled:* target motion (the scene is static; use `--vehicle-speed-kmh` for ego motion blur),
   bicycle retroreflectors, the soft EPT target's fabric texture.
+
+**Imported two-wheelers under the rider.** `--vru-bike <model>` puts the
+procedural rider on one of the Objaverse CC-BY models from `--two-wheelers`
+(`tools/two_wheelers.py`, fetch IDs listed there): a bicycle for `--vru cyclist`
+(default: the procedural bicycle), or a motorbike, moped or scooter for the new
+`--vru motorcyclist` (default `moto_yamaha_fz150`; full-face helmet instead of
+the cycle helmet). The rider is posed from contact points stored per model in
+`two_wheelers.RIDER` (saddle; grips; bottom bracket, footpegs or floorboard),
+read off side and top point-cloud profiles of each prepared mesh to a few
+centimetres. The torso lean is chosen so the arms reach the grips. The manifest's
+`vru.bike` records the model, its nominal length and scale, and `bbox_world_m`
+covers rider and model. Limitations: the models' colours are sRGB texture maps,
+not measured spectra; their lamps are unlit; the rider is static, with no
+steering angle or lean into a turn; the kick e-scooter is not rideable.
 
 ## Falling rain (`--rain-mmh`; `tools/highway_rain.py`)
 
