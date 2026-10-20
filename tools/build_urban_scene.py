@@ -42,6 +42,7 @@ from build_highway_scene import (  # noqa: E402
     camera_lines,
     car_include,
     film_lines,
+    luminance_texture,
     mesh,
     proxy_car,
     quads_mesh,
@@ -127,6 +128,12 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     ap.add_argument("--shop-pwm-hz", type=float, default=100.0, help="Shop LED PWM [Hz] (0 = DC).")
     ap.add_argument("--shop-duty", type=float, default=0.3)
     ap.add_argument("--lit-windows", type=float, default=0.35, help="Fraction of windows lit at dusk/night.")
+    ap.add_argument(
+        "--facade-textures",
+        choices=("none", "mixed"),
+        default="none",
+        help="ambientCG CC0 brick/plaster/concrete maps on the street lots (spectral base kept; texture adds detail).",
+    )
     ap.add_argument("--exposure-s", type=float, default=None, help="Integration time; records the exposure.")
     ap.add_argument("--rolling-line-time-s", type=float, default=15e-6, help="With --exposure-s.")
     add_camera_args(ap, fov=40.0, focus_distance=20.0)
@@ -211,7 +218,64 @@ def _quad(p0, du, dv) -> tuple[np.ndarray, np.ndarray]:
     return np.array([p0, p0 + du, p0 + du + dv, p0 + dv]), np.array([(0, 1, 2), (0, 2, 3)])
 
 
-def facade_lines(lots: list[dict], rng: np.random.Generator, dark: bool, lit: float) -> tuple[list[str], dict]:
+FACADE_TEX = (
+    "tex_bricks059",
+    "tex_bricks085",
+    "tex_bricks092",
+    "tex_bricks060",
+    "tex_bricks093",
+    "tex_concrete034",
+    "tex_paintedplaster017",
+    "tex_paintedplaster004",
+)
+
+
+def textured_box(cx: float, cz: float, sx: float, h: float, sz: float, tile: float):
+    """Lot box (walls + roof) with metric UVs: u along the wall, v up, both divided by the tile size."""
+    x0, x1, z0, z1 = cx - sx / 2, cx + sx / 2, cz - sz / 2, cz + sz / 2
+    faces = [
+        ((x0, 0, z0), (0, 0, sz), (0, h, 0), (z0, 0), "z"),
+        ((x1, 0, z0), (0, 0, sz), (0, h, 0), (z0, 0), "z"),
+        ((x0, 0, z0), (sx, 0, 0), (0, h, 0), (x0, 0), "x"),
+        ((x0, 0, z1), (sx, 0, 0), (0, h, 0), (x0, 0), "x"),
+        ((x0, h, z0), (sx, 0, 0), (0, 0, sz), (x0, z0), "xz"),
+    ]
+    P, T, UV = [], [], []
+    for i, (p0, du, dv, (u0, v0), _) in enumerate(faces):
+        p, t = _quad(p0, du, dv)
+        lu, lv = float(np.linalg.norm(du)), float(np.linalg.norm(dv))
+        P.append(p)
+        T.append(t + 4 * i)
+        UV.append(np.array([(u0, v0), (u0 + lu, v0), (u0 + lu, v0 + lv), (u0, v0 + lv)]) / tile)
+    return np.concatenate(P), np.concatenate(T), np.concatenate(UV)
+
+
+def facade_texture_lines(
+    args, asset, out_dir: Path, n_lots: int, meta: dict
+) -> tuple[list[str], list | None, list[dict]]:
+    """Opt-in: one textured material per ambientCG map; each lot draws one from its own RNG."""
+    pool = [(aid, a) for aid in FACADE_TEX if (a := asset(aid)) is not None] if args.facade_textures != "none" else []
+    if not pool:
+        return [], None, []
+    L = ["# ---- facade textures (ambientCG CC0)"]
+    for aid, (info, raw) in pool:
+        lum = out_dir / "textures" / f"{aid}_lum.exr"
+        luminance_texture(raw / info["maps"]["color"], lum)
+        normal = os.path.relpath(raw / info["maps"]["normal"], out_dir)
+        L += [
+            f'Texture "{aid}:lum" "float" "imagemap" "string filename" "{os.path.relpath(lum, out_dir)}"',
+            f'Texture "{aid}" "spectrum" "scale" "spectrum tex" "spd/{meta[aid]["spd"]}.spd" "texture scale" "{aid}:lum"',
+            f'MakeNamedMaterial "{aid}" "string type" "diffuse" "texture reflectance" "{aid}" "string normalmap" "{normal}"',
+        ]
+    trng = np.random.default_rng([args.seed, 11])
+    picks = [pool[int(trng.integers(len(pool)))] for _ in range(n_lots)]
+    tex = [(aid, float(meta[aid]["tile_size_m"])) for aid, (info, _) in picks]
+    return L + [""], tex, [{"lot": k, "texture": aid} for k, (aid, _) in enumerate(tex)]
+
+
+def facade_lines(
+    lots: list[dict], rng: np.random.Generator, dark: bool, lit: float, tex: list | None = None
+) -> tuple[list[str], dict]:
     """Lot boxes plus a window grid on the street face (lit windows emit at dusk/night)."""
     L = ["# ---- facades (procedural)"]
     lit_n = dark_n = 0
@@ -222,10 +286,11 @@ def facade_lines(lots: list[dict], rng: np.random.Generator, dark: bool, lit: fl
         x_face = s * BUILD_X
         cx = x_face + s * lot["depth"] / 2
         mat = ("facade_render", "facade_brick", "concrete")[k % 3]
-        L += [
-            f'NamedMaterial "{mat}"',
-            *mesh(*box(cx, 0.0, (lot["z0"] + lot["z1"]) / 2, lot["depth"], h, lot["z1"] - lot["z0"])),
-        ]
+        cz, sz = (lot["z0"] + lot["z1"]) / 2, lot["z1"] - lot["z0"]
+        if tex:
+            L += [f'NamedMaterial "{tex[k][0]}"', *mesh(*textured_box(cx, cz, lot["depth"], h, sz, tex[k][1]))]
+        else:
+            L += [f'NamedMaterial "{mat}"', *mesh(*box(cx, 0.0, cz, lot["depth"], h, sz))]
         for fl in range(1, lot["storeys"]):
             y = 0.8 + 3.2 * fl + 0.9
             for z in np.arange(lot["z0"] + 1.2, lot["z1"] - 1.6, 2.6):
@@ -664,7 +729,11 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
     L += ['NamedMaterial "paint_white"', *mesh(p, t), ""]
 
     lots = building_lots(rng)
-    fl, facade_meta = facade_lines(lots, rng, dark, args.lit_windows)
+    tl, tex, tex_meta = facade_texture_lines(args, asset, out_dir, len(lots), amanifest["assets"])
+    L += tl
+    fl, facade_meta = facade_lines(lots, rng, dark, args.lit_windows, tex)
+    if tex:
+        facade_meta = {**facade_meta, "textures": tex_meta}
     L += fl
     cross_lots = []
     for sx in (-1, 1):
