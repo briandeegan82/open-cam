@@ -51,12 +51,12 @@ class TestAssetManifest(unittest.TestCase):
         m = fetch.load_asset_manifest()
         self.assertTrue(m["cache_dir"].startswith("scenes/assets"))
         for aid, a in m["assets"].items():
-            self.assertIn(a["license"], ("CC0-1.0", "CC-BY-4.0"), aid)
+            self.assertIn(a["license"], ("CC0-1.0", "CC-BY-4.0", "public-domain"), aid)
             self.assertTrue(a["source"].startswith("https://"), aid)
             for f in a.get("files", []):
                 self.assertTrue(f["url"].startswith("https://"), aid)
         kinds = {a["kind"] for a in m["assets"].values()}
-        self.assertEqual(kinds, {"hdri", "texture", "car_pbrt", "gltf", "glb"})
+        self.assertEqual(kinds, {"hdri", "texture", "car_pbrt", "gltf", "glb", "sign_svg"})
         for model in hw.CAR_MODELS:
             self.assertGreater(m["assets"][model]["length_m"], 3.5)
 

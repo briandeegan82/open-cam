@@ -631,6 +631,34 @@ measured asphalt BRDF exists in RGL, so the asphalt keeps the analytic coated-di
 lobe is not fitted to CIE 144 road reflection tables. USGS spectra are lab bidirectional
 (ASD, 350-2500 nm) reflectances of single samples.
 
+## Traffic signs with real artwork (`--sign-set`, `tools/highway_signs.py`)
+
+Opt-in row of real traffic signs on posts beside the right shoulder; the default scene is unchanged.
+
+```bash
+python tools/fetch_highway_assets.py $(python -c "import yaml; d=yaml.safe_load(open('config/highway_assets.yaml')); print(' '.join(k for k, a in d['assets'].items() if a['kind'] == 'sign_svg'))")
+python tools/build_highway_scene.py --sign-set stvo --time-of-day night --out-dir out/signs_night
+```
+
+- *Artwork:* public-domain SVGs from Wikimedia Commons (asset kind `sign_svg`, pinned SHA-256): 8 German StVO
+  signs (101, 138, 205, 206, 267, 274-60, 306, 350) and 4 US MUTCD signs (R1-1, R2-1, W1-1R, W11-2). Preparing them
+  needs `cairosvg`. Each SVG becomes an alpha cutout (so octagons, triangles and discs keep their outline) and one
+  mask per sheeting colour (nearest of white/red/yellow/blue/green/black; colours under 1 % of the face are
+  merged into their nearest neighbour to drop anti-aliasing fringes).
+- *Materials:* each colour region is its own spectral material, chained with `mix`. By day the sheeting is diffuse
+  (`sheeting_*` analytic reflectances). At night/dusk with retroreflection on, every colour is the `retroreflective`
+  sheeting of the night model (ASTM D4956 Type III minima x margin). Blue has no D4956 entry in the model and uses
+  8 % of white, a nominal value. `--sign-sheeting type1|type3|type11` scales R_A by the white-minimum ratios
+  (70/250, 1, 580/250); these are nominal, not checked against the standard.
+- *Layout:* first sign at `--sign-start-m` (25 m), then every `--sign-spacing-m` (15 m), `--sign-offset-m` (1 m) beyond
+  the paved edge, lower edge at `--sign-bottom-m` (2 m). Sizes are nominal (StVO size class 2, MUTCD conventional
+  road) and stored per asset as `width_m`.
+  The row replaces the procedural "SPEED LIMIT 65" plate at 60 m; the green guide sign stays.
+- *Ground truth:* `highway_manifest.json` -> `signs` lists each sign's code, distance, world bounding box, size,
+  colour fractions, source and licence.
+- *Not modelled:* sheeting ageing and dirt, embossed legends, sign-face sheen, sign-specific observation-angle
+  tables.
+
 ## Known approximations
 
 - Daytime markings use a glass-bead-like rough clear coat over a spectral binder and sign
@@ -788,3 +816,34 @@ verges and procedural trees, no street lighting. Night or dusk only (`--time-of-
   `--deer-distance-m` (default 40 m), `--deer-offset-m`, `--deer-heading-deg` (180 = crossing right-to-left).
   Procedural ellipsoids; analytic brown fur reflectance rising into the NIR; retroreflective eyes
   for tapetum eyeshine. The manifest records the world-space box and eye positions.
+
+## Urban intersection, night and wet (`tools/build_urban_scene.py`)
+
+    venv/bin/python tools/build_urban_scene.py --out-dir scenes/generated/urban [--sign-set stvo] [--vru pedestrian]
+    cd scenes/generated/urban && pbrt urban.pbrt          # writes out/urban_spectral.exr
+
+A signalised four-way crossing of two-lane streets (3.5 m lanes, 2.3 m parking lanes, 3 m
+sidewalks on 0.15 m kerbs), right-hand traffic, ego camera waiting on the near approach. Defaults:
+`--time-of-day night --road-wetness wet`; `--time-of-day day --road-wetness dry` gives the daytime
+counterpart. The builder reuses the highway modules rather than duplicating them: spectra, cars and
+camera/film options (`build_highway_scene`), night sky, moon, headlamps and retroreflection
+(`highway_night`), wet asphalt and markings (`highway_wet`; `--puddles`/`--spray` are highway-only),
+sign artwork (`--sign-set`, row placed beyond the junction) and AEB targets (`--vru`, placed on the
+near zebra crossing by default).
+
+* **Traffic signals:** five 3-aspect 200 mm heads (two primaries and one secondary for the ego,
+  two for the cross arms showing the opposite phase). `--signal-state red|amber|green`. Each lit
+  aspect is an LED area light (analytic LED spectra 626/592/505 nm) whose time-averaged luminance
+  times lens area equals a nominal 300 cd on-axis intensity (EN 12368 order of magnitude, not a
+  measured value). Signals are DC by default; `--signal-pwm-hz/--signal-duty` make them PWM.
+* **Shop LED signs:** `--shop-signs` (default 4) red/blue/green panels on the ground floors,
+  400 cd/m² time-averaged, PWM at `--shop-pwm-hz 100 --shop-duty 0.3` (nominal).
+* **Facades:** seeded 3–6 storey lots with window grids; at dusk/night `--lit-windows` (default
+  0.35) of them are 15 cd/m² 3000 K diffuse emitters.
+* **Street lights:** single-arm 8 m columns on both kerbs, 25 m apart, staggered, with the same
+  full-cutoff luminaire model as the highway (`--streetlights led_4000k|hps|none`).
+* **Cars:** parked cars along both kerbs (unlit), one oncoming and one waiting on the cross street
+  (both with headlamps at night).
+* **Flicker:** every signal aspect and shop sign is in `manifest["emitters"]`, so
+  `tools/render_time_slices.py scenes/generated/urban --linear` renders LED flicker / rolling
+  shutter (pass `--exposure-s` to record the exposure in the manifest).
