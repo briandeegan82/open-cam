@@ -264,6 +264,174 @@ assets:
       - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/shrub_04/shrub_04_diff_1k.jpg, path: shrub_04/textures/shrub_04_diff_1k.jpg, sha256: 0b0fa0a474753d13f3093858cea79d0de05da1e6a0c5d6e181cd351080980b6c}
       - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/shrub_04/shrub_04.bin, path: shrub_04/shrub_04.bin, sha256: cb442c39682e54cc63f912aa78ab17a03566f947a61adbbbaaa6473166744f01}
 
+  # Poly Haven trees / shrubs / grass clumps (opt-in --vegetation-pool extended)
+  veg_jacaranda_tree:
+    kind: gltf
+    title: Jacaranda Tree
+    source: https://polyhaven.com/a/jacaranda_tree
+    author: Rob Tuytel, Rico Cilliers (Poly Haven)
+    license: CC0-1.0
+    gltf: jacaranda_tree/jacaranda_tree_1k.gltf
+    files:
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/jacaranda_tree/jacaranda_tree_1k.gltf, path: jacaranda_tree/jacaranda_tree_1k.gltf, sha256: ba4aa8ab4c3e3741ce3699604d6ec1607cd6b126ae2d32abbcc0d98e8edb3be4}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/jacaranda_tree/jacaranda_tree_branches_diff_1k.jpg, path: jacaranda_tree/textures/jacaranda_tree_branches_diff_1k.jpg, sha256: 5a4fe735f0c346cec83b6b444a0169fc14d2b31bbb7b26e26b1b6c726b6e06f6}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/jacaranda_tree/jacaranda_tree_trunk_diff_1k.jpg, path: jacaranda_tree/textures/jacaranda_tree_trunk_diff_1k.jpg, sha256: e5582fba664a9255252d1ee8088f75ad557f07360aa7f4513f2b2f1577e90be9}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/jacaranda_tree/jacaranda_tree_leaves_diff_1k.jpg, path: jacaranda_tree/textures/jacaranda_tree_leaves_diff_1k.jpg, sha256: 6fe80c1f514ef690cccefb90b7e559fbd1aa9c8935fdc02523cc8ab83c22f7c2}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/jacaranda_tree/jacaranda_tree.bin, path: jacaranda_tree/jacaranda_tree.bin, sha256: 4310d1e25db8ac63d6d345afc8154a1df7e85b301dfad228be66d85d6c52bbfc}
+
+  veg_island_tree_01:
+    kind: gltf
+    title: Island Tree 01
+    source: https://polyhaven.com/a/island_tree_01
+    author: Rob Tuytel, Rico Cilliers (Poly Haven)
+    license: CC0-1.0
+    gltf: island_tree_01/island_tree_01_1k.gltf
+    files:
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/island_tree_01/island_tree_01_1k.gltf, path: island_tree_01/island_tree_01_1k.gltf, sha256: 78e905a40670bfabb2760601d4d9a6c17193a50d68e6271c66893eb7bd75906d}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/island_tree_01/island_tree_01_diff_1k.jpg, path: island_tree_01/textures/island_tree_01_diff_1k.jpg, sha256: 51bff9a3a6ed7d89ff4c73f01708b7267ed8d7a82b0cb12343741894f708218f}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/island_tree_01/island_tree_01_leaves_diff_1k.jpg, path: island_tree_01/textures/island_tree_01_leaves_diff_1k.jpg, sha256: f56d762a1507754752abf164cc12acbc1e87ce87fa609ac44b98a1b0037c89d8}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/island_tree_01/island_tree_01_branches_diff_1k.jpg, path: island_tree_01/textures/island_tree_01_branches_diff_1k.jpg, sha256: bee5ec22196e9e31ad0c95a5a9b4636571cc0124d5bb27a92f1e307d289cc60d}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/island_tree_01/island_tree_01.bin, path: island_tree_01/island_tree_01.bin, sha256: 1faa817b46e24ed6fc90d3ec72188a0dc5ac75e82c89b3dd3c5fdaecf7cc005c}
+
+  veg_tree_small_02:
+    kind: gltf
+    title: Tree Small 02
+    source: https://polyhaven.com/a/tree_small_02
+    author: Rico Cilliers (Poly Haven)
+    license: CC0-1.0
+    gltf: tree_small_02/tree_small_02_1k.gltf
+    files:
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/tree_small_02/tree_small_02_1k.gltf, path: tree_small_02/tree_small_02_1k.gltf, sha256: 3062a709614c05b80fdc1e56583998bc3cb1027b0d52f956c8ecfb882ff8ca6d}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/tree_small_02/tree_small_02_branch_diff_1k.jpg, path: tree_small_02/textures/tree_small_02_branch_diff_1k.jpg, sha256: a71b768e330c0c6cca097e30314f6b4e842ef724a1370f6aab14b4434eec64cb}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/tree_small_02/tree_small_02_leaves_diff_1k.jpg, path: tree_small_02/textures/tree_small_02_leaves_diff_1k.jpg, sha256: 261e7d7a5ac7d2e16ea8823ff8510be8f3f615999724232994039ad2885e5c36}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/tree_small_02/tree_small_02_diff_1k.jpg, path: tree_small_02/textures/tree_small_02_diff_1k.jpg, sha256: 4e0093f407b3a1120a36de49a48ebe5a465a9a9b77e361c7a3e66866e115e404}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/tree_small_02/tree_small_02.bin, path: tree_small_02/tree_small_02.bin, sha256: 8da6c3c389ad8748286d1b7488cd827f75ebdad9d8f59ef7dfb0916df5edc634}
+
+  veg_fir_sapling:
+    kind: gltf
+    title: Fir Sapling
+    source: https://polyhaven.com/a/fir_sapling
+    author: Rob Tuytel, Rico Cilliers (Poly Haven)
+    license: CC0-1.0
+    gltf: fir_sapling/fir_sapling_1k.gltf
+    files:
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/fir_sapling/fir_sapling_1k.gltf, path: fir_sapling/fir_sapling_1k.gltf, sha256: a9466ca9d8c5b9b2eeeeafd3ce426f8912dcbd98a7281bad8c734833eb35b186}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/fir_sapling/fir_sapling_branches_diff_1k.jpg, path: fir_sapling/textures/fir_sapling_branches_diff_1k.jpg, sha256: 46d216526b6203dbd5dc3cfce5e49d7a4cc1770da2420faab45adf33671c7de4}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/fir_sapling/fir_sapling_twigs_diff_1k.jpg, path: fir_sapling/textures/fir_sapling_twigs_diff_1k.jpg, sha256: a9900fafad850deeb5f79b928fd7590bca9e8ec8734d2368d4c64bba8b0c5b22}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/fir_sapling/fir_sapling.bin, path: fir_sapling/fir_sapling.bin, sha256: efdebfae6ee4b3ea20c7a85eb9f798ff4953259a3616bcff0b7e580b00f34f40}
+
+  veg_fir_tree_01:
+    kind: gltf
+    title: Fir Tree 01
+    source: https://polyhaven.com/a/fir_tree_01
+    author: Rob Tuytel, Rico Cilliers (Poly Haven)
+    license: CC0-1.0
+    gltf: fir_tree_01/fir_tree_01_1k.gltf
+    files:
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/fir_tree_01/fir_tree_01_1k.gltf, path: fir_tree_01/fir_tree_01_1k.gltf, sha256: 72e49eefb4ed4db6a8ca5e17fb10980f8463dd300d94589ac774cde95ade7709}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/fir_tree_01/fir_tree_01_bark_diff_1k.jpg, path: fir_tree_01/textures/fir_tree_01_bark_diff_1k.jpg, sha256: a5d25150ba1bee10008c039f98aa3c73b4477a404d6715c511ca9b5b0f4a9077}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/fir_tree_01/fir_tree_01_trunk_a_diff_1k.jpg, path: fir_tree_01/textures/fir_tree_01_trunk_a_diff_1k.jpg, sha256: cfb646cbc4b6cb2db410eb4342174ebe7812a4ae03520491e788722cf1867286}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/fir_tree_01/fir_tree_01_twig_diff_1k.jpg, path: fir_tree_01/textures/fir_tree_01_twig_diff_1k.jpg, sha256: 8c0833a10e4fd44498d848cf9e659fe250a3813984cbd679f42430eb98c61fb8}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/fir_tree_01/fir_tree_01_trunk_b_diff_1k.jpg, path: fir_tree_01/textures/fir_tree_01_trunk_b_diff_1k.jpg, sha256: 9d39263a9243a4b6cd669de5e3a504eae32d52f5ab48e471cad5f7e52e052508}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/fir_tree_01/fir_tree_01.bin, path: fir_tree_01/fir_tree_01.bin, sha256: ba2ef15a1061a84c73b0a74643e88c118f801ce1664ca7a25a6a79bcc2c63790}
+
+  veg_searsia_burchellii:
+    kind: gltf
+    title: Searsia Burchellii
+    source: https://polyhaven.com/a/searsia_burchellii
+    author: James Ray Cock, Jenelle van Heerden (Poly Haven)
+    license: CC0-1.0
+    gltf: searsia_burchellii/searsia_burchellii_1k.gltf
+    files:
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/searsia_burchellii/searsia_burchellii_1k.gltf, path: searsia_burchellii/searsia_burchellii_1k.gltf, sha256: 77cde5ca5a5aade15e1d167cb35dd7e52d9c4f59fadffdfb1baa47eed178ea2c}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/searsia_burchellii/searsia_burchellii_diff_1k.jpg, path: searsia_burchellii/textures/searsia_burchellii_diff_1k.jpg, sha256: 9d8e6fe7da51da3e1d67ebf9624b1360ece2a7a436a696392a36860df6b894cc}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/searsia_burchellii/searsia_burchellii.bin, path: searsia_burchellii/searsia_burchellii.bin, sha256: 28d37b817d3d09d2bf9a765e247786ea65200927cb28d631ba59680ebbf6931f}
+
+  veg_shrub_03:
+    kind: gltf
+    title: Shrub 03
+    source: https://polyhaven.com/a/shrub_03
+    author: Rico Cilliers (Poly Haven)
+    license: CC0-1.0
+    gltf: shrub_03/shrub_03_1k.gltf
+    files:
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/shrub_03/shrub_03_1k.gltf, path: shrub_03/shrub_03_1k.gltf, sha256: b76d7c14bc027e834e82d3f984c32b5d060e62908aa90ff9420a637ca253a8ea}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/shrub_03/shrub_03.bin, path: shrub_03/shrub_03.bin, sha256: bf4df21e6d2a2bc5f00b4c9142f776171fe7da00cf960001825748067af542b6}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/shrub_03/shrub_03_diff_1k.jpg, path: shrub_03/textures/shrub_03_diff_1k.jpg, sha256: 3cadc7aba46d3aabbd7d6d2b1d04aa32e2a7da0bc87c2d38ef3cb1ee42cb03ec}
+
+  veg_grass_medium_01:
+    kind: gltf
+    title: Grass Medium 01
+    source: https://polyhaven.com/a/grass_medium_01
+    author: Rob Tuytel, Rico Cilliers (Poly Haven)
+    license: CC0-1.0
+    gltf: grass_medium_01/grass_medium_01_1k.gltf
+    files:
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/grass_medium_01/grass_medium_01_1k.gltf, path: grass_medium_01/grass_medium_01_1k.gltf, sha256: 3e5e2a314c94e16de54fd7c28e41709731fbd2b1613ab539f1544f622ddb6a85}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/grass_medium_01/grass_medium_01_diff_1k.jpg, path: grass_medium_01/textures/grass_medium_01_diff_1k.jpg, sha256: 71495bd6a11fddcab0aaff38246fea1a7b802a705483f1c7cbca53955daa8050}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/grass_medium_01/grass_medium_01.bin, path: grass_medium_01/grass_medium_01.bin, sha256: f4587cabdb96a2e96d8be644923dc954a248edfaaa717a0ff224cacb898bee1f}
+
+  veg_grass_medium_02:
+    kind: gltf
+    title: Grass Medium 02
+    source: https://polyhaven.com/a/grass_medium_02
+    author: Rico Cilliers (Poly Haven)
+    license: CC0-1.0
+    gltf: grass_medium_02/grass_medium_02_1k.gltf
+    files:
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/grass_medium_02/grass_medium_02_1k.gltf, path: grass_medium_02/grass_medium_02_1k.gltf, sha256: 7037f8d2dfc6aeec0bf72f4eeb96cfa3f6b3a5e6c6f0bc5de537c055b2fd5d04}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/grass_medium_02/grass_medium_02_diff_1k.jpg, path: grass_medium_02/textures/grass_medium_02_diff_1k.jpg, sha256: 91ae99005b449011aceb207a68a937258fd9bfd66ff367d344c50398b1df389c}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/grass_medium_02/grass_medium_02.bin, path: grass_medium_02/grass_medium_02.bin, sha256: aa8493bc1544a89e08bf440c7ba361042bfe6ea48b1fefc7e4af2dfff42fdf4a}
+
+  veg_grass_bermuda_01:
+    kind: gltf
+    title: Grass Bermuda 01
+    source: https://polyhaven.com/a/grass_bermuda_01
+    author: Rico Cilliers (Poly Haven)
+    license: CC0-1.0
+    gltf: grass_bermuda_01/grass_bermuda_01_1k.gltf
+    files:
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/grass_bermuda_01/grass_bermuda_01_1k.gltf, path: grass_bermuda_01/grass_bermuda_01_1k.gltf, sha256: a1e5bb7fcf33721dc4844d7acacab80759fccec659f1ea643f8701afc542e207}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/grass_bermuda_01/grass_bermuda_01_diff_1k.jpg, path: grass_bermuda_01/textures/grass_bermuda_01_diff_1k.jpg, sha256: ef202eeb8f8fb3312446009acecc87e5679a7d612e4dee859d8a849e00af5fcb}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/grass_bermuda_01/grass_bermuda_01.bin, path: grass_bermuda_01/grass_bermuda_01.bin, sha256: b98be48b43afb9d57f6c722d918a49996635064b829b16dc14ef4a48c0f04dae}
+
+  veg_wild_rooibos_bush:
+    kind: gltf
+    title: Wild Rooibos Bush
+    source: https://polyhaven.com/a/wild_rooibos_bush
+    author: James Ray Cock, Jenelle van Heerden (Poly Haven)
+    license: CC0-1.0
+    gltf: wild_rooibos_bush/wild_rooibos_bush_1k.gltf
+    files:
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/wild_rooibos_bush/wild_rooibos_bush_1k.gltf, path: wild_rooibos_bush/wild_rooibos_bush_1k.gltf, sha256: 7f3fb17e4606e33d0bc4239c4901c9610b4bd17fe26b6780ba11ab4493f25d29}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/wild_rooibos_bush/wild_rooibos_bush_diff_1k.jpg, path: wild_rooibos_bush/textures/wild_rooibos_bush_diff_1k.jpg, sha256: d963cdaf769bc39bb57295d518b37cd9456168cf5e3b82fd59f58c98d3faf596}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/wild_rooibos_bush/wild_rooibos_bush.bin, path: wild_rooibos_bush/wild_rooibos_bush.bin, sha256: 7a3471b4d110fe9927f4a200191eae86fa3c0a08f8e8e797d22e94a1703322e1}
+
+  veg_dead_tree_trunk_02:
+    kind: gltf
+    title: Dead Tree Trunk 02
+    source: https://polyhaven.com/a/dead_tree_trunk_02
+    author: Jenelle van Heerden, Rico Cilliers (Poly Haven)
+    license: CC0-1.0
+    gltf: dead_tree_trunk_02/dead_tree_trunk_02_1k.gltf
+    files:
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/dead_tree_trunk_02/dead_tree_trunk_02_1k.gltf, path: dead_tree_trunk_02/dead_tree_trunk_02_1k.gltf, sha256: b486ab1f0c7f4972e0eec97b19de53b26a34d09f07da5f9c2a70f8621f9e574c}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/dead_tree_trunk_02/dead_tree_trunk_02_diff_1k.jpg, path: dead_tree_trunk_02/textures/dead_tree_trunk_02_diff_1k.jpg, sha256: fac23e81ab5639dcde93db605e5dd94c65e0aa2b1fb4a303f37de9afbb9af5b4}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/dead_tree_trunk_02/dead_tree_trunk_02.bin, path: dead_tree_trunk_02/dead_tree_trunk_02.bin, sha256: 2b1b7ca07d98396ddc1987e367dcff9734df16b62e997c14837512d134687ded}
+
+  veg_tree_stump_01:
+    kind: gltf
+    title: Tree Stump 01
+    source: https://polyhaven.com/a/tree_stump_01
+    author: Rob Tuytel (Poly Haven)
+    license: CC0-1.0
+    gltf: tree_stump_01/tree_stump_01_1k.gltf
+    files:
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/tree_stump_01/tree_stump_01_1k.gltf, path: tree_stump_01/tree_stump_01_1k.gltf, sha256: 9c66ba87d693f35eb404acaa96e0eeff831c295b61a0a903795584cbcc3527c9}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/tree_stump_01/tree_stump_01.bin, path: tree_stump_01/tree_stump_01.bin, sha256: b4d9ca70b3c908c4a638fbd6a23ed96c84055bbbf14cf44b89e31ad59fa21e0a}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/tree_stump_01/tree_stump_01_diff_1k.jpg, path: tree_stump_01/textures/tree_stump_01_diff_1k.jpg, sha256: 781ebe420ac4d84f2e44b9e9937a596e3d5d90711d978a1392f8bf3771b5bf31}
+
+
   # --- Heavy vehicles (Sketchfab CC-BY-4.0 via the public Objaverse mirror; glb -> PLY) --
   truck_daf_cf_tractor:
     kind: glb

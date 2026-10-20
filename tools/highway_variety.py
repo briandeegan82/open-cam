@@ -91,6 +91,30 @@ SPECIES = {
     "veg_shrub_04": ("shrub", 3.0),
 }
 DEFAULT_SPECIES = [("veg_island_tree_02", "tree"), ("veg_shrub_02", "shrub")]
+# --vegetation-pool extended: more Poly Haven species. Multipliers give mean heights of about 12 m
+# (jacaranda), 18 m (fir), 6-11 m (broadleaf), 4.5 m (fir sapling); shrubs/grass 0.25-0.8 m.
+SPECIES_EXTENDED = {
+    "veg_jacaranda_tree": ("tree", 0.19),
+    "veg_island_tree_01": ("tree", 0.68),
+    "veg_tree_small_02": ("tree", 0.55),
+    "veg_fir_tree_01": ("tree", 0.30),
+    "veg_fir_sapling": ("tree", 1.1),
+    "veg_searsia_burchellii": ("tree", 0.58),
+    "veg_shrub_03": ("shrub", 1.6),
+    "veg_wild_rooibos_bush": ("shrub", 1.35),
+    "veg_grass_medium_01": ("shrub", 1.3),
+    "veg_grass_medium_02": ("shrub", 1.1),
+    "veg_grass_bermuda_01": ("shrub", 1.4),
+    "veg_dead_tree_trunk_02": ("shrub", 0.9),
+    "veg_tree_stump_01": ("shrub", 0.9),
+}
+DEFAULT_SPECIES_EXTENDED = [
+    ("veg_island_tree_02", "tree"),
+    ("veg_fir_tree_01", "tree"),
+    ("veg_tree_small_02", "tree"),
+    ("veg_shrub_02", "shrub"),
+    ("veg_grass_medium_01", "shrub"),
+]
 
 # Heavy/commercial vehicles (manifest kind "glb"): class, model forward axis, real length [m],
 # paintable materials and proxy box (width, height) for --allow-missing-assets.
@@ -163,6 +187,12 @@ def add_arguments(ap: argparse.ArgumentParser) -> None:
     g.add_argument("--gantry", choices=("on", "off"), default=None)
     g.add_argument("--overpass", choices=("on", "off"), default=None)
     g.add_argument("--barrier-materials", choices=("textured", "flat"), default="textured")
+    g.add_argument(
+        "--vegetation-pool",
+        choices=("classic", "extended"),
+        default="classic",
+        help="extended: add 6 trees and 7 shrubs/grass clumps/stumps (Poly Haven CC0) to the species mix.",
+    )
 
 
 # ---------------------------------------------------------------------------- alignment
@@ -297,7 +327,7 @@ class Variety:
     lamp_heads: list[dict] = field(default_factory=list)
 
     def species_scale(self, vid: str) -> float:
-        return SPECIES[vid][1]
+        return {**SPECIES, **SPECIES_EXTENDED}[vid][1]
 
     def species_spacing(self, kind: str) -> float:
         return float(sum(k == kind for _, k in self.species))
@@ -332,6 +362,9 @@ def _pick(rng: np.random.Generator, shares: dict[str, float]) -> str:
 
 def resolve(args: argparse.Namespace, car_models: tuple[str, ...], cam_lane: int) -> Variety:
     v = Variety(seed=args.seed, barrier_textured=args.barrier_materials == "textured")
+    extended_veg = getattr(args, "vegetation_pool", "classic") == "extended"
+    if extended_veg:
+        v.species = list(DEFAULT_SPECIES_EXTENDED)
     rng = np.random.default_rng(args.seed) if args.seed is not None else None
     r = rng.uniform if rng is not None else None
 
@@ -353,8 +386,9 @@ def resolve(args: argparse.Namespace, car_models: tuple[str, ...], cam_lane: int
     v.overpass = on[args.overpass] if args.overpass else bool(rng is not None and r() < 0.35)
     if rng is not None:
         v.gantry_s, v.overpass_s, v.lamp_spacing_m = r(90, 220), r(240, 480), r(36, 50)
-        trees = [k for k, (kind, _) in SPECIES.items() if kind == "tree"]
-        shrubs = [k for k, (kind, _) in SPECIES.items() if kind == "shrub"]
+        pool = {**SPECIES, **SPECIES_EXTENDED} if extended_veg else SPECIES
+        trees = [k for k, (kind, _) in pool.items() if kind == "tree"]
+        shrubs = [k for k, (kind, _) in pool.items() if kind == "shrub"]
         v.species = [(t, "tree") for t in rng.choice(trees, int(rng.integers(1, 4)), replace=False)]
         v.species += [(s, "shrub") for s in rng.choice(shrubs, int(rng.integers(1, 4)), replace=False)]
         v.species = [(str(a), b) for a, b in v.species]
