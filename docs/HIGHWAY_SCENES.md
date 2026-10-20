@@ -46,7 +46,7 @@ venv/bin/python tools/pbrt_spectral_exr_to_electrons.py --exr out/highway_spectr
 
 Useful options: `--sky {kloofendal_43d_clear,kloofendal_48d_partly_cloudy,syferfontein_6d_clear,analytic}`,
 `--sun-elevation` (analytic sky), `--sun-azimuth` (degrees from the road direction, + = right),
-`--global-illuminance-lux`, `--road {asphalt031,asphalt026c,plain}`, `--vegetation`, `--traffic none`,
+`--global-illuminance-lux`, `--road` (see below), `--verge`, `--vegetation`, `--traffic none`,
 `--proxy-cars`, `--cam-height`, `--cam-lane`, `--cam-pitch`, and the usual film/camera options.
 `--allow-missing-assets` builds without any downloads (proxy cars, analytic sky, untextured
 surfaces); the tests use it.
@@ -66,9 +66,36 @@ surfaces); the tests use it.
   Realistic-camera EXRs are film irradiance, pinhole/thin-lens EXRs radiance, as for the
   other builders. Daylight is bright: pick a short `--integration-time-s`.
 
+## Road and verge surfaces
+
+`--road` picks the carriageway texture and `--verge` the ground beside it, all ambientCG CC0
+2K maps listed in `config/highway_assets.yaml` with checksums. As for the original asphalt,
+only the luminance of the colour map is used, normalised to mean 1. It scales a measured
+reflectance spectrum (`ROAD_SURFACES` / `VERGE_SURFACES` in `tools/build_highway_scene.py`),
+so the albedo comes from the spectrum and the texture adds detail.
+
+| `--road` | Surface | Tile | Spectrum |
+|---|---|---|---|
+| `asphalt031` (default) | fine-aggregate asphalt | 2.0 m | `asphalt_aged` |
+| `asphalt026c` | cracked asphalt | 2.0 m | `asphalt_aged` |
+| `asphalt023s` | smooth, fresh fine asphalt | 1.25 m | `asphalt_new` |
+| `asphalt030` | grey worn asphalt | 2.2 m | `asphalt_aged` |
+| `asphalt021` | cracked dark asphalt | 1.85 m | `asphalt_aged` |
+| `concrete046` | concrete pavement | 2.4 m | `concrete` |
+| `pavingstones070` | granite setts | 1.15 m | `concrete` |
+| `pavingstones128` | concrete block paving | 3.5 m | `concrete` |
+
+`--verge grass004` (default), `gravel023` (grey gravel, 1.5 m tile, `concrete`) or
+`ground062s` (sandy soil, 1.6 m, `soil`). The distant fields stay grass.
+
+Tile sizes are ambientCG's stated dimensions. The Road0xx series was left out because it has
+lane markings baked in. Road wear and its anti-tiling model asphalt, so `--road-wear` defaults
+to `none` on concrete and paving, and asking for wear there is an error. The setts and the
+gravel use a grey concrete spectrum, not a measured granite or gravel one.
+
 ## Road surface wear
 
-`--road-wear none|light|moderate|heavy` (default `moderate`) ages the road with seeded,
+`--road-wear none|light|moderate|heavy` (default `moderate` on asphalt roads, `none` otherwise) ages the road with seeded,
 reproducible distress (`--road-wear-seed`, default `--seed`). The code lives in
 `tools/highway_road_wear.py`. The default `asphalt` material is replaced, and so are the clean
 `paint_*` quads. Only material fields change, so the manifest's absolute illuminance is not

@@ -159,6 +159,20 @@ def write_spd(path: Path, wl: np.ndarray, val: np.ndarray) -> None:
     path.write_text("\n".join(f"{w:.1f} {v:.6g}" for w, v in zip(wl, val)) + "\n")
 
 
+# --road / --verge texture -> spectral shape (spd/<name>.spd) that its mean-1 luminance map scales.
+ROAD_SURFACES = {
+    "asphalt031": "asphalt_aged",
+    "asphalt026c": "asphalt_aged",
+    "asphalt023s": "asphalt_new",
+    "asphalt030": "asphalt_aged",
+    "asphalt021": "asphalt_aged",
+    "concrete046": "concrete",
+    "pavingstones070": "concrete",
+    "pavingstones128": "concrete",
+}
+VERGE_SURFACES = {"grass004": "grass", "gravel023": "concrete", "ground062s": "soil"}
+
+
 def luminance_texture(src: Path, dst: Path, size: int = 1024) -> None:
     """Linear luminance of an sRGB colour map, normalised to mean 1 (float EXR, single channel)."""
     if dst.is_file():
@@ -490,8 +504,25 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         default=None,
         help="Override the horizontal (sun + sky) illuminance at the road; default: clear-sky model.",
     )
-    ap.add_argument("--road", choices=("asphalt031", "asphalt026c", "plain"), default="asphalt031")
-    ap.add_argument("--road-wear", choices=("none", *WEAR_LEVELS), default="moderate", help="Seeded road ageing.")
+    ap.add_argument(
+        "--road",
+        choices=(*ROAD_SURFACES, "plain"),
+        default="asphalt031",
+        help="Road texture (ambientCG CC0); asphalt031/asphalt026c/asphalt023s/asphalt030/asphalt021 are asphalt, "
+        "concrete046 is concrete pavement, pavingstones070/128 are setts and block paving.",
+    )
+    ap.add_argument(
+        "--verge",
+        choices=VERGE_SURFACES,
+        default="grass004",
+        help="Ground texture for the verges and embankments: grass, grey gravel or sandy soil.",
+    )
+    ap.add_argument(
+        "--road-wear",
+        choices=("none", *WEAR_LEVELS),
+        default=None,
+        help="Seeded road ageing (asphalt roads only; default: moderate on asphalt, none otherwise).",
+    )
     ap.add_argument("--road-wear-seed", type=int, default=None, help="Road-wear seed (default: --seed, else 7).")
     ap.add_argument(
         "--road-rtable",
@@ -616,6 +647,11 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
     haze = atmosphere.params_from_args(args)
     rain_notes = rain.check_args(args)
     snow_notes = snow.check_args(args)
+    asphalt_road = args.road == "plain" or ROAD_SURFACES[args.road].startswith("asphalt")
+    if args.road_wear is None:
+        args.road_wear = "moderate" if asphalt_road else "none"
+    elif args.road_wear != "none" and not asphalt_road:
+        raise SystemExit(f"--road-wear models asphalt ageing; use --road-wear none with --road {args.road}")
     wet.check_args(args, args.road_wear != "none")
     vru.check_args(args)
     if args.road_rtable and (args.road_wear != "none" or wet.enabled(args)):
@@ -695,7 +731,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
 
     # ---- road surface
     road_tex = None if args.road == "plain" else asset(f"tex_{args.road}")
-    road_spd = "spd/asphalt_aged.spd"
+    road_spd = f"spd/{ROAD_SURFACES.get(args.road, 'asphalt_aged')}.spd"
     tile = 1.0
     wear = None
     rtable = None
@@ -754,21 +790,22 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
             f'MakeNamedMaterial "asphalt" "string type" "coateddiffuse" "spectrum reflectance" "{road_spd}"'
             ' "float roughness" [0.35] "float thickness" [0.001]'
         )
-    grass_tex = asset("tex_grass004")
+    grass_tex = asset(f"tex_{args.verge}")
+    verge_spd = f"spd/{VERGE_SURFACES[args.verge]}.spd"
     gtile = 1.5
     if grass_tex is not None:
         info, raw = grass_tex
         gtile = float(info["tile_size_m"])
-        lum = out_dir / "textures" / "grass004_lum.exr"
+        lum = out_dir / "textures" / f"{args.verge}_lum.exr"
         luminance_texture(raw / info["maps"]["color"], lum)
         L += [
             f'Texture "grass:lum" "float" "imagemap" "string filename" "{os.path.relpath(lum, out_dir)}"',
-            'Texture "grass" "spectrum" "scale" "spectrum tex" "spd/grass.spd" "texture scale" "grass:lum"',
+            f'Texture "grass" "spectrum" "scale" "spectrum tex" "{verge_spd}" "texture scale" "grass:lum"',
             'MakeNamedMaterial "grass" "string type" "diffuse" "texture reflectance" "grass"',
             f'    "string normalmap" "{os.path.relpath(linear_normal_map(raw / info["maps"]["normal"], out_dir / "textures"), out_dir)}"',
         ]
     else:
-        L.append('MakeNamedMaterial "grass" "string type" "diffuse" "spectrum reflectance" "spd/grass.spd"')
+        L.append(f'MakeNamedMaterial "grass" "string type" "diffuse" "spectrum reflectance" "{verge_spd}"')
     L += [
         'MakeNamedMaterial "grass_far" "string type" "diffuse" "spectrum reflectance" "spd/grass.spd"',
         *(
@@ -1167,6 +1204,8 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
             "lane_width_m": LANE_W,
             "markings": "MUTCD: yellow left edge, broken white 3.05/9.14 m, solid white right edge",
             "surface": args.road,
+            "surface_spd": ROAD_SURFACES.get(args.road, "asphalt_aged"),
+            "verge": args.verge,
             "length_m": ROAD_Z1 - ROAD_Z0,
             "wear": wear.summary if wear is not None else None,
             **({"rtable": rtable.summary()} if rtable is not None else {}),
