@@ -554,7 +554,10 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
     for sx in (-1, 1):
         for sz in (-1, 1):
             zc = Z_INT + sz * (HALF + WALK_W + 25.0)
-            cross_lots.append(box(sx * (BUILD_X + 30.0), 0.0, zc, 60.0, 12.0 + 4.0 * rng.random(), 50.0))
+            inset = fk.RECESS if kit_meta else 0.0  # keep the kit recess behind the wall plane clear
+            cross_lots.append(
+                box(sx * (BUILD_X + 30.0 + inset / 2), 0.0, zc, 60.0 - inset, 12.0 + 4.0 * rng.random(), 50.0)
+            )
     L += ['NamedMaterial "facade_render"', *[m for b in cross_lots for m in mesh(*b)], ""]
 
     emitters: list[dict] = []
