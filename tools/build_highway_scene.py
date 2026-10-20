@@ -42,6 +42,7 @@ import highway_materials as hmat  # noqa: E402
 import highway_night as night  # noqa: E402
 import highway_snow as snow  # noqa: E402
 import highway_variety as variety  # noqa: E402
+import highway_vru as vru  # noqa: E402
 import highway_wet as wet  # noqa: E402
 import road_rtable as rt  # noqa: E402
 from fetch_highway_assets import cache_root, load_asset_manifest  # noqa: E402
@@ -498,6 +499,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     wet.add_args(ap)
     snow.add_args(ap)
     hmat.add_arguments(ap)
+    vru.add_args(ap)
     return ap.parse_args(argv)
 
 
@@ -579,6 +581,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
     haze = atmosphere.params_from_args(args)
     snow_notes = snow.check_args(args)
     wet.check_args(args, args.road_wear != "none")
+    vru.check_args(args)
     if args.road_rtable and (args.road_wear != "none" or wet.enabled(args)):
         raise SystemExit("--road-rtable replaces the dry asphalt only: use it with --road-wear none and a dry road")
     atm = None
@@ -901,11 +904,13 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
     L.append("")
 
     # ---- traffic
+    vru_cleared: list[dict] = []
     cars_meta = []
     if args.traffic != "none":
         car_dir = out_dir / "cars"
         car_dir.mkdir(exist_ok=True)
         traffic = var.traffic or DEFAULT_TRAFFIC
+        traffic, vru_cleared = vru.clear_traffic(args, traffic)
         speeds = fx.car_speeds_kmh([c[0] for c in traffic])
         for k, (lane, z, model, paint, yaw) in enumerate(traffic):
             if paint not in CAR_PAINTS and paint not in var.paints:
@@ -965,6 +970,28 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
                 cars_meta, v_spray, heavy, args, "haze" if atm else "", variety.place, float(eye[2])
             )
             L += spray
+
+    vru_meta = None
+    if vru.enabled(args):
+
+        def parked_car(inst: str, model: str, paint: str) -> tuple[str, float]:
+            paint_spd = f"spd/carpaint_{paint}.spd"
+            ca = None if args.proxy_cars else asset(model)
+            if ca is not None:
+                body = car_include(*ca, out_dir, inst, paint_spd, amanifest["assets"][model]["length_m"])
+                yaw_model = 90.0
+            else:
+                body, yaw_model = proxy_car(paint_spd, inst), 0.0
+            inc = out_dir / "cars" / f"{inst}.pbrt"
+            inc.parent.mkdir(exist_ok=True)
+            inc.write_text("\n".join(mats.car_body(body, paint)) + "\n")
+            return os.path.relpath(inc, out_dir), yaw_model
+
+        vru_spectra = vru.write_spectra(args, spd, wl, write_spd, reflectance)
+        vru_lines, vru_meta = vru.scene_lines(args, Layout.right_edge, variety.place, parked_car)
+        vru_meta["spectra"] = vru_spectra
+        vru_meta["removed_traffic"] = vru_cleared
+        L += vru_lines
 
     median_x = Layout.median_l + MEDIAN_W / 2 + LEFT_SHOULDER / 2 - 0.6
     L += variety.structures(var, out_dir, Layout, median_x, mesh, box, sign_legend, LANE_W)
@@ -1109,6 +1136,8 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
     night.update_manifest(manifest, nopts, night_lighting, night_meta)
     manifest.update(fx.manifest())
     manifest.update(mats.manifest())
+    if vru_meta is not None:
+        manifest["vru"] = vru_meta
     (out_dir / "highway_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     print(
         f"wrote {_rel(repo, scene_path)} (+ highway_manifest.json); horizontal illuminance "
