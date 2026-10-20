@@ -99,6 +99,7 @@ def test_kits_build_keeps_cars_and_emitters_and_lights_rooms_at_night(tmp_path):
         assert f'ObjectBegin "{name}"' in b
 
 
+@pytest.mark.skipif(not HAVE, reason="facade kits not prepared (tools/fetch_highway_assets.py)")
 def test_kit_recess_is_not_covered_by_lot_or_back_block_boxes(tmp_path):
     b, _ = _build(tmp_path, "--facade-style", "kits")
     seen = 0
