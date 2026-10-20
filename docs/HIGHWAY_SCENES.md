@@ -247,9 +247,34 @@ analytic ECE R112/R149 class-B (right-hand traffic) passing beam with a 15 deg k
 checked against the test points B50L, 75R, 75L, 50L, 50R, 50V, 25L, 25R and zone III
 (halogen peak ~23 kcd / ~310 lm, LED ~32 kcd / ~430 lm per lamp). Spectra: halogen = 3200 K
 Planck (H7); LED = 5700 K phosphor-converted LED (blue InGaN + YAG). 5 % of the flux is moved
-into a visible Lambertian lens quad. Tail lamps (6 cd) and brake lamps (86 cd, ECE R7 ranges)
-are `diffuse` area lights with a red LED spectrum (626 nm, 17 nm FWHM; inside the ECE red
-chromaticity box). Traffic lamp positions come from each car's bounding box.
+into a visible Lambertian lens quad.
+
+**Rear lamps** (`tools/highway_taillamps.py`, `--tail-lamps detailed`, default). Each traffic
+vehicle gets a rear lamp cluster per side that follows its body: a 1 cm grid over the lamp outline
+is ray-cast from behind onto the car asset's meshes, and the lens and emitters are bilinear meshes
+2 mm and 4 mm proud of the hit surface. The outlines (`LAYOUTS`) follow each asset's own lamp
+geometry: the BMW M6 lamp glass, the Pontiac GTO's slot lamps behind the chrome louvres and the
+vintage car's round fender lamps. The box proxy car and the heavy vehicles (flat bounding-box
+rear) get generic layouts; trucks, the van and the bus have amber / red / clear chambers.
+* *Photometry at H-V (Lambertian, L = I / A):* tail 6 cd, stop +80 cd per side and a centre
+  high-mounted stop lamp (CHMSL) of 40 cd on the BMW and the proxy (UN ECE R7 R1 4–17 cd,
+  S1 60–185 cd, S3 25–80 cd). The manifest (`lighting.artificial.tail_lamps[*].sides`) gives
+  each side's lens and emitting area, intensity and peak luminance.
+* *LED lamps* (BMW, proxy, bus): the tail function lights a 2 cm contour light guide round the
+  lens edge (~580 cd/m² on the BMW); braking adds the inner area (~6400 cd/m²). Red LED spectrum
+  626 nm, 17 nm FWHM.
+* *Incandescent lamps* (Pontiac, vintage car, trucks, van): the whole red chamber glows, with a
+  bulb hot spot at the centre (luminance weight 1 + 4 exp(−r²/2σ²), σ = 2 cm). Braking raises
+  the same chamber (dual filament). Spectrum: 2856 K behind a 610 nm long-pass red lens.
+* *Unlit lenses:* glossy `coateddiffuse` with nominal red, amber or clear reflectances, so they
+  reflect other cars' headlamps.
+* *Not modelled:* the lamps' angular intensity distribution (they are Lambertian, while R7 lets
+  the intensity fall off away from H-V), the inner optics (pillow lenses, reflector facets) and
+  sparkle, rear reflex reflectors, indicators flashing, reversing and rear fog lamps lit. Heavy
+  vehicles use the flat rear of their bounding box.
+
+`--tail-lamps simple` restores the old flat 0.30 × 0.10 m red quads at the bounding-box rear
+corners, which float beside cars whose bounding box includes the mirrors.
 
 **Street lights.** 12 m twin-arm poles in the median every 48 m (2.5 m outreach), ANSI/IES
 RP-8 / EN 13201 freeway geometry. Each luminaire is a goniometric light with an analytic

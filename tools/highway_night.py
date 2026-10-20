@@ -43,6 +43,7 @@ import math
 import os
 from pathlib import Path
 
+import highway_taillamps as taillamps
 import numpy as np
 from colour_science import correlated_colour_temperature, tristimulus, xy_chromaticity
 from highway_sky import (
@@ -197,6 +198,7 @@ LAMP_SPECTRA = {
     "led_4000k": lambda wl: pc_led(wl, 4000.0, red_phosphor=0.45),
     "hps": hps_spectrum,
     "red_led": red_led_spectrum,
+    "red_incandescent": taillamps.red_incandescent_spectrum,
     "night_sky": night_sky_spectrum,
 }
 
@@ -526,6 +528,13 @@ def add_night_args(ap: argparse.ArgumentParser) -> None:
     g.add_argument("--moon-azimuth", type=float, default=-40.0, help="From the road direction, + = right.")
     g.add_argument("--headlamps", choices=("auto", "mixed", "led", "halogen", "off"), default="auto")
     g.add_argument("--brake-lights", choices=("none", "lead", "all"), default="lead")
+    g.add_argument(
+        "--tail-lamps",
+        choices=("detailed", "simple"),
+        default="detailed",
+        help="detailed = lens + light guides / bulbs following the car body (tools/highway_taillamps.py); "
+        "simple = the old flat 0.30 x 0.10 m red quads.",
+    )
     g.add_argument("--streetlights", choices=("auto", "none", "led_4000k", "hps"), default="auto")
     g.add_argument("--retroreflective", choices=("auto", "on", "off"), default="auto")
 
@@ -538,6 +547,7 @@ def resolve(args: argparse.Namespace) -> dict:
         "headlamps": ("mixed" if dark else "off") if args.headlamps == "auto" else args.headlamps,
         "streetlights": ("led_4000k" if dark else "none") if args.streetlights == "auto" else args.streetlights,
         "retroreflective": dark if args.retroreflective == "auto" else args.retroreflective == "on",
+        "tail_lamps": getattr(args, "tail_lamps", "detailed"),
     }
 
 
@@ -670,6 +680,8 @@ def write_light_assets(out_dir: Path, spd_dir: Path, opts: dict, n: int = 1024, 
     """Write lamp spectra and goniometric maps; returns their relative paths and fluxes."""
     for name, fn in LAMP_SPECTRA.items():
         _write_spd(spd_dir / f"lamp_{name}.spd", LIGHT_WL, fn(LIGHT_WL))
+    for name, r in taillamps.lens_reflectances(LIGHT_WL).items():
+        _write_spd(spd_dir / f"taillamp_lens_{name}.spd", LIGHT_WL, r)
     info = {}
     for kind in ("halogen", "led"):
         m = headlamp_map(n, kind)
@@ -761,6 +773,11 @@ def vehicle_light_lines(
                 )
             meta["headlamps"].append({"car": c["id"], "kind": kind, "lens_luminance_cd_m2": lens_l})
         braking = opts["brake"] == "all" or c["id"] == lead
+        if opts.get("tail_lamps", "detailed") == "detailed":
+            tl_lines, tl_meta = taillamps.rear_lamp_lines(c, braking, opts.get("asset_root"))
+            lines += [*tl_lines, "AttributeEnd"]
+            meta["tail_lamps"].append(tl_meta)
+            continue
         tail_area = TAIL_LAMP[0] * TAIL_LAMP[1]
         lum = (TAIL_CD + (STOP_CD if braking else 0.0)) / tail_area  # Lambertian: I(0) = L A
         for sx in (-1, 1):
