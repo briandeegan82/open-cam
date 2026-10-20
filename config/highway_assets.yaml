@@ -55,6 +55,136 @@ assets:
         extract: Asphalt031
     maps: {color: Asphalt031/Asphalt031_2K-JPG_Color.jpg, normal: Asphalt031/Asphalt031_2K-JPG_NormalGL.jpg,
            roughness: Asphalt031/Asphalt031_2K-JPG_Roughness.jpg}
+  # ambientCG road / verge surfaces (--road, --verge); tile_size_m from ambientCG dimensions;
+  # spd = spectral shape the mean-1 luminance map scales
+  tex_asphalt023s:
+    kind: texture
+    title: Asphalt 023 S (smooth fine-aggregate asphalt)
+    source: https://ambientcg.com/view?id=Asphalt023S
+    author: ambientCG (Lennart Demes)
+    license: CC0-1.0
+    tile_size_m: 1.25
+    spd: asphalt_new
+    role: road
+    files:
+      - url: https://ambientcg.com/get?file=Asphalt023S_2K-JPG.zip
+        path: Asphalt023S_2K-JPG.zip
+        sha256: 5803eb6d066bff83708406568d5905c7eda3c1c210e4d0391626951a6729f210
+        extract: Asphalt023S
+    maps: {color: Asphalt023S/Asphalt023S_2K-JPG_Color.jpg, normal: Asphalt023S/Asphalt023S_2K-JPG_NormalGL.jpg,
+           roughness: Asphalt023S/Asphalt023S_2K-JPG_Roughness.jpg}
+  tex_asphalt030:
+    kind: texture
+    title: Asphalt 030 (grey worn asphalt)
+    source: https://ambientcg.com/view?id=Asphalt030
+    author: ambientCG (Lennart Demes)
+    license: CC0-1.0
+    tile_size_m: 2.2
+    spd: asphalt_aged
+    role: road
+    files:
+      - url: https://ambientcg.com/get?file=Asphalt030_2K-JPG.zip
+        path: Asphalt030_2K-JPG.zip
+        sha256: cdd7fbbc3571dc9433610f62cd5f9194747416ca96575ccacecda36de18ab854
+        extract: Asphalt030
+    maps: {color: Asphalt030/Asphalt030_2K-JPG_Color.jpg, normal: Asphalt030/Asphalt030_2K-JPG_NormalGL.jpg,
+           roughness: Asphalt030/Asphalt030_2K-JPG_Roughness.jpg}
+  tex_asphalt021:
+    kind: texture
+    title: Asphalt 021 (cracked dark asphalt)
+    source: https://ambientcg.com/view?id=Asphalt021
+    author: ambientCG (Lennart Demes)
+    license: CC0-1.0
+    tile_size_m: 1.85
+    spd: asphalt_aged
+    role: road
+    files:
+      - url: https://ambientcg.com/get?file=Asphalt021_2K-JPG.zip
+        path: Asphalt021_2K-JPG.zip
+        sha256: ed83369cd47d726a482d4d242444d3522d4ffe29e6fae12fee2652b9fd537395
+        extract: Asphalt021
+    maps: {color: Asphalt021/Asphalt021_2K-JPG_Color.jpg, normal: Asphalt021/Asphalt021_2K-JPG_NormalGL.jpg,
+           roughness: Asphalt021/Asphalt021_2K-JPG_Roughness.jpg}
+  tex_concrete046:
+    kind: texture
+    title: Concrete 046 (smooth concrete pavement)
+    source: https://ambientcg.com/view?id=Concrete046
+    author: ambientCG (Lennart Demes)
+    license: CC0-1.0
+    tile_size_m: 2.4
+    spd: concrete
+    role: road
+    files:
+      - url: https://ambientcg.com/get?file=Concrete046_2K-JPG.zip
+        path: Concrete046_2K-JPG.zip
+        sha256: 597e009cb504219e85671ec06a375cd0cf030142749bb414990cc3dece477dde
+        extract: Concrete046
+    maps: {color: Concrete046/Concrete046_2K-JPG_Color.jpg, normal: Concrete046/Concrete046_2K-JPG_NormalGL.jpg,
+           roughness: Concrete046/Concrete046_2K-JPG_Roughness.jpg}
+  tex_pavingstones070:
+    kind: texture
+    title: Paving Stones 070 (granite setts)
+    source: https://ambientcg.com/view?id=PavingStones070
+    author: ambientCG (Lennart Demes)
+    license: CC0-1.0
+    tile_size_m: 1.15
+    spd: concrete
+    role: road
+    files:
+      - url: https://ambientcg.com/get?file=PavingStones070_2K-JPG.zip
+        path: PavingStones070_2K-JPG.zip
+        sha256: 0fb428c7d92b166185a3a2b2223f9dd0f26629146342416bcb823e94350f17e7
+        extract: PavingStones070
+    maps: {color: PavingStones070/PavingStones070_2K-JPG_Color.jpg, normal: PavingStones070/PavingStones070_2K-JPG_NormalGL.jpg,
+           roughness: PavingStones070/PavingStones070_2K-JPG_Roughness.jpg}
+  tex_pavingstones128:
+    kind: texture
+    title: Paving Stones 128 (concrete block paving)
+    source: https://ambientcg.com/view?id=PavingStones128
+    author: ambientCG (Lennart Demes)
+    license: CC0-1.0
+    tile_size_m: 3.5
+    spd: concrete
+    role: road
+    files:
+      - url: https://ambientcg.com/get?file=PavingStones128_2K-JPG.zip
+        path: PavingStones128_2K-JPG.zip
+        sha256: 05c61918db5e2eb76d4312e14286932dd72e6f043acf08433a5281dd288abf01
+        extract: PavingStones128
+    maps: {color: PavingStones128/PavingStones128_2K-JPG_Color.jpg, normal: PavingStones128/PavingStones128_2K-JPG_NormalGL.jpg,
+           roughness: PavingStones128/PavingStones128_2K-JPG_Roughness.jpg}
+  tex_gravel023:
+    kind: texture
+    title: Gravel 023 (grey gravel shoulder)
+    source: https://ambientcg.com/view?id=Gravel023
+    author: ambientCG (Lennart Demes)
+    license: CC0-1.0
+    tile_size_m: 1.5
+    spd: concrete
+    role: verge
+    files:
+      - url: https://ambientcg.com/get?file=Gravel023_2K-JPG.zip
+        path: Gravel023_2K-JPG.zip
+        sha256: a6dd0aea7bcda95d6373c823734eda0cfa066e34c0eea9e1e07023926021bab5
+        extract: Gravel023
+    maps: {color: Gravel023/Gravel023_2K-JPG_Color.jpg, normal: Gravel023/Gravel023_2K-JPG_NormalGL.jpg,
+           roughness: Gravel023/Gravel023_2K-JPG_Roughness.jpg}
+  tex_ground062s:
+    kind: texture
+    title: Ground 062 S (sandy soil)
+    source: https://ambientcg.com/view?id=Ground062S
+    author: ambientCG (Lennart Demes)
+    license: CC0-1.0
+    tile_size_m: 1.6
+    spd: soil
+    role: verge
+    files:
+      - url: https://ambientcg.com/get?file=Ground062S_2K-JPG.zip
+        path: Ground062S_2K-JPG.zip
+        sha256: 03203762fb4aaeb17de2dac2ef30f519ab8abdd565cf810136674c0def8a3eab
+        extract: Ground062S
+    maps: {color: Ground062S/Ground062S_2K-JPG_Color.jpg, normal: Ground062S/Ground062S_2K-JPG_NormalGL.jpg,
+           roughness: Ground062S/Ground062S_2K-JPG_Roughness.jpg}
   tex_asphalt026c:
     kind: texture
     title: Asphalt 026C (aged, cracked asphalt)
