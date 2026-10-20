@@ -58,8 +58,14 @@ def pairs(P: dict, wall: str, insert: str) -> list[tuple[str, str]]:
 
 
 def trim(P: dict, prefix: str) -> str | None:
+    """Straight 3 m trim piece (angled, corner and end pieces skipped)."""
     c = sorted(
-        n for n in P if n.startswith(prefix) and "standard" in n and abs(P[n]["hi"][0] - P[n]["lo"][0] - BAY) < 0.05
+        n
+        for n in P
+        if n.startswith(prefix)
+        and not any(w in n for w in ("angled", "corner", "end"))
+        and abs(P[n]["hi"][0] - P[n]["lo"][0] - BAY) < 0.05
+        and P[n]["lo"][2] > -0.5
     )
     return c[0] if c else None
 
