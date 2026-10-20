@@ -499,3 +499,199 @@ assets:
       - url: https://upload.wikimedia.org/wikipedia/commons/9/98/MUTCD_W11-2.svg
         path: "MUTCD_W11-2.svg"
         sha256: 3ae5b9f1605ebb7e87faf26610f5d8f7acb9fbdc8d3a76ff719032016c3a070a
+
+  # --- Street furniture (Poly Haven CC0 glTF; Objaverse CC-BY glb) -----------
+  prop_fire_hydrant:
+    kind: gltf
+    title: Fire Hydrant
+    source: https://polyhaven.com/a/fire_hydrant
+    author: Gonçalo Felício (Poly Haven)
+    license: CC0-1.0
+    gltf: fire_hydrant/fire_hydrant_1k.gltf
+    files:
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/fire_hydrant/fire_hydrant_1k.gltf, path: fire_hydrant/fire_hydrant_1k.gltf, sha256: aaca81b2904e6e5f1fb10a854c7b9a921232624387d1f8757b5c6bdaedcd9eb0}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/fire_hydrant/fire_hydrant.bin, path: fire_hydrant/fire_hydrant.bin, sha256: a3c7ed023bc4aff190902764326e7f83ae1a108f6bac2a1b637c38a8e03eb516}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/fire_hydrant/fire_hydrant_nor_gl_1k.jpg, path: fire_hydrant/textures/fire_hydrant_nor_gl_1k.jpg, sha256: f6786775276c7b48f0582fdd7c43984b63b15b7a8e0ea0e2f2af8cdab98c06d7}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/fire_hydrant/fire_hydrant_aged_diff_1k.jpg, path: fire_hydrant/textures/fire_hydrant_aged_diff_1k.jpg, sha256: 3198cabcaf5107e59109bd07dfe8e4c87b3f0533173d10fafdaf86f8024a291e}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/fire_hydrant/fire_hydrant_aged_arm_1k.jpg, path: fire_hydrant/textures/fire_hydrant_aged_arm_1k.jpg, sha256: 9c46b014735a4e8df5a80e4c030ddb321c9aeaa715ad4ea3eb60e6f0909c9d0a}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/fire_hydrant/fire_hydrant_aged_nor_gl_1k.jpg, path: fire_hydrant/textures/fire_hydrant_aged_nor_gl_1k.jpg, sha256: 6fadc78fd5d696bf594ff021aaf93a0c6aced761830f9aa6971c51b17c869c35}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/fire_hydrant/fire_hydrant_diff_1k.jpg, path: fire_hydrant/textures/fire_hydrant_diff_1k.jpg, sha256: a3d0b8b6fcd8a39c8d5067f8ef95e3290053131887398f89baf57c1f8d24ab45}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/fire_hydrant/fire_hydrant_arm_1k.jpg, path: fire_hydrant/textures/fire_hydrant_arm_1k.jpg, sha256: d15bf8fc6389ae48a1060a38057c2093469e62f585c8033d300b80af81d40f9d}
+  prop_metal_trash_can:
+    kind: gltf
+    title: Metal Trash Can
+    source: https://polyhaven.com/a/metal_trash_can
+    author: GurJas Studios (Poly Haven)
+    license: CC0-1.0
+    gltf: metal_trash_can/metal_trash_can_1k.gltf
+    files:
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/metal_trash_can/metal_trash_can_1k.gltf, path: metal_trash_can/metal_trash_can_1k.gltf, sha256: ccdc55ecfe43db2174c9257891e92551882a874564bb9a7908cafc5268b46c0c}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/metal_trash_can/metal_trash_can_diff_1k.jpg, path: metal_trash_can/textures/metal_trash_can_diff_1k.jpg, sha256: 920c895a31b1cd2c000123c0592c70c33d46562752987da98070e7e0eebb662f}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/metal_trash_can/metal_trash_can_rust_diff_1k.jpg, path: metal_trash_can/textures/metal_trash_can_rust_diff_1k.jpg, sha256: 51c44248305b111d978f7e0cbfe4a71ab7f49549968ce37c54b635d74c2cfba1}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/metal_trash_can/metal_trash_can_arm_1k.jpg, path: metal_trash_can/textures/metal_trash_can_arm_1k.jpg, sha256: b23dcdb2ed40c1c6cfbd2d2779c6f075025b7269bfbbed2a70c6bdb7167e47fb}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/metal_trash_can/metal_trash_can_rust_nor_gl_1k.jpg, path: metal_trash_can/textures/metal_trash_can_rust_nor_gl_1k.jpg, sha256: a5497588e00e5e56db72e701457fc8a46d3a1fa7d9dd7bf9d79e02cada09e84b}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/metal_trash_can/metal_trash_can_nor_gl_1k.jpg, path: metal_trash_can/textures/metal_trash_can_nor_gl_1k.jpg, sha256: b977f17aa9d4718ffc91a62868b7171b4479578b8cffd1d32001d92552af81a4}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/metal_trash_can/metal_trash_can.bin, path: metal_trash_can/metal_trash_can.bin, sha256: a9b9f526b655bef865933335f2cfc8c8f0bd1a35fda05b290a93e3061f2b6c8a}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/metal_trash_can/metal_trash_can_rust_arm_1k.jpg, path: metal_trash_can/textures/metal_trash_can_rust_arm_1k.jpg, sha256: 31a6269e98a3a8b2a2d6db8f58724e0151d5312b5137e6d59b5a2ba873989159}
+  prop_concrete_road_barrier:
+    kind: gltf
+    title: Concrete Road Barrier
+    source: https://polyhaven.com/a/concrete_road_barrier
+    author: Amal Kumar (Poly Haven)
+    license: CC0-1.0
+    gltf: concrete_road_barrier/concrete_road_barrier_1k.gltf
+    files:
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/concrete_road_barrier/concrete_road_barrier_1k.gltf, path: concrete_road_barrier/concrete_road_barrier_1k.gltf, sha256: c371e87d303fff3f0c9fbe88520f7837514364e5c66aac3244e115ffa673d061}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/concrete_road_barrier/concrete_road_barrier_nor_gl_1k.jpg, path: concrete_road_barrier/textures/concrete_road_barrier_nor_gl_1k.jpg, sha256: c1072f51ff5c3d7158f0fbb0aa26e82b816b745b9f03639c4816832af2b37c52}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/concrete_road_barrier/concrete_road_barrier_arm_1k.jpg, path: concrete_road_barrier/textures/concrete_road_barrier_arm_1k.jpg, sha256: b940847648012f2db8c24b16e07ad1e39b3bd33ea493203364deca209606e4b4}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/concrete_road_barrier/concrete_road_barrier_diff_1k.jpg, path: concrete_road_barrier/textures/concrete_road_barrier_diff_1k.jpg, sha256: 88b2d79829ffec7b11ac4d9c8554328f30b665d2c17f634197fde4f1ca8696fe}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/concrete_road_barrier/concrete_road_barrier.bin, path: concrete_road_barrier/concrete_road_barrier.bin, sha256: 64a4f9bc6e4af64d714a252c3c13428c430a60569deba3d52ca6b7dd3aa70d8c}
+  prop_concrete_road_barrier_02:
+    kind: gltf
+    title: Concrete Road Barrier 02
+    source: https://polyhaven.com/a/concrete_road_barrier_02
+    author: Amal Kumar (Poly Haven)
+    license: CC0-1.0
+    gltf: concrete_road_barrier_02/concrete_road_barrier_02_1k.gltf
+    files:
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/concrete_road_barrier_02/concrete_road_barrier_02_1k.gltf, path: concrete_road_barrier_02/concrete_road_barrier_02_1k.gltf, sha256: 52d13b5105ce861db5dd1413a1a924ad5594dee5a8eb37dbe1a9df441fcd7caf}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/concrete_road_barrier_02/concrete_road_barrier_02.bin, path: concrete_road_barrier_02/concrete_road_barrier_02.bin, sha256: 254ee05467733e224e127dc76e019e5b5211c0da4248fa3fc75117ec005d7c90}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/concrete_road_barrier_02/concrete_road_barrier_02_arm_1k.jpg, path: concrete_road_barrier_02/textures/concrete_road_barrier_02_arm_1k.jpg, sha256: 6fb282f242ce86a3e44663678c2e0366c37de8244b08acc003d99771cb780e53}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/concrete_road_barrier_02/concrete_road_barrier_02_nor_gl_1k.jpg, path: concrete_road_barrier_02/textures/concrete_road_barrier_02_nor_gl_1k.jpg, sha256: 42ec702843df209f0aef1d247c76dfb91385f0bf3b226b752d22a4c0e3780a31}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/concrete_road_barrier_02/concrete_road_barrier_02_diff_1k.jpg, path: concrete_road_barrier_02/textures/concrete_road_barrier_02_diff_1k.jpg, sha256: 9329260ebfc8632a5d47d9b344ab6f916e26604e73ebd2c495fee544df4bdefa}
+  prop_barrel_03:
+    kind: gltf
+    title: Barrel 03
+    source: https://polyhaven.com/a/barrel_03
+    author: Serhii Khromov (Poly Haven)
+    license: CC0-1.0
+    gltf: barrel_03/barrel_03_1k.gltf
+    files:
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/barrel_03/barrel_03_1k.gltf, path: barrel_03/barrel_03_1k.gltf, sha256: 80e2faf48b7423bb522b573e459d99c5656a16763285ec8268e957fc7d41f9b8}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/barrel_03/barrel_03_diff_1k.jpg, path: barrel_03/textures/barrel_03_diff_1k.jpg, sha256: 62feb27dfa9a0daf3f323fdc1ddc2d8e4a5996cf2c72fe50197b55c2b9cba7f3}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/barrel_03/barrel_03.bin, path: barrel_03/barrel_03.bin, sha256: 10f3202e9ac9acf8dd896f1562c64db58311ffef89efb402d8433e03ad486427}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/barrel_03/barrel_03_nor_gl_1k.jpg, path: barrel_03/textures/barrel_03_nor_gl_1k.jpg, sha256: ade97c52985047858a4f38226a9b8a888e3a766ba0434700b4618fb25424c4b6}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/barrel_03/barrel_03_arm_1k.jpg, path: barrel_03/textures/barrel_03_arm_1k.jpg, sha256: 2cec2338b36d7322bef55e6a1d0884b223c5ed383cf986a58bfa461478c64c7e}
+  prop_painted_wooden_bench:
+    kind: gltf
+    title: Painted Wooden Bench
+    source: https://polyhaven.com/a/painted_wooden_bench
+    author: Kirill Sannikov (Poly Haven)
+    license: CC0-1.0
+    gltf: painted_wooden_bench/painted_wooden_bench_1k.gltf
+    files:
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/painted_wooden_bench/painted_wooden_bench_1k.gltf, path: painted_wooden_bench/painted_wooden_bench_1k.gltf, sha256: 2289ab82f3fe3045bf18f7b9541743d2c65b9f071cb34bbe424d2bc998f3e507}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/painted_wooden_bench/painted_wooden_bench_diff_1k.jpg, path: painted_wooden_bench/textures/painted_wooden_bench_diff_1k.jpg, sha256: 9bc533313091ee71eaca5fa6334b71d27935d9d75311f64df6a53c28a67c435c}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/painted_wooden_bench/painted_wooden_bench_nor_gl_1k.jpg, path: painted_wooden_bench/textures/painted_wooden_bench_nor_gl_1k.jpg, sha256: a0f53740d77fc61aac01de0b7e1ae6109445d1756839f739ae31fdf10c9911f2}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/painted_wooden_bench/painted_wooden_bench_arm_1k.jpg, path: painted_wooden_bench/textures/painted_wooden_bench_arm_1k.jpg, sha256: 878785565eeff706b8f1e4db7e3d794a544e9cf0e56cee424d9a271ab4ead47e}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/painted_wooden_bench/painted_wooden_bench.bin, path: painted_wooden_bench/painted_wooden_bench.bin, sha256: 5799bcb20924105cccd6424de8cdb8e67eb57fddc19c395befeac634a7b2e013}
+  prop_utility_box_01:
+    kind: gltf
+    title: Utility Box 01
+    source: https://polyhaven.com/a/utility_box_01
+    author: James Ray Cock (Poly Haven)
+    license: CC0-1.0
+    gltf: utility_box_01/utility_box_01_1k.gltf
+    files:
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/utility_box_01/utility_box_01_1k.gltf, path: utility_box_01/utility_box_01_1k.gltf, sha256: 5b9f8c45f2640c9dd831dc3450529e45b24c987208ddcf73010fe717ce8c454e}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/utility_box_01/utility_box_01_diff_1k.jpg, path: utility_box_01/textures/utility_box_01_diff_1k.jpg, sha256: 6a703a4cdf20c3fc3d0400fa815e5a1834836c96c207bdb57ba9e4a5db3a5532}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/utility_box_01/utility_box_01_nor_gl_1k.jpg, path: utility_box_01/textures/utility_box_01_nor_gl_1k.jpg, sha256: 1c4e377906c13e864c9c7ffbd31a7d86075f28b948bf54872d6ad3ab38a08124}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/utility_box_01/utility_box_01_arm_1k.jpg, path: utility_box_01/textures/utility_box_01_arm_1k.jpg, sha256: e65428774e94b6a8aeb7a23802e0af8f1568952ea79e21a7a3475b957e34956b}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/utility_box_01/utility_box_01.bin, path: utility_box_01/utility_box_01.bin, sha256: e4249eb754d7802154eed36bb12070dc24c90fc331f355d60ef7570d61fc0f5c}
+  prop_utility_box_02:
+    kind: gltf
+    title: Utility Box 02
+    source: https://polyhaven.com/a/utility_box_02
+    author: James Ray Cock (Poly Haven)
+    license: CC0-1.0
+    gltf: utility_box_02/utility_box_02_1k.gltf
+    files:
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/utility_box_02/utility_box_02_1k.gltf, path: utility_box_02/utility_box_02_1k.gltf, sha256: d3f87ce0852709498602f6a096be99a9e13f0ac2619f99edcebad9e89f9faf00}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/utility_box_02/utility_box_02_diff_1k.jpg, path: utility_box_02/textures/utility_box_02_diff_1k.jpg, sha256: 78a0c93b1d8d394beee5989c0d3470a9c8c4e902f708acf3c11cd4edafbe08b1}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/utility_box_02/utility_box_02_arm_1k.jpg, path: utility_box_02/textures/utility_box_02_arm_1k.jpg, sha256: f85575f891c97354d2fff11d5d0e2bc5f7d3aeab853ff3d75100c30c177a9cc5}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/utility_box_02/utility_box_02_nor_gl_1k.jpg, path: utility_box_02/textures/utility_box_02_nor_gl_1k.jpg, sha256: e7c85b37fa5420591b6fa5dcef7875c927c8dc51f38c39c5844d53284ef37c74}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/utility_box_02/utility_box_02.bin, path: utility_box_02/utility_box_02.bin, sha256: 0f0a3f8ecc0358e36e97120aa752c2456a78bf922671e6f77e402b0aa58ecfce}
+  signal_nyc80s:
+    kind: glb
+    title: NYC 80's Traffic Light
+    source: https://sketchfab.com/3d-models/bad8aa4988474919be8f48920dde7e3d
+    author: evgenymur (Sketchfab)
+    license: CC-BY-4.0
+    license_note: "Attribution required: 'NYC 80's Traffic Light' by evgenymur, https://sketchfab.com/3d-models/bad8aa4988474919be8f48920dde7e3d, CC BY 4.0. Mirror: Objaverse (allenai/objaverse, ODC-By)."
+    glb: bad8aa4988474919be8f48920dde7e3d.glb
+    files:
+      - url: https://huggingface.co/datasets/allenai/objaverse/resolve/556637099bf4fa79ea7b239d0d9c328b8a2e9ac8/glbs/000-078/bad8aa4988474919be8f48920dde7e3d.glb
+        path: bad8aa4988474919be8f48920dde7e3d.glb
+        sha256: f61b01b1e37f8ed3af2f7a93bb28abccd42dd45a3f24b0c109dab8f07151b117
+  signal_12in_backplate:
+    kind: glb
+    title: Traffic Light 12in
+    source: https://sketchfab.com/3d-models/d8a64bf6320b489ca6aabc02001722cb
+    author: Kenetics (Sketchfab)
+    license: CC-BY-4.0
+    license_note: "Attribution required: 'Traffic Light 12in' by Kenetics, https://sketchfab.com/3d-models/d8a64bf6320b489ca6aabc02001722cb, CC BY 4.0. Mirror: Objaverse (allenai/objaverse, ODC-By)."
+    glb: d8a64bf6320b489ca6aabc02001722cb.glb
+    files:
+      - url: https://huggingface.co/datasets/allenai/objaverse/resolve/556637099bf4fa79ea7b239d0d9c328b8a2e9ac8/glbs/000-121/d8a64bf6320b489ca6aabc02001722cb.glb
+        path: d8a64bf6320b489ca6aabc02001722cb.glb
+        sha256: 6252d5f55b00ee2ebe862e0219f7b9671e20ffebd80a06f22fbcd1ac9759cc58
+  cone_orange:
+    kind: glb
+    title: Orange street cone
+    source: https://sketchfab.com/3d-models/77da362c4cb44295a838fd778f70f31b
+    author: jeandiz (Sketchfab)
+    license: CC-BY-4.0
+    license_note: "Attribution required: 'Orange street cone' by jeandiz, https://sketchfab.com/3d-models/77da362c4cb44295a838fd778f70f31b, CC BY 4.0. Mirror: Objaverse (allenai/objaverse, ODC-By)."
+    glb: 77da362c4cb44295a838fd778f70f31b.glb
+    files:
+      - url: https://huggingface.co/datasets/allenai/objaverse/resolve/556637099bf4fa79ea7b239d0d9c328b8a2e9ac8/glbs/000-047/77da362c4cb44295a838fd778f70f31b.glb
+        path: 77da362c4cb44295a838fd778f70f31b.glb
+        sha256: 43e628cdcbd7e753890cf1096fc19f8cec0cd91edfb60d6caec64376df563a23
+  cone_reflective:
+    kind: glb
+    title: Traffic Cone
+    source: https://sketchfab.com/3d-models/66b282e65d3b4da8a883ae8579bfb33c
+    author: jamiemcfarlane (Sketchfab)
+    license: CC-BY-4.0
+    license_note: "Attribution required: 'Traffic Cone' by jamiemcfarlane, https://sketchfab.com/3d-models/66b282e65d3b4da8a883ae8579bfb33c, CC BY 4.0. Mirror: Objaverse (allenai/objaverse, ODC-By)."
+    glb: 66b282e65d3b4da8a883ae8579bfb33c.glb
+    files:
+      - url: https://huggingface.co/datasets/allenai/objaverse/resolve/556637099bf4fa79ea7b239d0d9c328b8a2e9ac8/glbs/000-109/66b282e65d3b4da8a883ae8579bfb33c.glb
+        path: 66b282e65d3b4da8a883ae8579bfb33c.glb
+        sha256: 45d3b423227f903a3e2ec53f022b07c18ab251ce22ebaf5120b60a80a9ee6de7
+  cone_weathered:
+    kind: glb
+    title: Traffic Cone
+    source: https://sketchfab.com/3d-models/51cc688ae4254e30813e0bdc5997af1e
+    author: drydoctoregg (Sketchfab)
+    license: CC-BY-4.0
+    license_note: "Attribution required: 'Traffic Cone' by drydoctoregg, https://sketchfab.com/3d-models/51cc688ae4254e30813e0bdc5997af1e, CC BY 4.0. Mirror: Objaverse (allenai/objaverse, ODC-By)."
+    glb: 51cc688ae4254e30813e0bdc5997af1e.glb
+    files:
+      - url: https://huggingface.co/datasets/allenai/objaverse/resolve/556637099bf4fa79ea7b239d0d9c328b8a2e9ac8/glbs/000-074/51cc688ae4254e30813e0bdc5997af1e.glb
+        path: 51cc688ae4254e30813e0bdc5997af1e.glb
+        sha256: e7bbdbd4d99527f62a9a910c2e9f6de930219fa648c54b165a4ce36831c0432d
+  drum_traffic:
+    kind: glb
+    title: Traffic Drum
+    source: https://sketchfab.com/3d-models/6f4d6343a1bd466e9472340e967a0a06
+    author: FameProductions (Sketchfab)
+    license: CC-BY-4.0
+    license_note: "Attribution required: 'Traffic Drum' by FameProductions, https://sketchfab.com/3d-models/6f4d6343a1bd466e9472340e967a0a06, CC BY 4.0. Mirror: Objaverse (allenai/objaverse, ODC-By)."
+    glb: 6f4d6343a1bd466e9472340e967a0a06.glb
+    files:
+      - url: https://huggingface.co/datasets/allenai/objaverse/resolve/556637099bf4fa79ea7b239d0d9c328b8a2e9ac8/glbs/000-133/6f4d6343a1bd466e9472340e967a0a06.glb
+        path: 6f4d6343a1bd466e9472340e967a0a06.glb
+        sha256: 86a3d24854d27adaf294766f0b9d4f74e75a9ff48774bb301aedca6021b98c2f
+  drum_construction:
+    kind: glb
+    title: Bent Construction Barrel
+    source: https://sketchfab.com/3d-models/631b573d26354f6abefc05f8f5d19364
+    author: chimeracreations (Sketchfab)
+    license: CC-BY-4.0
+    license_note: "Attribution required: 'Bent Construction Barrel' by chimeracreations, https://sketchfab.com/3d-models/631b573d26354f6abefc05f8f5d19364, CC BY 4.0. Mirror: Objaverse (allenai/objaverse, ODC-By)."
+    glb: 631b573d26354f6abefc05f8f5d19364.glb
+    files:
+      - url: https://huggingface.co/datasets/allenai/objaverse/resolve/556637099bf4fa79ea7b239d0d9c328b8a2e9ac8/glbs/000-125/631b573d26354f6abefc05f8f5d19364.glb
+        path: 631b573d26354f6abefc05f8f5d19364.glb
+        sha256: 644c01cce11991f354cfb7a550e92099bf9a832e0135f4719f6107a8f43d647d
