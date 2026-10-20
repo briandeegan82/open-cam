@@ -95,7 +95,9 @@ class TestImportedRider(unittest.TestCase):
     def test_contact_points_cover_every_rideable_model(self) -> None:
         import two_wheelers as tw
 
-        self.assertEqual(set(tw.RIDER), set(tw.MODELS) - {"kickscooter_electric"})
+        self.assertEqual(
+            set(tw.RIDER), set(tw.MODELS) - {"kickscooter_electric", "moto_yamaha_fz150", "moped_solifer_export"}
+        )
         for aid, ((sz, sy), (gz, gy, gw), (_fz, fy, fw)) in tw.RIDER.items():
             half = tw.MODELS[aid][2] / 2
             self.assertTrue(-half < sz < gz < half, aid)  # saddle behind the grips, both on the model
@@ -105,7 +107,7 @@ class TestImportedRider(unittest.TestCase):
     def test_rider_sits_on_the_model(self) -> None:
         import two_wheelers as tw
 
-        for aid in ("bike_road", "moto_yamaha_fz150", "scooter_vespa_yellow"):
+        for aid in ("bike_road", "moto_80s", "scooter_vespa_yellow"):
             (sz, sy), _, _ = tw.RIDER[aid]
             lo, hi = vru.imported_rider(aid, 0.25).bounds()
             self.assertGreater(lo[1], 0.0, aid)  # feet above the road

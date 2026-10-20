@@ -886,8 +886,9 @@ venv/bin/python tools/build_highway_scene.py --vru cyclist --vru-motion along --
 procedural rider on one of the Objaverse CC-BY models from `--two-wheelers`
 (`tools/two_wheelers.py`, fetch IDs listed there): a bicycle for `--vru cyclist`
 (default: the procedural bicycle), or a motorbike, moped or scooter for the new
-`--vru motorcyclist` (default `moto_yamaha_fz150`; full-face helmet instead of
-the cycle helmet). The rider is posed from contact points stored per model in
+`--vru motorcyclist` (default `moto_80s`; full-face helmet instead of
+the cycle helmet). The Yamaha FZ150 and Solifer meshes lean on their side stands, so
+they are parked-only. The rider is posed from contact points stored per model in
 `two_wheelers.RIDER` (saddle; grips; bottom bracket, footpegs or floorboard),
 read off side and top point-cloud profiles of each prepared mesh to a few
 centimetres. The torso lean is chosen so the arms reach the grips. The manifest's

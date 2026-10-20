@@ -37,7 +37,7 @@ USGS = REPO / "spectra" / "usgs_nir"
 
 HEIGHT_M = {"pedestrian": 1.80, "child": 1.154, "cyclist": 1.80, "motorcyclist": 1.80}
 RIDERS = ("cyclist", "motorcyclist")
-DEFAULT_MOTO = "moto_yamaha_fz150"
+DEFAULT_MOTO = "moto_80s"
 WHEEL_D, WHEELBASE = 0.70, 1.05
 CLOTHING = {
     # preset: (top, trousers) USGS chart files
