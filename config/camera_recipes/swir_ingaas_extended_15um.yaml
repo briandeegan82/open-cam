@@ -1,0 +1,9 @@
+schema_version: 1
+model:
+  name: swir_ingaas_extended_15um
+  display_name: SWIR extended InGaAs 15 um, 0.9-2.6 um (representative)
+lens_model: research_pinhole_baseline
+sensor_model: swir_ingaas_extended_15um
+source:
+  calibration_tier: research
+  notes: Representative SWIR camera (see docs/SWIR.md); pinhole lens, no glass transmission model.

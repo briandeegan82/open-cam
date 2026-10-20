@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Measured 350-2500 nm reflectances for a 24-patch NIR material chart (USGS splib07a).
 
-Writes ``spectra/usgs_nir/NN_<name>.csv`` (wavelength_nm, reflectance; 350-1100 nm, 1 nm) from the
+Writes ``spectra/usgs_nir/NN_<name>.csv`` (wavelength_nm, reflectance; 350-2500 nm, 1 nm) from the
 USGS Spectral Library v7 ASCII archive (Kokaly et al. 2017, USGS Data Series 1035,
 doi:10.5066/F7RR1WDJ; public domain). All records are ASD FieldSpec absolute reflectance (AREF).
 The chart uses the ColorChecker layout, so ``build_colorchecker_scene.py --patch-dir spectra/usgs_nir``
-renders it. Unlike ``spectra/xrite`` (380-730 nm), these curves are measured through 1100 nm.
+renders it. Unlike ``spectra/xrite`` (380-730 nm), these curves are measured through 2500 nm
+(the SWIR detectors in ``tools/swir_spectra.py`` use the whole range).
 """
 
 from __future__ import annotations
@@ -67,7 +68,7 @@ def resample(lam_nm: np.ndarray, val: np.ndarray, wl: np.ndarray) -> np.ndarray:
     return np.interp(wl, lam_nm[ok], val[ok])
 
 
-def write_chart(repo: Path = REPO, lo: float = 350.0, hi: float = 1100.0) -> list[Path]:
+def write_chart(repo: Path = REPO, lo: float = 350.0, hi: float = 2500.0) -> list[Path]:
     wl = np.arange(lo, hi + 0.5, 1.0)
     out = Path(repo) / OUT_REL
     out.mkdir(parents=True, exist_ok=True)

@@ -1,0 +1,9 @@
+schema_version: 1
+model:
+  name: swir_ingaas_visswir_5um
+  display_name: SWIR VisSWIR InGaAs 5 um, 0.4-1.7 um (representative)
+lens_model: research_pinhole_baseline
+sensor_model: swir_ingaas_visswir_5um
+source:
+  calibration_tier: research
+  notes: Representative SWIR camera (see docs/SWIR.md); pinhole lens, no glass transmission model.

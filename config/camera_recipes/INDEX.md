@@ -83,3 +83,6 @@
 - sony_zv_1
 - study_nikon_z6_minvar
 - xiaomi_mi_8
+- swir_ingaas_extended_15um
+- swir_ingaas_vga_15um
+- swir_ingaas_visswir_5um

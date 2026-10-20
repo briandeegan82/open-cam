@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import functools
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 
@@ -69,6 +70,21 @@ _WATER_K = np.array(
         1.9e-6,
     ]
 )
+
+
+# SWIR (> 1100 nm, where the 1.45 / 1.94 um bands make droplets strongly absorbing): Segelstein
+# (1981), the finer-sampled continuation of Hale & Querry.  The table above is unchanged so
+# visible / NIR results are identical.
+_SEG = np.loadtxt(
+    Path(__file__).resolve().parent.parent / "spectra/water/segelstein_1981_nk.csv",
+    delimiter=",",
+    comments="#",
+    skiprows=5,
+)
+_SEG = _SEG[_SEG[:, 0] > _WATER_WL_NM[-1]]
+_WATER_WL_NM = np.concatenate([_WATER_WL_NM, _SEG[:, 0]])
+_WATER_N = np.concatenate([_WATER_N, _SEG[:, 1]])
+_WATER_K = np.concatenate([_WATER_K, _SEG[:, 2]])
 
 
 def water_index(wl_nm: float) -> complex:
