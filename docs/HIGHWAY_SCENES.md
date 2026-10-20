@@ -1007,3 +1007,22 @@ near zebra crossing by default).
 * **Flicker:** every signal aspect and shop sign is in `manifest["emitters"]`, so
   `tools/render_time_slices.py scenes/generated/urban --linear` renders LED flicker / rolling
   shutter (pass `--exposure-s` to record the exposure in the manifest).
+* **Imported signal heads (opt-in):** `--signal-model nyc80s|backplate12` replaces the procedural
+  black housing with an Objaverse CC-BY mesh (`signal_nyc80s`: 1980s New York-style 3-aspect head;
+  `signal_12in_backplate`: 12-inch head with a yellow backplate). The head is scaled so its aspect
+  pitch is 0.3 m, and its lenses sit 1 cm behind the procedural emitter positions. The lit aspect stays
+  the same LED emitter (luminance, spectrum, PWM), as a 200 mm disc with the same area as the
+  procedural square, so `manifest["emitters"]` and the photometry are unchanged. Unlit aspects show
+  the mesh's own textured lenses. Default `--signal-model procedural` is the original housing.
+* **Street furniture (opt-in):** `--street-furniture pavement` puts seeded Poly Haven CC0 props on both
+  pavements: fire hydrants and bins at the kerb, benches, utility cabinets and a drum against the
+  facades, kept 1.5 m clear of street-light columns and signal poles. `--work-zone cones|drums` closes
+  the near-right parking lane between z = 8 and 20 m with a taper of Objaverse CC-BY cones (0.75 m,
+  nominal) or channelizer drums (1.0 m, nominal), plus concrete barriers. Parked cars there are
+  removed. Placements use their own RNG, so the rest of the seeded scene is unchanged, and
+  `manifest["street_furniture"]["items"]` lists each item's asset, position, yaw and world box.
+  Fetch the assets with `tools/fetch_highway_assets.py` (ids `prop_*`, `cone_*`, `drum_*`,
+  `signal_*`). Limitations: the props use their sRGB base-colour textures, not measured spectra.
+  Cone and drum bands are diffuse, not retroreflective, so they don't light up in headlamps at night.
+  The Poly Haven hydrant and bin files contain two variants side by side, which are split into
+  separate objects.

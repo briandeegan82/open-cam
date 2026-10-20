@@ -29,6 +29,7 @@ import highway_night as night  # noqa: E402
 import highway_signs as sign_scene  # noqa: E402
 import highway_vru as vru  # noqa: E402
 import highway_wet as wet  # noqa: E402
+import street_furniture as sf  # noqa: E402
 from build_highway_scene import (  # noqa: E402
     CAR_MODELS,
     _f,
@@ -96,6 +97,24 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--signal-pwm-hz", type=float, default=0.0, help="Traffic-signal LED PWM [Hz] (0 = DC, the default)."
     )
     ap.add_argument("--signal-duty", type=float, default=0.5)
+    ap.add_argument(
+        "--signal-model",
+        choices=("procedural", *sf.SIGNAL_MODELS),
+        default="procedural",
+        help="Signal-head housing: procedural box or an imported Objaverse CC-BY mesh (aspects stay LED emitters).",
+    )
+    ap.add_argument(
+        "--street-furniture",
+        choices=("none", "pavement"),
+        default="none",
+        help="Hydrants, bins, benches and utility cabinets on both pavements (Poly Haven CC0).",
+    )
+    ap.add_argument(
+        "--work-zone",
+        choices=("none", "cones", "drums"),
+        default="none",
+        help="Close the near-right parking lane (z 8-20 m) with a channelizer taper and concrete barriers.",
+    )
     ap.add_argument("--shop-signs", type=int, default=4, help="Shop LED signs on the ground floors.")
     ap.add_argument("--shop-pwm-hz", type=float, default=100.0, help="Shop LED PWM [Hz] (0 = DC).")
     ap.add_argument("--shop-duty", type=float, default=0.3)
@@ -253,8 +272,25 @@ def signal_heads(args) -> list[dict]:
     ]
 
 
-def signal_lines(args, out_dir: Path, heads: list[dict], window) -> tuple[list[str], list[dict]]:
-    """Pole + black housing + three aspects; the lit aspect is a PWM-tagged LED emitter."""
+def disc_emitter(centre, yaw_deg: float, spd: str, luminance: float, mat: str) -> list[str]:
+    """Round aspect (diameter ASPECT_D) facing +z rotated by yaw; same area as the procedural square."""
+    return [
+        "AttributeBegin",
+        f"Translate {_pts(centre)}",
+        f"Rotate {_f(yaw_deg)} 0 1 0",
+        f'NamedMaterial "{mat}"',
+        f'AreaLightSource "diffuse" "spectrum L" "{spd}" "float scale" [{_f(luminance)}]',
+        f'Shape "disk" "float radius" [{_f(ASPECT_D / 2)}]',
+        "AttributeEnd",
+    ]
+
+
+def signal_lines(args, out_dir: Path, heads: list[dict], window, head_obj=None) -> tuple[list[str], list[dict]]:
+    """Pole + housing + three aspects; the lit aspect is a PWM-tagged LED emitter.
+
+    With head_obj = (object name, SIGNAL_MODELS entry) the housing is the imported mesh, scaled so its
+    aspect pitch is 0.3 m and its lenses sit 1 cm behind the (unchanged) emitter positions.
+    """
     L, emitters = ["# ---- traffic signals"], []
     area = math.pi * (ASPECT_D / 2) ** 2
     pwm = PWM(args.signal_pwm_hz, args.signal_duty) if args.signal_pwm_hz > 0 else None
@@ -268,16 +304,25 @@ def signal_lines(args, out_dir: Path, heads: list[dict], window) -> tuple[list[s
         else:
             housing = box(x, y, z + 0.15, hw, 0.95, 0.25)
         L += ['NamedMaterial "galvanized"', *mesh(*box(x, 0.0, z + (0.3 if not nx else 0.0), 0.12, y, 0.12))]
-        L += ['NamedMaterial "signal_housing"', *mesh(*housing)]
+        yaw = sf.FACE_YAW[hd["face"]]
+        if head_obj:
+            _, (_, lx, ly, pitch, lz) = head_obj
+            lens = (x + nx * 0.02, y + 0.49, z) if nx else (x, y + 0.49, z + 0.005)
+            L += sf.instance_lines(head_obj[0], lens, yaw, 0.3 / pitch, (lx, ly, lz))
+        else:
+            L += ['NamedMaterial "signal_housing"', *mesh(*housing)]
         for k, colour in enumerate(("red", "amber", "green")):
             cy = y + 0.95 - 0.16 - 0.3 * k
             c = (x + nx * 0.03, cy, z) if nx else (x, cy, z + 0.025 - 0.03)
             if colour != hd["state"]:
-                L += emissive_panel(c, (ASPECT_D * 0.886, ASPECT_D * 0.886), nx, "", 0.0, f"lens_{colour}")
+                if not head_obj:  # imported heads show their own unlit lenses
+                    L += emissive_panel(c, (ASPECT_D * 0.886, ASPECT_D * 0.886), nx, "", 0.0, f"lens_{colour}")
                 continue
             lum = SIGNAL_CD[colour] / area / duty  # peak while on (time average = I / area)
 
-            def lines_for_level(level, c=c, colour=colour, lum=lum, nx=nx):
+            def lines_for_level(level, c=c, colour=colour, lum=lum, nx=nx, yaw=yaw):
+                if head_obj:
+                    return disc_emitter(c, yaw, f"spd/led_{colour}.spd", lum * level, f"lens_{colour}")
                 return emissive_panel(
                     c, (ASPECT_D * 0.886, ASPECT_D * 0.886), nx, f"spd/led_{colour}.spd", lum * level, f"lens_{colour}"
                 )
@@ -300,6 +345,63 @@ def signal_lines(args, out_dir: Path, heads: list[dict], window) -> tuple[list[s
             L.append(inc)
             emitters.append(entry)
     return L + [""], emitters
+
+
+def furniture_lines(args, asset, out_dir: Path, zone) -> tuple[list[str], list[dict]]:
+    """Opt-in pavement props and a work-zone lane closure; own RNG so the default scene is unchanged."""
+    rng = np.random.default_rng([args.seed, 7])
+    L, meta, defined = ["# ---- street furniture"], [], {}
+
+    def place(aid: str, x: float, y: float, z: float, yaw: float, vk: int = 0) -> None:
+        if aid not in defined:
+            a = asset(aid)
+            defined[aid] = None
+            if a is not None:
+                info, raw = a
+                prep = raw.parent.parent / "prepared" / aid
+                defined[aid] = sf.variants(aid, info, prep)
+                for v in defined[aid]:
+                    L.extend(sf.object_lines(v["name"], info, prep, raw, out_dir, v["shapes"]))
+        if not defined[aid]:
+            return
+        v = defined[aid][vk % len(defined[aid])]
+        s, origin = sf.placement(v, sf.PROPS[aid][1])
+        L.extend(sf.instance_lines(v["name"], (x, y, z), yaw, s, origin))
+        meta.append(
+            {
+                "asset": aid,
+                "variant": v["name"],
+                "role": sf.PROPS[aid][0],
+                "position": [round(x, 3), round(y, 3), round(z, 3)],
+                "yaw_deg": round(yaw, 2),
+                "scale": round(s, 5),
+                "box_world": sf.world_box(v, (x, y, z), yaw, s, origin),
+            }
+        )
+
+    if args.street_furniture == "pavement":
+        kerb = [a for a, r in sf.PROPS.items() if r[0] == "kerb"]
+        facade = [a for a, r in sf.PROPS.items() if r[0] == "facade"]
+        ranges = [(3.0, Z_INT - BUILD_X - 2.0), (Z_INT + BUILD_X + 2.0, Z_INT + 45.0)]
+        for side in (1, -1):
+            avoid = [p[2] for p in streetlight_positions() if p[3] == side]
+            avoid += [h["pos"][2] for h in signal_heads(args) if h["pos"][0] * side > 0]
+            front = -90.0 if side > 0 else 90.0  # model +z (front) faces the street
+            for z in sf.pavement_slots(rng, ranges, avoid):
+                if rng.random() < 0.5:
+                    aid, x, yaw = kerb[int(rng.integers(len(kerb)))], side * (HALF + 0.45), front + rng.uniform(-10, 10)
+                else:
+                    aid, x, yaw = facade[int(rng.integers(len(facade)))], side * (BUILD_X - 0.35), front
+                place(aid, x, KERB_H, z, float(yaw), int(rng.integers(2)))
+    if zone:
+        z0, z1 = zone
+        chan = [a for a, r in sf.PROPS.items() if r[0] == args.work_zone[:-1]]
+        for k, (x, z) in enumerate(sf.work_zone_layout(HALF - 0.5, HALF - PARK_W + 0.45, z0, z1)):
+            place(chan[k % len(chan)], x, 0.0, z, float(rng.uniform(0.0, 360.0)))
+        barriers = [a for a, r in sf.PROPS.items() if r[0] == "barrier"]
+        for k, z in enumerate(np.arange(z0 + 7.0, z1, 1.6)):
+            place(barriers[k % len(barriers)], HALF - 0.5, 0.0, float(z), 90.0)
+    return L + [""], meta
 
 
 def shop_lines(args, out_dir: Path, lots: list[dict], rng: np.random.Generator, window) -> tuple[list[str], list[dict]]:
@@ -535,12 +637,28 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
 
     emitters: list[dict] = []
     heads = signal_heads(args)
-    sl, em = signal_lines(args, out_dir, heads, window)
+    head_obj = None
+    if args.signal_model != "procedural":
+        spec = sf.SIGNAL_MODELS[args.signal_model]
+        ha = asset(spec[0])
+        if ha is not None:
+            info, raw = ha
+            name = f"signal_head_{args.signal_model}"
+            L += sf.object_lines(
+                name, info, raw.parent.parent / "prepared" / spec[0], raw, out_dir, list(range(len(info["shapes"])))
+            )
+            head_obj = (name, spec)
+    sl, em = signal_lines(args, out_dir, heads, window, head_obj)
     L += sl
     emitters += em
     sh, em = shop_lines(args, out_dir, lots, rng, window)
     L += sh
     emitters += em
+    zone = (8.0, 20.0) if args.work_zone != "none" else None
+    furniture_meta: list[dict] = []
+    if args.street_furniture != "none" or zone:
+        fl, furniture_meta = furniture_lines(args, asset, out_dir, zone)
+        L += fl
 
     # ---- cars: parked along both kerbs, one waiting on the cross street, one oncoming
     cars_meta: list[dict] = []
@@ -580,7 +698,11 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         for z in np.arange(4.0, Z_INT - HALF - 6.0, 6.5):
             if vru.enabled(args) and side > 0 and abs(z - args.vru_distance_m) < 4.0:
                 continue
-            if rng.random() < 0.75:
+            keep = rng.random() < 0.75
+            if zone and side > 0 and zone[0] - 3.0 < z < zone[1] + 3.0:
+                k += keep  # closed by the work zone; later cars keep their model and paint
+                continue
+            if keep:
                 car(
                     f"park{k}",
                     CAR_MODELS[k % 3],
@@ -653,6 +775,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         },
         "lighting": {**lighting, **light_meta},
         "signals": [{k2: v for k2, v in h.items()} for h in heads],
+        "signal_model": args.signal_model,
         "signal_photometry": "nominal: 300 cd per 200 mm aspect (EN 12368 order of magnitude), LED spectra analytic",
         "facades": facade_meta,
         "cars": cars_meta,
@@ -678,6 +801,18 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         manifest["vru"] = vru_meta
     if sign_meta:
         manifest["signs"] = sign_meta
+    if furniture_meta or args.street_furniture != "none" or zone:
+        manifest["street_furniture"] = {
+            "pavement": args.street_furniture,
+            "work_zone": args.work_zone,
+            "work_zone_z_m": list(zone) if zone else None,
+            "items": furniture_meta,
+        }
+    if furniture_meta or head_obj:
+        manifest["approximations"].append(
+            "Street furniture and imported signal heads use sRGB base-colour textures (no measured spectra); "
+            "cone and drum sleeves are diffuse, not retroreflective."
+        )
     (out_dir / "urban_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     print(f"wrote {_rel(repo, scene_path)} (+ urban_manifest.json); {len(emitters)} PWM-tagged emitters")
 
