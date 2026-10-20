@@ -81,6 +81,13 @@ def test_work_zone_closes_right_parking(tmp_path):
     _, d = _build(tmp_path / "d")
     assert [c for c in d["cars"] if c["lane"] == 9 and c["x"] > 0 and 5.0 < c["z"] < 23.0]
 
+    def outside(cars):
+        return [
+            (c["id"], c["model"], c["paint"], c["x"], c["z"]) for c in cars if not (c["x"] > 0 and 5.0 < c["z"] < 23.0)
+        ]
+
+    assert outside(m["cars"]) == outside(d["cars"])
+
 
 @needs_assets
 def test_row_assets_split_into_variants():

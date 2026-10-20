@@ -700,7 +700,8 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
                 continue
             keep = rng.random() < 0.75
             if zone and side > 0 and zone[0] - 3.0 < z < zone[1] + 3.0:
-                continue  # closed by the work zone
+                k += keep  # closed by the work zone; later cars keep their model and paint
+                continue
             if keep:
                 car(
                     f"park{k}",
