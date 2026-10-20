@@ -969,7 +969,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
             paint_spd = f"spd/carpaint_{paint}.spd"
             ca = None if args.proxy_cars else asset(model)
             heading = 0.0 if lane >= 0 else 180.0
-            if ca is not None and model in variety.HEAVY:
+            if ca is not None and variety.glb_spec(model) is not None:
                 info, raw = ca
                 body, yaw_model = variety.glb_vehicle_include(
                     model, info, aroot / "prepared" / model, raw, out_dir, inst, paint_spd, luminance_texture
@@ -1007,7 +1007,11 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
                         amanifest["assets"][model].get("length_m", 4.6),
                         x,
                         heading + yaw,
-                        (hv["length_m"], *variety._PROXY_WH[hv["cls"]]) if (hv := variety.HEAVY.get(model)) else None,
+                        (hv["length_m"], *variety._PROXY_WH[hv["cls"]])
+                        if (hv := variety.HEAVY.get(model))
+                        else variety.glb_size(model, info, aroot / "prepared" / model)
+                        if ca and model in variety.CARS_GLB
+                        else None,
                     ),
                 }
             )

@@ -608,6 +608,18 @@ the glTF accessor bounds (some exports contain corrupt ones), and the builder sc
 to its real length (robust bounding box) and maps materials by name: paint -> spectral
 basecoat, glass -> thin dielectric, tyres -> rubber, others -> the authors' textures/colours.
 
+**Passenger cars, extended pool** (opt-in `--car-pool extended`; CC-BY-4.0, Sketchfab via the
+same Objaverse mirror, attribution in `config/highway_assets.yaml`): 13 modern cars (hatchback,
+saloon, estate, SUV, pickup, taxi) join the 3 CC0 cars in `--seed` traffic: "Tesla 2018 Model 3" by uchiha.321abc, "Renault Logan 2004" by goooddenis, "Daewoo - Nexia/Cielo" by SevKa, "Honda Civic Type R -98 (Free Asset)" by tiedtke, "2001 Crown Victoria Taxi Game Prop" by haoliu95, "Nissan Titan 4x4" by David_Holiday, "Range Rover Evoque" by minghau, "2015 Audi Q7" by razor24, "Volkswagen Passat 3D Scan" by zdenkoroman, "2015 Hyundai Tucson" by razor24, "2018 Mercedes Benz E63 AMG S Wagon" by sinnik, "Mazda CX-5" by tnnv, "VW Tiguan 2021" by source5525.
+Fetch them with `tools/fetch_highway_assets.py car_tesla_model3 car_renault_logan car_daewoo_nexia car_honda_civic_ek car_crown_victoria_taxi car_nissan_titan car_range_rover_evoque car_audi_q7 car_vw_passat_b6 car_hyundai_tucson car_mercedes_e63_estate car_mazda_cx5 car_vw_tiguan`. `highway_variety.CARS_GLB` gives each
+model its nominal manufacturer length (not checked against data sheets), forward axis and paint
+materials; cars with a textured livery or body (taxi, Titan, Passat scan, Logan) keep the
+authors' colours. Rear lamps are traced onto the body like the CC0 cars: where the asset has a
+rear-lamp material (Tesla, Evoque, Q7, Tucson, E63, CX-5, Tiguan) the lamp fills that lens,
+looking through clear outer lens/window materials; otherwise it fills a generic cluster region on
+the body. Widths come from the asset's bounding box and include the mirrors. The default
+`classic` pool leaves existing `--seed` scenes unchanged.
+
 ## Measured / spectral materials (opt-in)
 
 Three independent flags in `tools/highway_materials.py`; all default off, and with them off the

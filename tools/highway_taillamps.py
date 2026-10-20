@@ -20,6 +20,7 @@ from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
+from highway_variety import _YAW, CARS_GLB, _robust_box, glb_spec, is_glass_material
 
 REPO = Path(__file__).resolve().parents[1]
 DEFAULT_ASSET_ROOT = REPO / "scenes" / "assets" / "highway"
@@ -44,7 +45,7 @@ _PLY_TYPES = {
 }
 
 
-def read_ply_mesh(path: Path) -> tuple[np.ndarray, np.ndarray]:
+def read_ply_mesh(path: Path, max_abs: float = 100.0) -> tuple[np.ndarray, np.ndarray]:
     """Positions (N, 3) and triangles (M, 3) of a binary little-endian PLY (tri/quad faces)."""
     data = Path(path).read_bytes()
     end = data.index(b"end_header") + len(b"end_header")
@@ -77,7 +78,7 @@ def read_ply_mesh(path: Path) -> tuple[np.ndarray, np.ndarray]:
         raise ValueError(f"{path}: mixed face sizes not supported")
     idx = f["i"].astype(np.int64)
     tri = idx if k == 3 else np.concatenate([idx[:, [0, 1, 2]], idx[:, [0, 2, 3]]])
-    ok = np.isfinite(pos).all(1) & (np.abs(pos) < 100).all(1)
+    ok = np.isfinite(pos).all(1) & (np.abs(pos) < max_abs).all(1)
     tri = tri[ok[tri].all(1)]
     return pos, tri
 
@@ -151,6 +152,8 @@ def rear_surface(model: str, asset_root: str) -> RearSurface | None:
     if not p.is_file():
         return None
     info = json.loads(p.read_text())
+    if info.get("asset", {}).get("kind") == "glb" and model in CARS_GLB:  # heavy vehicles keep flat rears
+        return _glb_rear_surface(model, info, p.parent)
     if info.get("asset", {}).get("kind") != "car_pbrt" or "length_m" not in info.get("asset", {}):
         return None
     raw = (p.parent / info["raw_dir"]).resolve()
@@ -172,6 +175,35 @@ def rear_surface(model: str, asset_root: str) -> RearSurface | None:
     tri, mid = np.concatenate(tris), np.concatenate(mids)
     zmin = tri[..., 2].min(1)
     keep = zmin < zmin.min() + 2.0  # rays come from behind: only the rear 2 m can be hit first
+    return RearSurface(tri[keep], mid[keep], mats)
+
+
+def _glb_rear_surface(model: str, info: dict, prep: Path) -> RearSurface | None:
+    """Rear geometry of a prepared glb vehicle with the glb_vehicle_include transform (front +z)."""
+    spec = glb_spec(model)
+    lo, hi = _robust_box(info, prep)
+    ax = 2 if spec["forward"][1] == "z" else 0
+    s = spec["length_m"] / float(hi[ax] - lo[ax])
+    c = 0.5 * (lo + hi)
+    th = np.radians(_YAW[spec["forward"]])
+    mats = [m["name"] for m in info["materials"]]
+    tris, mids = [], []
+    for sh in info["shapes"]:
+        m = info["materials"][int(sh["material"])]
+        if is_glass_material(m) and m["name"] not in spec["lens"]:
+            continue  # rays pass the clear outer lens / rear window to the coloured lamp material
+        pos, tri = read_ply_mesh(prep / sh["ply"], max_abs=np.inf)  # glb units are not metres
+        if not len(tri):
+            continue
+        q = s * (pos - np.array([c[0], lo[1], c[2]]))
+        x, z = q[:, 0] * np.cos(th) + q[:, 2] * np.sin(th), -q[:, 0] * np.sin(th) + q[:, 2] * np.cos(th)
+        tris.append(np.stack([x, q[:, 1], z], -1)[tri])
+        mids.append(np.full(len(tri), int(sh["material"])))
+    if not tris:
+        return None
+    tri, mid = np.concatenate(tris), np.concatenate(mids)
+    zmin = tri[..., 2].min(1)
+    keep = zmin < zmin.min() + 2.0
     return RearSurface(tri[keep], mid[keep], mats)
 
 
@@ -252,6 +284,15 @@ LAYOUTS = {
         fog=(0.85, 0.67, 0.62, 0.76),
     ),
 }
+
+# Objaverse passenger cars: the lamp is wherever the asset's own rear lens material is (searched over the
+# whole rear), else a generic cluster region on the body. No CHMSL; rear fog lamp low on the left.
+for _m, _spec in CARS_GLB.items():
+    LAYOUTS[_m] = (
+        LampLayout("led", (0.60, 0.0, 0.45, 1.40), tuple(_spec["lens"]), from_edge=True, fog=(0.45, 0.30, 0.40, 0.46))
+        if _spec["lens"]
+        else LampLayout("led", (0.45, 0.05, 0.80, 0.97), from_edge=True, fog=(0.45, 0.30, 0.40, 0.46))
+    )
 
 LENS_SPD = {
     "red": "spd/taillamp_lens_red.spd",
