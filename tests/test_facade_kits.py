@@ -1,0 +1,99 @@
+"""Opt-in street fronts assembled from the Poly Haven modular facade kits (--facade-style kits)."""
+
+import json
+import re
+import sys
+from pathlib import Path
+
+import numpy as np
+import pytest
+import yaml
+
+REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO / "tools"))
+
+import build_urban_scene as urban  # noqa: E402
+import facade_kits as fk  # noqa: E402
+
+BASE = ["--proxy-cars", "--allow-missing-assets", "--xres", "64", "--yres", "36", "--pixelsamples", "1"]
+MANIFEST = yaml.safe_load((REPO / "config/highway_assets.yaml").read_text())["assets"]
+PREPARED = REPO / "scenes/assets/highway/prepared"
+HAVE = all((PREPARED / a / "prepared.json").is_file() for a in fk.KITS)
+
+
+def _build(tmp_path: Path, *extra: str) -> tuple[str, dict]:
+    urban.main([*BASE, "--out-dir", str(tmp_path), *extra])
+    return (tmp_path / "urban.pbrt").read_text(), json.loads((tmp_path / "urban_manifest.json").read_text())
+
+
+def _same_manifest(ma, mb, a, b):
+    return json.dumps(ma).replace(str(a), "OUT") == json.dumps(mb).replace(str(b), "OUT")
+
+
+def test_manifest_entries_are_poly_haven_cc0_with_pinned_files():
+    for aid in fk.KITS:
+        a = MANIFEST[aid]
+        assert a["kind"] == "gltf" and a["license"] == "CC0-1.0"
+        assert a["source"].startswith("https://polyhaven.com/a/modular_")
+        assert a["gltf"].endswith("_2k.gltf")
+        paths = [f["path"] for f in a["files"]]
+        assert a["gltf"] in paths and any(p.endswith(".bin") for p in paths)
+        for f in a["files"]:
+            assert f["url"].startswith("https://dl.polyhaven.org/") and re.fullmatch(r"[0-9a-f]{64}", f["sha256"])
+
+
+def test_frame_maps_bay_onto_both_street_faces():
+    # right side (s=+1): local +z (out of the wall) -> world -x, local x in [-3, 0] -> world z in [zb, zb+wb]
+    yaw, za = fk.frame(1, 9.0, 10.0, 3.0)
+    assert yaw == -90.0 and za == 13.0
+    yaw, za = fk.frame(-1, -9.0, 10.0, 3.0)
+    assert yaw == 90.0 and za == 10.0
+    part = {"lo": np.array([-2.5, 0.3, 0.0]), "hi": np.array([-0.5, 2.3, 0.1])}
+    for s, (_yaw, za) in ((1, fk.frame(1, 9.0, 10.0, 3.0)), (-1, fk.frame(-1, -9.0, 10.0, 3.0))):
+        q = fk.room_quad(part, s, s * 9.0, 3.0, za, 1.0)
+        assert np.allclose(q[:, 0], s * (9.0 + fk.INTERIOR))
+        assert np.isclose(q[:, 2].min(), 10.5) and np.isclose(q[:, 2].max(), 12.5)
+        assert np.isclose(q[:, 1].min(), 3.3) and np.isclose(q[:, 1].max(), 5.3)
+
+
+def test_default_and_explicit_procedural_are_identical(tmp_path):
+    a, ma = _build(tmp_path / "a")
+    b, mb = _build(tmp_path / "b", "--facade-style", "procedural")
+    assert a == b and _same_manifest(ma, mb, tmp_path / "a", tmp_path / "b")
+    assert "kits" not in ma["facades"] and "ObjectInstance" not in a.split("# ---- facades")[1].split("# ----")[0]
+
+
+def test_missing_kits_fall_back_to_procedural(tmp_path, monkeypatch):
+    monkeypatch.setattr(fk, "KITS", ("kit_does_not_exist",))
+    a, _ = _build(tmp_path / "a")
+    b, mb = _build(tmp_path / "b", "--facade-style", "kits")
+    assert a == b and "kits" not in mb["facades"]
+
+
+@pytest.mark.skipif(not HAVE, reason="facade kits not prepared (tools/fetch_highway_assets.py)")
+def test_kit_parts_pair_walls_with_inserts():
+    for aid in fk.KITS:
+        info = json.loads((PREPARED / aid / "prepared.json").read_text())
+        P = fk.parts(info, PREPARED / aid)
+        win, door = fk.pairs(P, "wall_window_", "window_"), fk.pairs(P, "wall_door_", "door_")
+        assert len(win) >= 4 and len(door) >= 2
+        for wall, ins in win + door:
+            assert np.isclose(P[wall]["hi"][0] - P[wall]["lo"][0], fk.BAY, atol=0.05)
+            assert P[wall]["lo"][0] - 0.05 <= P[ins]["lo"][0] and P[ins]["hi"][0] <= P[wall]["hi"][0] + 0.05
+            assert P[ins]["hi"][1] <= fk.STOREY + 0.05
+        assert fk.trim(P, "cornice") and fk.trim(P, "crown")
+
+
+@pytest.mark.skipif(not HAVE, reason="facade kits not prepared (tools/fetch_highway_assets.py)")
+def test_kits_build_keeps_cars_and_emitters_and_lights_rooms_at_night(tmp_path):
+    a, ma = _build(tmp_path / "a")
+    b, mb = _build(tmp_path / "b", "--facade-style", "kits")
+    kits = mb["facades"]["kits"]
+    assert len(kits) == mb["facades"]["lots"] and {k["kit"] for k in kits} == set(fk.KITS)
+    assert all(abs(k["bay_m"] - fk.BAY) < 0.75 for k in kits)
+    assert mb["cars"] == ma["cars"] and mb["emitters"] == ma["emitters"]
+    assert mb["facades"]["windows_lit"] > 0 and mb["facades"]["windows_dark"] > 0
+    assert all(aid in mb["assets"] for aid in fk.KITS)
+    assert b.count("ObjectInstance") > 500 and '"thindielectric"' in b
+    for name in re.findall(r'ObjectInstance "([^"]+)"', b):
+        assert f'ObjectBegin "{name}"' in b

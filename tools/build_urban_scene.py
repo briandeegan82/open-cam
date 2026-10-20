@@ -25,6 +25,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import facade_kits as fk  # noqa: E402
 import highway_night as night  # noqa: E402
 import highway_signs as sign_scene  # noqa: E402
 import highway_vru as vru  # noqa: E402
@@ -100,6 +101,12 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     ap.add_argument("--shop-pwm-hz", type=float, default=100.0, help="Shop LED PWM [Hz] (0 = DC).")
     ap.add_argument("--shop-duty", type=float, default=0.3)
     ap.add_argument("--lit-windows", type=float, default=0.35, help="Fraction of windows lit at dusk/night.")
+    ap.add_argument(
+        "--facade-style",
+        choices=("procedural", "kits"),
+        default="procedural",
+        help="Street fronts: procedural boxes with window quads, or assembled Poly Haven CC0 apartment/factory kits.",
+    )
     ap.add_argument("--exposure-s", type=float, default=None, help="Integration time; records the exposure.")
     ap.add_argument("--rolling-line-time-s", type=float, default=15e-6, help="With --exposure-s.")
     add_camera_args(ap, fov=40.0, focus_distance=20.0)
@@ -184,7 +191,9 @@ def _quad(p0, du, dv) -> tuple[np.ndarray, np.ndarray]:
     return np.array([p0, p0 + du, p0 + du + dv, p0 + dv]), np.array([(0, 1, 2), (0, 2, 3)])
 
 
-def facade_lines(lots: list[dict], rng: np.random.Generator, dark: bool, lit: float) -> tuple[list[str], dict]:
+def facade_lines(
+    lots: list[dict], rng: np.random.Generator, dark: bool, lit: float, kit: bool = False
+) -> tuple[list[str], dict]:
     """Lot boxes plus a window grid on the street face (lit windows emit at dusk/night)."""
     L = ["# ---- facades (procedural)"]
     lit_n = dark_n = 0
@@ -194,10 +203,14 @@ def facade_lines(lots: list[dict], rng: np.random.Generator, dark: bool, lit: fl
         s = lot["side"]
         x_face = s * BUILD_X
         cx = x_face + s * lot["depth"] / 2
+        depth = lot["depth"]
+        if kit:  # box behind the kit wall plane, kit storey height
+            h, depth = fk.STOREY * lot["storeys"] + 0.3, lot["depth"] - fk.RECESS
+            cx = x_face + s * (fk.RECESS + depth / 2)
         mat = ("facade_render", "facade_brick", "concrete")[k % 3]
         L += [
             f'NamedMaterial "{mat}"',
-            *mesh(*box(cx, 0.0, (lot["z0"] + lot["z1"]) / 2, lot["depth"], h, lot["z1"] - lot["z0"])),
+            *mesh(*box(cx, 0.0, (lot["z0"] + lot["z1"]) / 2, depth, h, lot["z1"] - lot["z0"])),
         ]
         for fl in range(1, lot["storeys"]):
             y = 0.8 + 3.2 * fl + 0.9
@@ -205,7 +218,9 @@ def facade_lines(lots: list[dict], rng: np.random.Generator, dark: bool, lit: fl
                 p, t = _quad((x_face - s * 0.01, y, z), (0, 0, 1.4), (0, 1.5, 0))
                 if s > 0:
                     t = t[:, ::-1]
-                on = dark and rng.random() < lit
+                on = dark and rng.random() < lit  # drawn in kit mode too, so the rest of the scene is unchanged
+                if kit:
+                    continue
                 (win_lit if on else win_dark).append((p, t))
                 lit_n += on
                 dark_n += not on
@@ -524,8 +539,17 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
     L += ['NamedMaterial "paint_white"', *mesh(p, t), ""]
 
     lots = building_lots(rng)
-    fl, facade_meta = facade_lines(lots, rng, dark, args.lit_windows)
-    L += fl
+    kit_lines, kit_meta, kit_win = [], [], {}
+    if args.facade_style == "kits":
+        kits = {aid: a for aid in fk.KITS if (a := asset(aid)) is not None}
+        if kits:
+            kit_lines, kit_meta, kit_win = fk.street_fronts(
+                lots, kits, BUILD_X, args.seed, dark, args.lit_windows, out_dir, WINDOW_LUMINANCE
+            )
+    fl, facade_meta = facade_lines(lots, rng, dark, args.lit_windows, kit=bool(kit_meta))
+    L += fl + kit_lines
+    if kit_meta:
+        facade_meta = {**facade_meta, **kit_win, "kits": kit_meta}
     cross_lots = []
     for sx in (-1, 1):
         for sz in (-1, 1):

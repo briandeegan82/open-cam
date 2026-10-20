@@ -398,7 +398,15 @@ def prepare_gltf(asset: dict, raw: Path, out: Path) -> dict:
                 write_ply(out / name, pos, nrm, uv, tri)
                 used = pos[np.unique(tri)]
                 lo, hi = np.minimum(lo, used.min(0)), np.maximum(hi, used.max(0))
-                shapes.append({"ply": name, "material": int(prim.get("material", 0)), "triangles": int(len(tri))})
+                shapes.append(
+                    {
+                        "ply": name,
+                        "material": int(prim.get("material", 0)),
+                        "triangles": int(len(tri)),
+                        "node": node.get("name", ""),
+                        "origin": [float(x) for x in mtx[:3, 3]],
+                    }
+                )
         for c in node.get("children", []):
             visit(c, mtx)
 

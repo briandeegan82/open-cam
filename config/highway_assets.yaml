@@ -499,3 +499,51 @@ assets:
       - url: https://upload.wikimedia.org/wikipedia/commons/9/98/MUTCD_W11-2.svg
         path: "MUTCD_W11-2.svg"
         sha256: 3ae5b9f1605ebb7e87faf26610f5d8f7acb9fbdc8d3a76ff719032016c3a070a
+  # --- Building facade kits (Poly Haven glTF, assembled by tools/facade_kits.py) ---
+  kit_urban_apartments:
+    kind: gltf
+    title: Modular Urban Apartments Facade (kit)
+    source: https://polyhaven.com/a/modular_urban_apartments_facade
+    author: James Ray Cock (Poly Haven)
+    license: CC0-1.0
+    gltf: modular_urban_apartments_facade/modular_urban_apartments_facade_2k.gltf
+    files:
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/2k/modular_urban_apartments_facade/modular_urban_apartments_facade_2k.gltf, path: modular_urban_apartments_facade/modular_urban_apartments_facade_2k.gltf, sha256: ce1ef4af29b37ca558ca05c29f0b1cc65d5a51dd66627f9d979b5ffc948b5333}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/2k/modular_urban_apartments_facade/modular_urban_apartments_facade_trim_01_arm_2k.jpg, path: modular_urban_apartments_facade/textures/modular_urban_apartments_facade_trim_01_arm_2k.jpg, sha256: c34c3eb081a60a8d5daacc217bdca889c945225be79b272135abd08fb6b8aa85}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/2k/modular_urban_apartments_facade/modular_urban_apartments_facade_trim_02_diff_2k.jpg, path: modular_urban_apartments_facade/textures/modular_urban_apartments_facade_trim_02_diff_2k.jpg, sha256: 9fa34f2f5c1c421f700b16bd21e143d34c0b5e65423b8d7b5203d2b8761594e4}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/2k/modular_urban_apartments_facade/modular_urban_apartments_facade_plaster_diff_2k.jpg, path: modular_urban_apartments_facade/textures/modular_urban_apartments_facade_plaster_diff_2k.jpg, sha256: 56189b59a07675924e8c82d2aa963f861c60191fef337e29cca8f09b47767f72}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/2k/modular_urban_apartments_facade/modular_urban_apartments_facade_trim_02_nor_gl_2k.jpg, path: modular_urban_apartments_facade/textures/modular_urban_apartments_facade_trim_02_nor_gl_2k.jpg, sha256: eef1cf6efafd3cb92a23d382d09db5817f51dd3f1c09b5785e192bf4561e70c5}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/2k/modular_urban_apartments_facade/modular_urban_apartments_facade_trim_01_diff_2k.jpg, path: modular_urban_apartments_facade/textures/modular_urban_apartments_facade_trim_01_diff_2k.jpg, sha256: 6446a76c4b45a88101f2ba14723ca53f5f2269721249461fcff4c666914b626a}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/2k/modular_urban_apartments_facade/modular_urban_apartments_facade_plaster_nor_gl_2k.jpg, path: modular_urban_apartments_facade/textures/modular_urban_apartments_facade_plaster_nor_gl_2k.jpg, sha256: 582ac0de84d07e45d467ac898d2c14492db2258d06fbeba65644c25a346564ec}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/2k/modular_urban_apartments_facade/modular_urban_apartments_facade_plaster_arm_2k.jpg, path: modular_urban_apartments_facade/textures/modular_urban_apartments_facade_plaster_arm_2k.jpg, sha256: 0658b150074321691cdd81e04d0c42966034f45f4c74b501ec497a29c4144375}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/2k/modular_urban_apartments_facade/modular_urban_apartments_facade_trim_02_arm_2k.jpg, path: modular_urban_apartments_facade/textures/modular_urban_apartments_facade_trim_02_arm_2k.jpg, sha256: bab306cc2a40a9f699e5c33fd97e0f3a4ac1817e71afa47518861fb452011e86}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/2k/modular_urban_apartments_facade/modular_urban_apartments_facade_objects_diff_2k.jpg, path: modular_urban_apartments_facade/textures/modular_urban_apartments_facade_objects_diff_2k.jpg, sha256: 0fe0a7ef75c49a7f4f16699b6bfe99f8455f384aefe256d5d0f568fd730c4a26}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/2k/modular_urban_apartments_facade/modular_urban_apartments_facade_trim_01_nor_gl_2k.jpg, path: modular_urban_apartments_facade/textures/modular_urban_apartments_facade_trim_01_nor_gl_2k.jpg, sha256: cecff1160db9801e7c7d7eb2be4cae63cc883f8e1af9e496a0025a0776610813}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/2k/modular_urban_apartments_facade/modular_urban_apartments_facade_objects_nor_gl_2k.jpg, path: modular_urban_apartments_facade/textures/modular_urban_apartments_facade_objects_nor_gl_2k.jpg, sha256: 8c3cfb763c1343eed3082ba5f256f9d9c80775f6199aca9dc6434843e7b7a9dd}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/2k/modular_urban_apartments_facade/modular_urban_apartments_facade_objects_arm_2k.jpg, path: modular_urban_apartments_facade/textures/modular_urban_apartments_facade_objects_arm_2k.jpg, sha256: 8573bb7a15e809f635aa71fb0348355f93195394f1788bf05ea68ca4daa2e887}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/modular_urban_apartments_facade/modular_urban_apartments_facade.bin, path: modular_urban_apartments_facade/modular_urban_apartments_facade.bin, sha256: f041e71b6bd31864f20dd64d3a82519454a603c300686161e0349ff44f838bf2}
+  kit_factory:
+    kind: gltf
+    title: Modular Factory Facade (kit)
+    source: https://polyhaven.com/a/modular_factory_facade
+    author: James Ray Cock (Poly Haven)
+    license: CC0-1.0
+    gltf: modular_factory_facade/modular_factory_facade_2k.gltf
+    files:
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/2k/modular_factory_facade/modular_factory_facade_2k.gltf, path: modular_factory_facade/modular_factory_facade_2k.gltf, sha256: f659bc368b07878202dbacca63bc60c8150bb61a3ede4869b540864e4dcb1e48}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/2k/modular_factory_facade/modular_factory_facade_trim_01_diff_2k.jpg, path: modular_factory_facade/textures/modular_factory_facade_trim_01_diff_2k.jpg, sha256: bc4e041d46829466f8a7cb45b2b84f26e6cd7a41464b89590423d7ba65075c6d}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/2k/modular_factory_facade/modular_factory_facade_brick_nor_gl_2k.jpg, path: modular_factory_facade/textures/modular_factory_facade_brick_nor_gl_2k.jpg, sha256: a31341b4b1329bb2c27ce74da866aa56b359a5a60fcddbc6cd5be0029e410611}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/2k/modular_factory_facade/modular_factory_facade_doors_nor_gl_2k.jpg, path: modular_factory_facade/textures/modular_factory_facade_doors_nor_gl_2k.jpg, sha256: 4c885d8170310e9b26c80780458eee000dcb67ea057cb14b782d10e835b2a698}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/2k/modular_factory_facade/modular_factory_facade_garage_nor_gl_2k.jpg, path: modular_factory_facade/textures/modular_factory_facade_garage_nor_gl_2k.jpg, sha256: d42a8cbcffe9a08d4fea5d12dbac82da0622efa49ad083361eead5b94927a086}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/2k/modular_factory_facade/modular_factory_facade_trim_01_arm_2k.jpg, path: modular_factory_facade/textures/modular_factory_facade_trim_01_arm_2k.jpg, sha256: 3c70a0bb5e9f4d46183bebe5494d7665a775ea13c428af0dcea2fc29c950d48f}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/2k/modular_factory_facade/modular_factory_facade_garage_diff_2k.jpg, path: modular_factory_facade/textures/modular_factory_facade_garage_diff_2k.jpg, sha256: 83722741c6bbdfafd285b6f5d0a2913c133d91b11705fb684d526a6695da0537}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/2k/modular_factory_facade/modular_factory_facade_trim_01_nor_gl_2k.jpg, path: modular_factory_facade/textures/modular_factory_facade_trim_01_nor_gl_2k.jpg, sha256: 1f43fa78247a60f4f06096c95df26b95b94727167e917a18962963b2993eb650}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/2k/modular_factory_facade/modular_factory_facade_brick_arm_2k.jpg, path: modular_factory_facade/textures/modular_factory_facade_brick_arm_2k.jpg, sha256: dc313e13bd12687bd8827b5e439c1ea2b56fbc883d935f26132b44781a21be14}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/2k/modular_factory_facade/modular_factory_facade_windows_nor_gl_2k.jpg, path: modular_factory_facade/textures/modular_factory_facade_windows_nor_gl_2k.jpg, sha256: 7d66b69bf4715555085b1d3c0f95fc2e28f325d8a1ab7a68d1078dca7db7ab04}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/2k/modular_factory_facade/modular_factory_facade_garage_arm_2k.jpg, path: modular_factory_facade/textures/modular_factory_facade_garage_arm_2k.jpg, sha256: 0efc9b69568cf6b13bb22256edf8bec347fbc0ac5496d5736c8dc3eb69e800dd}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/2k/modular_factory_facade/modular_factory_facade_windows_diff_2k.jpg, path: modular_factory_facade/textures/modular_factory_facade_windows_diff_2k.jpg, sha256: 2ca66aa0a753ab7fb6dcf605ec64a90fe116d6271719b20ee1a2069b568d2edd}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/2k/modular_factory_facade/modular_factory_facade_doors_arm_2k.jpg, path: modular_factory_facade/textures/modular_factory_facade_doors_arm_2k.jpg, sha256: 07af095d6ecb4966ec029968ff7b0d111de8b2e1910bbea168dc9c958a4da3d1}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/2k/modular_factory_facade/modular_factory_facade_windows_arm_2k.jpg, path: modular_factory_facade/textures/modular_factory_facade_windows_arm_2k.jpg, sha256: 963ececefba6c4a104a32258e611f250ea1f715fba747f7a0a640b7e4603f1b6}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/2k/modular_factory_facade/modular_factory_facade_doors_diff_2k.jpg, path: modular_factory_facade/textures/modular_factory_facade_doors_diff_2k.jpg, sha256: 1189acbe5ed4ecaccda9ec40f0a4a4a454016a22dbab0f18d3bdb61a01d9821a}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/modular_factory_facade/modular_factory_facade.bin, path: modular_factory_facade/modular_factory_facade.bin, sha256: 12702fb065a838695e0621e1aac3947af92d32c439fb965c8b0563ad691fed70}
+      - {url: https://dl.polyhaven.org/file/ph-assets/Models/jpg/2k/modular_factory_facade/modular_factory_facade_brick_diff_2k.jpg, path: modular_factory_facade/textures/modular_factory_facade_brick_diff_2k.jpg, sha256: 02204a7971f406dcd2b6e1e3bc90e5656c5749a4417cfd5977dc7dfa5042a5d4}
