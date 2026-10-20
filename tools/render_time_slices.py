@@ -124,6 +124,11 @@ def scene_is_static(manifest: dict, scene_text: str) -> bool:
     return not any(abs(float(v)) > 0.0 for vec in moving for v in vec)
 
 
+def scene_name(scene_dir: Path) -> str:
+    """``highway`` (tools/build_highway_scene.py) or ``urban`` (tools/build_urban_scene.py)."""
+    return "urban" if not (scene_dir / "highway.pbrt").is_file() and (scene_dir / "urban.pbrt").is_file() else "highway"
+
+
 def linear_plan(exposure: dict, emitters: list[dict], yres: int) -> tuple[list[str], np.ndarray]:
     """PWM emitter ids and their on-fraction over each row's exposure window, shape [E, yres]."""
     t_int = float(exposure["integration_time_s"])
@@ -151,14 +156,14 @@ def render(
     keep: bool = False,
     exposure_override: dict | None = None,
 ) -> dict:
-    manifest = json.loads((scene_dir / "highway_manifest.json").read_text())
+    manifest = json.loads((scene_dir / f"{scene_name(scene_dir)}_manifest.json").read_text())
     if "exposure" not in manifest:
         raise ValueError(f"{scene_dir}: manifest has no exposure (build with --exposure-s)")
     xres, yres = int(manifest["film"]["xresolution"]), int(manifest["film"]["yresolution"])
     emitters = manifest.get("emitters", [])
     exposure = {**manifest["exposure"], **(exposure_override or {})}
     slices = plan_slices(exposure, emitters, yres, bands, spp, flicker)
-    scene = (scene_dir / "highway.pbrt").read_text()
+    scene = (scene_dir / f"{scene_name(scene_dir)}.pbrt").read_text()
     work = scene_dir / "slices"
     work.mkdir(exist_ok=True)
     nthreads = max(1, (os.cpu_count() or 1) // max(1, jobs))
@@ -220,10 +225,10 @@ def render_linear(
     seed: int = 0,
 ) -> dict:
     """Static-scene rolling shutter + PWM flicker by emitter linearity (see module docstring)."""
-    manifest = json.loads((scene_dir / "highway_manifest.json").read_text())
+    manifest = json.loads((scene_dir / f"{scene_name(scene_dir)}_manifest.json").read_text())
     if "exposure" not in manifest:
         raise ValueError(f"{scene_dir}: manifest has no exposure (build with --exposure-s)")
-    scene = (scene_dir / "highway.pbrt").read_text()
+    scene = (scene_dir / f"{scene_name(scene_dir)}.pbrt").read_text()
     if not scene_is_static(manifest, scene):
         raise ValueError("--linear needs a static scene (this one has motion); use the time-slice renderer")
     yres = int(manifest["film"]["yresolution"])
@@ -302,7 +307,7 @@ def main(argv: list[str] | None = None) -> None:
     sd = args.scene_dir.resolve()
     out = args.out
     if out is None:
-        m = re.search(r'"string filename" \["([^"]+)"\]', (sd / "highway.pbrt").read_text())
+        m = re.search(r'"string filename" \["([^"]+)"\]', (sd / f"{scene_name(sd)}.pbrt").read_text())
         out = sd / (m.group(1) if m else "out/highway_spectral.exr")
     override = {
         k: v

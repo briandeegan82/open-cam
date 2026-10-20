@@ -500,6 +500,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     hmat.add_arguments(ap)
     sign_scene.add_args(ap)
     vru.add_args(ap)
+    sign_scene.add_args(ap)
     return ap.parse_args(argv)
 
 
@@ -1130,6 +1131,9 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         manifest["signs"] = sign_meta
     if vru_meta is not None:
         manifest["vru"] = vru_meta
+    if sign_meta:
+        sign_meta["replaced"] = ["procedural speed_sign plate at 60 m"]
+        manifest["signs"] = sign_meta
     (out_dir / "highway_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     print(
         f"wrote {_rel(repo, scene_path)} (+ highway_manifest.json); horizontal illuminance "
