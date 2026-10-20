@@ -30,6 +30,7 @@ import highway_signs as sign_scene  # noqa: E402
 import highway_vru as vru  # noqa: E402
 import highway_wet as wet  # noqa: E402
 import street_furniture as sf  # noqa: E402
+import two_wheelers as tw  # noqa: E402
 from build_highway_scene import (  # noqa: E402
     CAR_MODELS,
     _f,
@@ -114,6 +115,13 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         choices=("none", "cones", "drums"),
         default="none",
         help="Close the near-right parking lane (z 8-20 m) with a channelizer taper and concrete barriers.",
+    )
+    ap.add_argument(
+        "--two-wheelers",
+        choices=("none", "parked"),
+        default="none",
+        help="Parked bicycles and kick e-scooters on the pavements, motorbikes and scooters in empty parking bays "
+        "(Objaverse CC-BY).",
     )
     ap.add_argument("--shop-signs", type=int, default=4, help="Shop LED signs on the ground floors.")
     ap.add_argument("--shop-pwm-hz", type=float, default=100.0, help="Shop LED PWM [Hz] (0 = DC).")
@@ -402,6 +410,36 @@ def furniture_lines(args, asset, out_dir: Path, zone) -> tuple[list[str], list[d
         for k, z in enumerate(np.arange(z0 + 7.0, z1, 1.6)):
             place(barriers[k % len(barriers)], HALF - 0.5, 0.0, float(z), 90.0)
     return L + [""], meta
+
+
+def two_wheeler_lines(args, asset, out_dir: Path, free_bays, furniture) -> tuple[list[str], list[dict]]:
+    """Opt-in parked two-wheelers; own RNG so the rest of the scene is unchanged."""
+    rng = np.random.default_rng([args.seed, 13])
+    p = tw.Placer(asset, out_dir)
+    for side, z in free_bays:  # 2-3 per empty bay, front to the street, angled 30 deg towards the traffic
+        n = int(rng.integers(2, 4))
+        for j in range(n):
+            aid = tw.POWERED[int(rng.integers(len(tw.POWERED)))]
+            pos = (side * (HALF - PARK_W / 2), 0.0, z + (j - (n - 1) / 2) * 1.2)
+            p.place(aid, pos, -90.0 * side + 30.0 + float(rng.uniform(-8, 8)), "parking_bay")
+    ranges = [(3.0, Z_INT - BUILD_X - 2.0), (Z_INT + BUILD_X + 2.0, Z_INT + 45.0)]
+    for side in (1, -1):  # bicycle groups across the pavement next to the kerb, front to the facades
+        avoid = [q[2] for q in streetlight_positions() if q[3] == side]
+        avoid += [h["pos"][2] for h in signal_heads(args) if h["pos"][0] * side > 0]
+        avoid += [f["position"][2] for f in furniture if f["position"][0] * side > 0]
+        for z in sf.pavement_slots(rng, ranges, [], spacing=9.0):
+            n = int(rng.integers(2, 5))
+            zs = [z + (j - (n - 1) / 2) * 0.75 for j in range(n)]
+            if any(abs(zb - a) < 1.2 for zb in zs for a in avoid) or not (ranges[0][0] <= min(zs)):
+                continue
+            for zb in zs:
+                aid = tw.BICYCLES[int(rng.integers(len(tw.BICYCLES)))]
+                p.place(aid, (side * (HALF + 1.1), KERB_H, zb), 90.0 * side, "pavement")
+            if tw.KICK and rng.random() < 0.4:  # dockless kick e-scooter at the kerb, parallel to it
+                zk = max(zs) + 1.0
+                if all(abs(zk - a) > 1.2 for a in avoid):
+                    p.place(tw.KICK[0], (side * (HALF + 0.4), KERB_H, zk), 0.0 if side > 0 else 180.0, "pavement")
+    return (["# ---- parked two-wheelers", *p.lines, ""] if p.meta else []), p.meta
 
 
 def shop_lines(args, out_dir: Path, lots: list[dict], rng: np.random.Generator, window) -> tuple[list[str], list[dict]]:
@@ -694,6 +732,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         )
 
     k = 0
+    free_bays: list[tuple[int, float]] = []
     for side in (1, -1):
         for z in np.arange(4.0, Z_INT - HALF - 6.0, 6.5):
             if vru.enabled(args) and side > 0 and abs(z - args.vru_distance_m) < 4.0:
@@ -713,6 +752,8 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
                     9,
                 )
                 k += 1
+            else:
+                free_bays.append((side, float(z)))
     car("oncoming", "car_bmw_m6", "white", -LANE_W / 2, Z_INT + HALF + 14.0, 180.0, -1)
     car(
         "cross_wait",
@@ -723,6 +764,11 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         -90.0,
         5,
     )
+
+    two_wheeler_meta: list[dict] = []
+    if args.two_wheelers != "none":
+        tl, two_wheeler_meta = two_wheeler_lines(args, asset, out_dir, free_bays, furniture_meta)
+        L += tl
 
     vru_meta = None
     if vru.enabled(args):
@@ -808,6 +854,12 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
             "work_zone_z_m": list(zone) if zone else None,
             "items": furniture_meta,
         }
+    if args.two_wheelers != "none":
+        manifest["two_wheelers"] = {"mode": args.two_wheelers, "items": two_wheeler_meta}
+        manifest["approximations"].append(
+            "Two-wheelers use sRGB base-colour textures (no measured spectra) and nominal overall lengths; "
+            "they carry no lamps and their reflectors are not retroreflective."
+        )
     if furniture_meta or head_obj:
         manifest["approximations"].append(
             "Street furniture and imported signal heads use sRGB base-colour textures (no measured spectra); "
