@@ -46,7 +46,7 @@ venv/bin/python tools/pbrt_spectral_exr_to_electrons.py --exr out/highway_spectr
 
 Useful options: `--sky {kloofendal_43d_clear,kloofendal_48d_partly_cloudy,syferfontein_6d_clear,analytic}`,
 `--sun-elevation` (analytic sky), `--sun-azimuth` (degrees from the road direction, + = right),
-`--global-illuminance-lux`, `--road {asphalt031,asphalt026c,plain}`, `--vegetation`, `--traffic none`,
+`--global-illuminance-lux`, `--road` (see below), `--verge`, `--vegetation`, `--traffic none`,
 `--proxy-cars`, `--cam-height`, `--cam-lane`, `--cam-pitch`, and the usual film/camera options.
 `--allow-missing-assets` builds without any downloads (proxy cars, analytic sky, untextured
 surfaces); the tests use it.
@@ -66,9 +66,36 @@ surfaces); the tests use it.
   Realistic-camera EXRs are film irradiance, pinhole/thin-lens EXRs radiance, as for the
   other builders. Daylight is bright: pick a short `--integration-time-s`.
 
+## Road and verge surfaces
+
+`--road` picks the carriageway texture and `--verge` the ground beside it, all ambientCG CC0
+2K maps listed in `config/highway_assets.yaml` with checksums. As for the original asphalt,
+only the luminance of the colour map is used, normalised to mean 1. It scales a measured
+reflectance spectrum (`ROAD_SURFACES` / `VERGE_SURFACES` in `tools/build_highway_scene.py`),
+so the albedo comes from the spectrum and the texture adds detail.
+
+| `--road` | Surface | Tile | Spectrum |
+|---|---|---|---|
+| `asphalt031` (default) | fine-aggregate asphalt | 2.0 m | `asphalt_aged` |
+| `asphalt026c` | cracked asphalt | 2.0 m | `asphalt_aged` |
+| `asphalt023s` | smooth, fresh fine asphalt | 1.25 m | `asphalt_new` |
+| `asphalt030` | grey worn asphalt | 2.2 m | `asphalt_aged` |
+| `asphalt021` | cracked dark asphalt | 1.85 m | `asphalt_aged` |
+| `concrete046` | concrete pavement | 2.4 m | `concrete` |
+| `pavingstones070` | granite setts | 1.15 m | `concrete` |
+| `pavingstones128` | concrete block paving | 3.5 m | `concrete` |
+
+`--verge grass004` (default), `gravel023` (grey gravel, 1.5 m tile, `concrete`) or
+`ground062s` (sandy soil, 1.6 m, `soil`). The distant fields stay grass.
+
+Tile sizes are ambientCG's stated dimensions. The Road0xx series was left out because it has
+lane markings baked in. Road wear and its anti-tiling model asphalt, so `--road-wear` defaults
+to `none` on concrete and paving, and asking for wear there is an error. The setts and the
+gravel use a grey concrete spectrum, not a measured granite or gravel one.
+
 ## Road surface wear
 
-`--road-wear none|light|moderate|heavy` (default `moderate`) ages the road with seeded,
+`--road-wear none|light|moderate|heavy` (default `moderate` on asphalt roads, `none` otherwise) ages the road with seeded,
 reproducible distress (`--road-wear-seed`, default `--seed`). The code lives in
 `tools/highway_road_wear.py`. The default `asphalt` material is replaced, and so are the clean
 `paint_*` quads. Only material fields change, so the manifest's absolute illuminance is not
@@ -585,6 +612,16 @@ fixed order, so the same N always gives the same `highway.pbrt` and manifest:
 - **Vegetation**: 1-3 tree species (Poly Haven island tree, Searsia lucida, fir and pine
   saplings) and 1-3 shrub species, scaled to plausible heights, with the per-species spacing
   stretched so the total density is unchanged.
+  `--vegetation-pool extended` adds 13 more Poly Haven CC0 species to the draw: jacaranda,
+  island tree 01, a small broadleaf tree, a fir tree (about 18 m) and a fir sapling, Searsia
+  burchellii, shrub 03, wild rooibos, three grass clumps, a fallen dead trunk and a stump
+  (`SPECIES_EXTENDED` in `tools/highway_variety.py`; trunks, stumps and grass count as
+  shrubs). Island tree 03 is left out: its mesh includes a sand and rock base. Without
+  `--seed` it uses a fixed mix of island tree 02, fir tree, small tree, shrub 02 and grass.
+  The default `classic` pool leaves every seed's draw unchanged. Fetch the extra assets with
+  `python tools/fetch_highway_assets.py` (about 870 MB at 1k; the fir tree alone is 460 MB
+  and 7.0 M triangles, the jacaranda 200 MB and 3.9 M; a 1280-px day frame with both peaks
+  at 6 GB in pbrt).
 
 Individual flags override the seeded draw: `--curve-radius` (m, + bends right, 0 straight),
 `--clothoid-length`, `--grade` (%), `--lamp-posts/--gantry/--overpass on|off`. Every draw is
@@ -607,6 +644,18 @@ bus by own.guest. The fetcher unpacks the `.glb` files (`kind: glb`), drops vert
 the glTF accessor bounds (some exports contain corrupt ones), and the builder scales each model
 to its real length (robust bounding box) and maps materials by name: paint -> spectral
 basecoat, glass -> thin dielectric, tyres -> rubber, others -> the authors' textures/colours.
+
+**Passenger cars, extended pool** (opt-in `--car-pool extended`; CC-BY-4.0, Sketchfab via the
+same Objaverse mirror, attribution in `config/highway_assets.yaml`): 13 modern cars (hatchback,
+saloon, estate, SUV, pickup, taxi) join the 3 CC0 cars in `--seed` traffic: "Tesla 2018 Model 3" by uchiha.321abc, "Renault Logan 2004" by goooddenis, "Daewoo - Nexia/Cielo" by SevKa, "Honda Civic Type R -98 (Free Asset)" by tiedtke, "2001 Crown Victoria Taxi Game Prop" by haoliu95, "Nissan Titan 4x4" by David_Holiday, "Range Rover Evoque" by minghau, "2015 Audi Q7" by razor24, "Volkswagen Passat 3D Scan" by zdenkoroman, "2015 Hyundai Tucson" by razor24, "2018 Mercedes Benz E63 AMG S Wagon" by sinnik, "Mazda CX-5" by tnnv, "VW Tiguan 2021" by source5525.
+Fetch them with `tools/fetch_highway_assets.py car_tesla_model3 car_renault_logan car_daewoo_nexia car_honda_civic_ek car_crown_victoria_taxi car_nissan_titan car_range_rover_evoque car_audi_q7 car_vw_passat_b6 car_hyundai_tucson car_mercedes_e63_estate car_mazda_cx5 car_vw_tiguan`. `highway_variety.CARS_GLB` gives each
+model its nominal manufacturer length (not checked against data sheets), forward axis and paint
+materials; cars with a textured livery or body (taxi, Titan, Passat scan, Logan) keep the
+authors' colours. Rear lamps are traced onto the body like the CC0 cars: where the asset has a
+rear-lamp material (Tesla, Evoque, Q7, Tucson, E63, CX-5, Tiguan) the lamp fills that lens,
+looking through clear outer lens/window materials; otherwise it fills a generic cluster region on
+the body. Widths come from the asset's bounding box and include the mirrors. The default
+`classic` pool leaves existing `--seed` scenes unchanged.
 
 ## Measured / spectral materials (opt-in)
 
@@ -958,6 +1007,25 @@ near zebra crossing by default).
 * **Flicker:** every signal aspect and shop sign is in `manifest["emitters"]`, so
   `tools/render_time_slices.py scenes/generated/urban --linear` renders LED flicker / rolling
   shutter (pass `--exposure-s` to record the exposure in the manifest).
+* **Imported signal heads (opt-in):** `--signal-model nyc80s|backplate12` replaces the procedural
+  black housing with an Objaverse CC-BY mesh (`signal_nyc80s`: 1980s New York-style 3-aspect head;
+  `signal_12in_backplate`: 12-inch head with a yellow backplate). The head is scaled so its aspect
+  pitch is 0.3 m, and its lenses sit 1 cm behind the procedural emitter positions. The lit aspect stays
+  the same LED emitter (luminance, spectrum, PWM), as a 200 mm disc with the same area as the
+  procedural square, so `manifest["emitters"]` and the photometry are unchanged. Unlit aspects show
+  the mesh's own textured lenses. Default `--signal-model procedural` is the original housing.
+* **Street furniture (opt-in):** `--street-furniture pavement` puts seeded Poly Haven CC0 props on both
+  pavements: fire hydrants and bins at the kerb, benches, utility cabinets and a drum against the
+  facades, kept 1.5 m clear of street-light columns and signal poles. `--work-zone cones|drums` closes
+  the near-right parking lane between z = 8 and 20 m with a taper of Objaverse CC-BY cones (0.75 m,
+  nominal) or channelizer drums (1.0 m, nominal), plus concrete barriers. Parked cars there are
+  removed. Placements use their own RNG, so the rest of the seeded scene is unchanged, and
+  `manifest["street_furniture"]["items"]` lists each item's asset, position, yaw and world box.
+  Fetch the assets with `tools/fetch_highway_assets.py` (ids `prop_*`, `cone_*`, `drum_*`,
+  `signal_*`). Limitations: the props use their sRGB base-colour textures, not measured spectra.
+  Cone and drum bands are diffuse, not retroreflective, so they don't light up in headlamps at night.
+  The Poly Haven hydrant and bin files contain two variants side by side, which are split into
+  separate objects.
 
 ### Facade textures (`--facade-textures mixed`)
 
