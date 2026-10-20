@@ -2,55 +2,71 @@
 
 The models are Objaverse/Sketchfab CC-BY-4.0 meshes listed in config/highway_assets.yaml. Like the
 street furniture they are rendered with their sRGB base-colour textures (no measured spectra). Each
-model is scaled to a nominal overall length (typical for its type, not checked against data sheets)
-and turned so that its front faces +z before the placement heading is applied.
+model is turned so that its front faces +z before the placement heading is applied, then scaled so
+its length along the front axis is a nominal overall length (typical for its type, not checked
+against data sheets).
 """
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import numpy as np
 import street_furniture as sf
+from fetch_highway_assets import read_ply_positions
 
-# aid -> (kind, model axis its front points along, nominal overall length [m])
+# aid -> (kind, direction of the model's front in prepared coordinates [deg from +z towards +x],
+#         nominal overall length [m]). Three meshes are not axis-aligned: their fronts are the
+# measured principal horizontal axes (tests/test_two_wheelers.py re-measures them).
 MODELS = {
-    "bike_roadster_old": ("bicycle", "+x", 1.80),
-    "bike_cruiser_red": ("bicycle", "+x", 1.80),
-    "bike_road": ("bicycle", "+x", 1.75),
-    "bike_beach_cruiser": ("bicycle", "+z", 1.80),
-    "bike_family_basket": ("bicycle", "+x", 1.80),
-    "bike_ardis_verona": ("bicycle", "-z", 1.85),
-    "bike_peugeot_retro": ("bicycle", "+x", 1.80),
-    "bike_bmx": ("bicycle", "+x", 1.60),
-    "moto_sarolea_vintage": ("motorcycle", "+z", 2.00),
-    "moped_puch_1978": ("moped", "+z", 1.75),
-    "moto_yamaha_fz150": ("motorcycle", "-x", 2.00),
-    "moto_80s": ("motorcycle", "-x", 2.10),
-    "moto_cruiser": ("motorcycle", "+z", 2.30),
-    "scooter_vespa_yellow": ("scooter", "+z", 1.80),
-    "scooter_vespa_orange": ("scooter", "-x", 1.80),
-    "scooter_honda_squash": ("scooter", "+x", 1.60),
-    "scooter_vespa_ss180": ("scooter", "+x", 1.80),
-    "scooter_vespa_50_special": ("scooter", "+z", 1.70),
-    "moped_solifer_export": ("moped", "-z", 1.80),
-    "scooter_vespa_200_rally": ("scooter", "-z", 1.80),
-    "kickscooter_electric": ("kickscooter", "-x", 1.08),
+    "bike_roadster_old": ("bicycle", 90.0, 1.80),
+    "bike_cruiser_red": ("bicycle", 90.0, 1.80),
+    "bike_road": ("bicycle", 90.0, 1.75),
+    "bike_beach_cruiser": ("bicycle", 0.0, 1.80),
+    "bike_family_basket": ("bicycle", 90.0, 1.80),
+    "bike_ardis_verona": ("bicycle", 180.0, 1.85),
+    "bike_peugeot_retro": ("bicycle", 90.0, 1.80),
+    "bike_bmx": ("bicycle", 90.0, 1.60),
+    "moto_sarolea_vintage": ("motorcycle", -40.3, 2.00),
+    "moped_puch_1978": ("moped", 0.0, 1.75),
+    "moto_yamaha_fz150": ("motorcycle", -78.0, 2.00),
+    "moto_80s": ("motorcycle", -90.0, 2.10),
+    "moto_cruiser": ("motorcycle", 0.0, 2.30),
+    "scooter_vespa_yellow": ("scooter", 0.0, 1.80),
+    "scooter_vespa_orange": ("scooter", -57.4, 1.80),
+    "scooter_honda_squash": ("scooter", 90.0, 1.60),
+    "scooter_vespa_ss180": ("scooter", 90.0, 1.80),
+    "scooter_vespa_50_special": ("scooter", 0.0, 1.70),
+    "moped_solifer_export": ("moped", 180.0, 1.80),
+    "scooter_vespa_200_rally": ("scooter", 180.0, 1.80),
+    "kickscooter_electric": ("kickscooter", -90.0, 1.08),
 }
-# pbrt `Rotate a 0 1 0` maps model +z to (sin a, 0, cos a): the yaw that turns each front axis to +z
-FRONT_YAW = {"+z": 0.0, "+x": -90.0, "-x": 90.0, "-z": 180.0}
 BICYCLES = tuple(a for a, m in MODELS.items() if m[0] == "bicycle")
 POWERED = tuple(a for a, m in MODELS.items() if m[0] in ("motorcycle", "moped", "scooter"))
 KICK = tuple(a for a, m in MODELS.items() if m[0] == "kickscooter")
 
 
-def placement(aid: str, v: dict) -> tuple[float, np.ndarray, float]:
-    """Scale to the nominal length, base-centre origin and the yaw that turns the front to +z."""
-    _, front, length = MODELS[aid]
-    ax = 0 if front[1] == "x" else 2
-    lo, hi = v["lo"], v["hi"]
-    s = length / float(hi[ax] - lo[ax])
-    return s, np.array([0.5 * (lo[0] + hi[0]), lo[1], 0.5 * (lo[2] + hi[2])]), FRONT_YAW[front]
+def rot_y(deg: float) -> np.ndarray:
+    """pbrt `Rotate deg 0 1 0`: maps +z to (sin deg, 0, cos deg)."""
+    a = math.radians(deg)
+    return np.array([[math.cos(a), 0.0, math.sin(a)], [0.0, 1.0, 0.0], [-math.sin(a), 0.0, math.cos(a)]])
+
+
+def placement(aid: str, pts: np.ndarray) -> dict:
+    """Yaw that turns the front to +z, scale to the nominal length, base-centre origin, front-aligned bounds."""
+    yaw0 = -MODELS[aid][1]
+    q = pts @ rot_y(yaw0).T
+    lo, hi = np.percentile(q, 0.05, 0), np.percentile(q, 99.95, 0)
+    c = np.array([0.5 * (lo[0] + hi[0]), lo[1], 0.5 * (lo[2] + hi[2])])
+    return {
+        "yaw0": yaw0,
+        "scale": MODELS[aid][2] / float(hi[2] - lo[2]),
+        "origin": c @ rot_y(yaw0),
+        "c": c,
+        "lo": lo,
+        "hi": hi,
+    }
 
 
 class Placer:
@@ -70,8 +86,9 @@ class Placer:
                 info, raw = a
                 prep = raw.parent.parent / "prepared" / aid
                 v = sf.variants(aid, info, prep)[0]
+                pts = np.concatenate([read_ply_positions(prep / info["shapes"][k]["ply"]) for k in v["shapes"]])
                 self.lines += sf.object_lines(v["name"], info, prep, raw, self.out_dir, v["shapes"])
-                self.defined[aid] = v
+                self.defined[aid] = {"name": v["name"], **placement(aid, pts[np.isfinite(pts).all(1)])}
         return self.defined[aid]
 
     def place(self, aid: str, pos, heading_deg: float, role: str) -> dict | None:
@@ -79,9 +96,8 @@ class Placer:
         v = self.variant(aid)
         if v is None:
             return None
-        s, origin, yaw0 = placement(aid, v)
-        yaw = heading_deg + yaw0
-        self.lines += sf.instance_lines(v["name"], pos, yaw, s, origin)
+        s = v["scale"]
+        self.lines += sf.instance_lines(v["name"], pos, heading_deg + v["yaw0"], s, v["origin"])
         m = {
             "asset": aid,
             "kind": MODELS[aid][0],
@@ -90,7 +106,7 @@ class Placer:
             "heading_deg": round(float(heading_deg), 2),
             "length_m": MODELS[aid][2],
             "scale": round(s, 5),
-            "box_world": sf.world_box(v, pos, yaw, s, origin),
+            "box_world": sf.world_box(v, pos, heading_deg, s, v["c"]),
         }
         self.meta.append(m)
         return m

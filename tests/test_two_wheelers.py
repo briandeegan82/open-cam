@@ -14,7 +14,7 @@ sys.path.insert(0, str(REPO / "tools"))
 
 import build_urban_scene as urban  # noqa: E402
 import two_wheelers as tw  # noqa: E402
-from fetch_highway_assets import cache_root, load_asset_manifest  # noqa: E402
+from fetch_highway_assets import cache_root, load_asset_manifest, read_ply_positions  # noqa: E402
 
 AM = load_asset_manifest(REPO / "config" / "highway_assets.yaml")
 PREP = cache_root(REPO, AM) / "prepared"
@@ -39,12 +39,20 @@ def test_manifest_provenance(aid):
     assert re.fullmatch(r"[0-9a-f]{64}", f["sha256"]) and f["url"].endswith(f"/{uid}.glb")
 
 
-@pytest.mark.parametrize("front", sorted(tw.FRONT_YAW))
-def test_front_yaw_turns_model_front_to_plus_z(front):
-    a = math.radians(tw.FRONT_YAW[front])
-    v = {"x": np.array([1.0, 0, 0]), "z": np.array([0, 0, 1.0])}[front[1]] * (1 if front[0] == "+" else -1)
-    rot = np.array([[math.cos(a), 0, math.sin(a)], [0, 1, 0], [-math.sin(a), 0, math.cos(a)]])  # pbrt Rotate a 0 1 0
-    assert np.allclose(rot @ v, [0, 0, 1], atol=1e-12)
+@pytest.mark.parametrize("aid", sorted(tw.MODELS))
+def test_front_turns_to_plus_z(aid):
+    f = math.radians(tw.MODELS[aid][1])
+    assert np.allclose(tw.rot_y(-tw.MODELS[aid][1]) @ [math.sin(f), 0, math.cos(f)], [0, 0, 1], atol=1e-12)
+
+
+@needs_assets
+@pytest.mark.parametrize("aid", sorted(tw.MODELS))
+def test_front_is_the_principal_horizontal_axis(aid):
+    info = json.loads((PREP / aid / "prepared.json").read_text())
+    p = np.concatenate([read_ply_positions(PREP / aid / s["ply"]) for s in info["shapes"]])[:, [0, 2]]
+    v = np.linalg.eigh(np.cov((p - p.mean(0)).T))[1][:, 1]
+    d = (math.degrees(math.atan2(v[0], v[1])) - tw.MODELS[aid][1]) % 180.0
+    assert min(d, 180.0 - d) < 3.0
 
 
 def test_default_has_no_two_wheelers(tmp_path):
