@@ -27,6 +27,8 @@ import shutil
 import struct
 import subprocess
 import sys
+import time
+import urllib.error
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -67,15 +69,25 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
+USER_AGENT = "open-cam-asset-fetch/1 (https://github.com/briandeegan82/open-cam)"
+
+
 def _download(url: str, dest: Path, sha256: str) -> None:
     if dest.is_file() and sha256_file(dest) == sha256:
         return
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_suffix(dest.suffix + ".part")
     print(f"  downloading {url}")
-    req = urllib.request.Request(url, headers={"User-Agent": "open-cam-asset-fetch/1"})
-    with urllib.request.urlopen(req, timeout=120) as r, open(tmp, "wb") as fh:
-        shutil.copyfileobj(r, fh, 1 << 20)
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    for attempt in range(6):
+        try:
+            with urllib.request.urlopen(req, timeout=120) as r, open(tmp, "wb") as fh:
+                shutil.copyfileobj(r, fh, 1 << 20)
+            break
+        except urllib.error.HTTPError as e:  # Wikimedia rate-limits bursts (429)
+            if e.code != 429 or attempt == 5:
+                raise
+            time.sleep(float(e.headers.get("Retry-After") or 5 * 2**attempt))
     got = sha256_file(tmp)
     if got != sha256:
         tmp.unlink()
@@ -425,6 +437,58 @@ def unpack_glb(glb: Path, dest: Path) -> Path:
     return out
 
 
+# Sheeting colour classes for sign artwork: nominal sRGB of the artwork colours.
+SIGN_PALETTE = {
+    "white": (240, 240, 240),
+    "red": (192, 16, 24),
+    "yellow": (240, 196, 16),
+    "blue": (16, 64, 128),
+    "green": (0, 110, 60),
+    "black": (0, 0, 0),
+}
+
+
+def prepare_sign(asset: dict, raw: Path, out: Path, width_px: int = 1024) -> dict:
+    """Rasterise an SVG sign into an alpha cutout + one mask per sheeting colour (nearest palette colour)."""
+    try:
+        import cairosvg
+    except ImportError as e:  # optional dependency, only needed for sign assets
+        raise RuntimeError("sign assets need cairosvg: pip install cairosvg") from e
+    import io
+
+    from PIL import Image
+
+    png = cairosvg.svg2png(url=str(raw / asset["svg"]), output_width=width_px)
+    rgba = np.asarray(Image.open(io.BytesIO(png)).convert("RGBA"), dtype=np.float64)
+    opaque = rgba[..., 3] >= 128
+    names = list(SIGN_PALETTE)
+    pal = np.array([SIGN_PALETTE[n] for n in names], dtype=np.float64)
+    d = ((rgba[..., None, :3] - pal[None, None]) ** 2).sum(-1)
+    cls = np.argmin(d, axis=-1)
+    # anti-aliased edges land on stray palette colours: keep colours covering >= 1 % of the face
+    keep = [k for k in range(len(names)) if (opaque & (cls == k)).sum() >= 0.01 * opaque.sum()]
+    cls = np.array(keep)[np.argmin(d[..., keep], axis=-1)]
+    Image.fromarray((opaque * 255).astype(np.uint8)).save(out / "alpha.png")
+    masks, frac = {}, {}
+    for k, n in enumerate(names):
+        m = opaque & (cls == k)
+        if k not in keep:
+            continue
+        Image.fromarray((m * 255).astype(np.uint8)).save(out / f"mask_{n}.png")
+        masks[n], frac[n] = f"mask_{n}.png", round(float(m.sum() / opaque.sum()), 4)
+    h, w = opaque.shape
+    return {
+        "sign_set": asset["sign_set"],
+        "code": asset["code"],
+        "width_m": float(asset["width_m"]),
+        "height_m": float(asset["width_m"]) * h / w,
+        "png_size": [w, h],
+        "alpha": "alpha.png",
+        "masks": masks,
+        "colour_fraction": frac,
+    }
+
+
 def prepare(aid: str, asset: dict, root: Path, *, force: bool = False) -> Path:
     raw = fetch_raw(aid, asset, root)
     out = root / "prepared" / aid
@@ -446,6 +510,8 @@ def prepare(aid: str, asset: dict, root: Path, *, force: bool = False) -> Path:
     elif kind == "glb":
         gltf = unpack_glb(raw / asset["glb"], raw / "unpacked")
         data = prepare_gltf({**asset, "gltf": str(gltf.relative_to(raw))}, raw, out)
+    elif kind == "sign_svg":
+        data = prepare_sign(asset, raw, out)
     elif kind == "texture":
         missing = [m for m in asset.get("maps", {}).values() if not (raw / m).is_file()]
         if missing:
