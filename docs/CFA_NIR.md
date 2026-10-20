@@ -156,12 +156,20 @@ cd scenes/cabin_dms && ../../third_party/pbrt-v4/build-nir/pbrt cabin.pbrt
   BSDF-sampled paths that happen to hit the small LED. Real lenses transmit ~92 %; treat
   `--glasses` renders as showing the lens reflections, not the eye behind them. The manifest lists eye, cornea and pupil
   centres (world space) as gaze ground truth.
-- **Corneal glint is under-sampled.** The virtual image of a 2.5 mm LED in the cornea is ~0.015 mm,
-  far below a pixel (~0.5 mm on the face), and it can only be reached by BSDF sampling through the
-  specular cornea. At 128–1024 spp it shows as a few scattered bright samples or not at all.
-  A larger emitter (e.g. `--led-radius-mm 15`) makes hits frequent enough to see, at the cost of a
-  less realistic source. A deterministic glint (analytic splat at the predicted position) is not
-  implemented.
+- **Corneal glint:** the virtual image of a 2.5 mm LED in the cornea is ~0.015 mm, far below a
+  pixel (~0.7 mm on the face), so a smooth cornea is almost never hit by a camera sample (a few
+  scattered bright samples at 128–1024 spp, or none). `--cornea-roughness` (GGX α, default 0.02)
+  spreads the reflection over ~1–3 px, where pbrt samples it with next-event estimation. The total
+  glint power stays the mirror-sphere value J = ρ E R²/4 (pbrt within 3 % for α = 0.02–0.05 on an
+  isolated cornea, `tests/test_cabin_dms.py`; in the full scene with black eye materials the glint
+  centroid is within 0.25 px of `glint.pixel_xy` and its power 1.01–1.03× the analytic value), so a sensor/lens model downstream sees the right
+  energy at the right place. The blob is wider than the true sub-pixel glint; `--cornea-roughness 0`
+  restores the smooth cornea. The manifest gives each eye's analytic glint (`glint.pixel_xy`,
+  `glint.camera_irradiance_w_m2`, Fresnel ρ, `on_cornea`) and `pupil_pixel_xy` for pupil-centre /
+  corneal-reflection gaze ground truth. Only the first Purkinje image is modelled; there is no lens
+  inside the eye. The rough cornea also lets next-event estimation light the iris through it, so
+  the iris shows bright render-noise specks at 512 spp that converge with more samples (with a
+  smooth cornea the iris is lit only by rare paths that hit the LED and stays under-converged).
 - **Nominal / not modelled:** head and eye geometry, sclera/iris/pupil reflectances and LED output
   are nominal. No sunlight, no bright-pupil retinal retroreflection, no eyelids/brows/hair, no
   subsurface blur in skin.
