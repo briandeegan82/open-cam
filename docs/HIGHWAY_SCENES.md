@@ -819,6 +819,29 @@ asphalt. `packed` covers the whole road with compacted snow, hiding the markings
   (no motion streaks) and the count grows with range³ (≈ 0.34 M at 1 mm/h, 15 m, 31° fov).
 * **Not modelled:** snow on trees, cars and signs; snow-covered markings in `slush`.
 
+## Unlit rural road at night (`tools/build_rural_scene.py`)
+
+    venv/bin/python tools/build_rural_scene.py --out-dir scenes/generated/rural
+    cd scenes/generated/rural && pbrt rural.pbrt          # writes out/rural_spectral.exr
+
+A two-lane rural road (3.25 m lanes, 0.5 m paved strips, 6 m / 12 m broken centre line) with grass
+verges and procedural trees, no street lighting. Night or dusk only (`--time-of-day`, moon via the
+`highway_night` options); `--road-wetness` works as on the highway (no puddles/spray).
+
+* **Glare:** an oncoming car at `--oncoming-distance-m` (default 120 m) with `--oncoming-beam high`
+  (default); the ego uses `--ego-beam low` (default) or `high`. The high beam is the passing beam
+  plus an analytic H-V-centred driving beam, `highway_night.high_beam_cd`, 70 kcd per lamp
+  (nominal: ECE R112/R113 need at least 30 kcd on H-V, R48 caps the sum at 430 kcd). The highway
+  builder's lamps are unchanged; `write_light_assets(..., high_beam=True)` writes the extra maps.
+* **Reflector posts:** 1 m white posts with a black band, every 50 m on both sides, 0.5 m beyond
+  the paved edge; right side one 40×180 mm reflector, left side two 60 mm reflectors (German
+  Leitpfosten layout). Reflectors use the retroreflective sheeting model (nominal, not measured
+  cube-corner data).
+* **Deer:** `--deer roe|red|none` (default roe, 0.70 m shoulder height; red 1.20 m) at
+  `--deer-distance-m` (default 40 m), `--deer-offset-m`, `--deer-heading-deg` (180 = crossing right-to-left).
+  Procedural ellipsoids; analytic brown fur reflectance rising into the NIR; retroreflective eyes
+  for tapetum eyeshine. The manifest records the world-space box and eye positions.
+
 ## Urban intersection, night and wet (`tools/build_urban_scene.py`)
 
     venv/bin/python tools/build_urban_scene.py --out-dir scenes/generated/urban [--sign-set stvo] [--vru pedestrian]
