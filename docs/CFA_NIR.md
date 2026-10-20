@@ -108,7 +108,7 @@ At 500 lux and 0.12 s the white patch exceeds the 4800 e- full well, so colour i
 
 24 materials from the USGS Spectral Library v7 (Kokaly et al. 2017, USGS Data Series 1035,
 doi:10.5066/F7RR1WDJ; public domain), ASD FieldSpec absolute reflectance, resampled to 1 nm over
-350-1100 nm. It uses the ColorChecker's 6 x 4 layout:
+350-2500 nm (the SWIR range is used by the InGaAs sensors in [SWIR.md](SWIR.md)). It uses the ColorChecker's 6 x 4 layout:
 
 ```bash
 python tools/build_colorchecker_scene.py --patch-dir spectra/usgs_nir \

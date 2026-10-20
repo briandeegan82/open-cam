@@ -1,0 +1,36 @@
+# Delta from config/sensor_models/default.yaml — only overrides are listed.
+# Representative TEC-stabilised VGA InGaAs SWIR camera (not a specific product): 15 um pitch,
+# In0.53Ga0.47As 0.9-1.7 um (tools/swir_spectra.py, fit to Hamamatsu G12180), monochrome.
+# Dark current ~5 nA/cm^2 at 20 C (typical InGaAs FPA order of magnitude) and 1.09x per deg C
+# (G12180 datasheet temperature coefficient, i.e. doubling every ~8 C). See docs/SWIR.md.
+schema_version: 1
+source:
+  qe_variant: swir_ingaas_standard
+  qe_variant_note: 'Monochrome InGaAs via a 1x1 cfa.layout (see docs/SWIR.md)'
+model:
+  name: swir_ingaas_vga_15um
+  display_name: SWIR InGaAs VGA 15 um, 0.9-1.7 um (representative)
+sensor:
+  pixel_pitch_um: 15.0
+  integration_time_s: 0.001
+  f_number: 1.4
+  fill_factor: 1.0
+noise:
+  emva:
+    overall_system_gain_K_e_per_DN: 9.2
+    sigma_d_e: 45.0
+    black_level_DN: 256
+    prnu_std_fraction: 0.02
+    dark_current_e_per_s: 70000.0
+    dark_current_reference_temp_c: 20.0
+    temperature_c: 15.0
+    dark_current_doubling_per_c: 8.0
+  adc:
+    bit_depth: 14
+    full_well_e: 150000
+cfa:
+  layout: [[S]]
+  demosaic: bilinear
+  ircf: false
+  channels:
+    S: {qe_csv: spectra/QE/swir/QE_ingaas_standard.csv}

@@ -1,0 +1,36 @@
+# Delta from config/sensor_models/default.yaml — only overrides are listed.
+# Representative extended-wavelength (In0.81Ga0.19As, 0.9-2.6 um) SWIR camera, 15 um pitch,
+# 4-stage TEC at -60 C (not a specific product). Dark current scaled from the Hamamatsu
+# G12183-210KA-03 datasheet (0.05 uA for a 1 mm diode at -20 C, 10 mV bias = 6.4 uA/cm^2,
+# 1.067x per deg C): ~6.7e6 e/s per 15 um pixel at -60 C. See docs/SWIR.md.
+schema_version: 1
+source:
+  qe_variant: swir_ingaas_extended
+  qe_variant_note: 'Monochrome extended InGaAs via a 1x1 cfa.layout (see docs/SWIR.md)'
+model:
+  name: swir_ingaas_extended_15um
+  display_name: SWIR extended InGaAs 15 um, 0.9-2.6 um (representative)
+sensor:
+  pixel_pitch_um: 15.0
+  integration_time_s: 0.0005
+  f_number: 1.4
+  fill_factor: 1.0
+noise:
+  emva:
+    overall_system_gain_K_e_per_DN: 73.0
+    sigma_d_e: 150.0
+    black_level_DN: 256
+    prnu_std_fraction: 0.03
+    dark_current_e_per_s: 9.0e7
+    dark_current_reference_temp_c: -20.0
+    temperature_c: -60.0
+    dark_current_doubling_per_c: 10.7
+  adc:
+    bit_depth: 14
+    full_well_e: 1200000
+cfa:
+  layout: [[S]]
+  demosaic: bilinear
+  ircf: false
+  channels:
+    S: {qe_csv: spectra/QE/swir/QE_ingaas_extended.csv}
