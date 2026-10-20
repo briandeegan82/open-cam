@@ -301,9 +301,17 @@ def read_weight_exr(path: Path) -> np.ndarray:
         return np.stack([np.asarray(ch[f"B{i}"].pixels, float) for i in range(k)], -1)
 
 
-def write_basis_spds(spd_dir: Path, prefix: str = "sky_basis") -> list[Path]:
-    """Write the unit-luminance basis spectra as pbrt .spd files; returns their paths."""
+def write_basis_spds(spd_dir: Path, prefix: str = "sky_basis", lambda_max: float | None = None) -> list[Path]:
+    """Write the unit-luminance basis spectra as pbrt .spd files; returns their paths.
+
+    ``lambda_max`` beyond the CIE table's 830 nm extends them with the G173 diffuse-sky shape
+    (tools/highway_swir.py).
+    """
     wl, b = basis_spectra()
+    if lambda_max is not None and lambda_max > wl[-1]:
+        import highway_swir
+
+        wl, b = highway_swir.extend_sky_basis(wl, b, lambda_max)
     spd_dir.mkdir(parents=True, exist_ok=True)
     paths = []
     for k, v in enumerate(b):
@@ -427,7 +435,9 @@ def spectral_sky_light(args, sky_file: Path, elev: float, out_dir: Path, spd_dir
     up = equal_area_directions(w.shape[0])[..., 2] > 0.0
     info["out_of_gamut_luminance_fraction"] = round(out_of_gamut_fraction(c[up]), 4)
     info |= sky_colour_summary(w)
-    spds = write_basis_spds(spd_dir)
+    import highway_swir
+
+    spds = write_basis_spds(spd_dir, lambda_max=args.spectral_lambda_max if highway_swir.enabled(args) else None)
     rel = [Path(os.path.relpath(p, out_dir)).as_posix() for p in spds]
     info["spectra"] = rel
     return {

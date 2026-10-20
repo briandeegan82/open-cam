@@ -691,6 +691,12 @@ python tools/build_highway_scene.py --sign-set stvo --time-of-day night --out-di
 - *Not modelled:* sheeting ageing and dirt, embossed legends, sign-face sheen, sign-specific observation-angle
   tables.
 
+## SWIR (`--spectral-lambda-max` > 830, `tools/highway_swir.py`)
+
+Day scenes can be rendered past 830 nm with the 2500 nm pbrt build; `--swir-spectra auto` then
+splices G173 sun/sky and measured-leaf tails onto the visible spectra and `--film-lambda-min/max`
+choose the rendered band. See [SWIR.md](SWIR.md#highway-scene-in-the-swir-toolshighway_swirpy).
+
 ## Known approximations
 
 - Daytime markings use a glass-bead-like rough clear coat over a spectral binder and sign

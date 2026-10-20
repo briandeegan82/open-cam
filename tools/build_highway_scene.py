@@ -43,6 +43,7 @@ import highway_night as night  # noqa: E402
 import highway_rain as rain  # noqa: E402
 import highway_signs as sign_scene  # noqa: E402
 import highway_snow as snow  # noqa: E402
+import highway_swir as swir  # noqa: E402
 import highway_variety as variety  # noqa: E402
 import highway_vru as vru  # noqa: E402
 import highway_wet as wet  # noqa: E402
@@ -384,6 +385,24 @@ def add_film_args(ap: argparse.ArgumentParser, *, xres: int, yres: int, pixelsam
     ap.add_argument("--spectral-lambda-min", type=float, default=360.0)
     ap.add_argument("--spectral-lambda-max", type=float, default=830.0)
     ap.add_argument("--step-nm", type=float, default=5.0)
+    ap.add_argument(
+        "--film-lambda-min",
+        type=float,
+        default=None,
+        help="Film (rendered) band [nm]; default --spectral-lambda-min. Spectra keep the full grid.",
+    )
+    ap.add_argument("--film-lambda-max", type=float, default=None, help="default --spectral-lambda-max.")
+
+
+def film_band(args: argparse.Namespace) -> tuple[float, float]:
+    lo = args.spectral_lambda_min if args.film_lambda_min is None else args.film_lambda_min
+    hi = args.spectral_lambda_max if args.film_lambda_max is None else args.film_lambda_max
+    if not args.spectral_lambda_min <= lo < hi <= args.spectral_lambda_max:
+        raise SystemExit(
+            f"film band {lo:g}-{hi:g} nm must lie inside the spectra grid "
+            f"{args.spectral_lambda_min:g}-{args.spectral_lambda_max:g} nm"
+        )
+    return float(lo), float(hi)
 
 
 def film_lines(args: argparse.Namespace, film_out: str) -> list[str]:
@@ -397,8 +416,8 @@ def film_lines(args: argparse.Namespace, film_out: str) -> list[str]:
     if args.film == "spectral":
         film += [
             f'    "integer nbuckets" [{args.spectral_nbuckets}]',
-            f'    "float lambdamin" [{_f(args.spectral_lambda_min)}]',
-            f'    "float lambdamax" [{_f(args.spectral_lambda_max)}]',
+            f'    "float lambdamin" [{_f(film_band(args)[0])}]',
+            f'    "float lambdamax" [{_f(film_band(args)[1])}]',
         ]
     if args.camera == "realistic":
         film.append(f'    "float diagonal" [{_f(args.film_diagonal_mm)}]')
@@ -504,6 +523,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     hmat.add_arguments(ap)
     sign_scene.add_args(ap)
     vru.add_args(ap)
+    swir.add_args(ap)
     return ap.parse_args(argv)
 
 
@@ -539,7 +559,10 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
     # ---- spectra
     wl = np.arange(args.spectral_lambda_min, args.spectral_lambda_max + 1e-9, args.step_nm)
     for name in SURFACES:
-        write_spd(spd / f"{name}.spd", wl, reflectance(name, wl))
+        r = reflectance(name, wl)
+        if swir.enabled(args) and name in swir.VEGETATION:
+            r = swir.vegetation(name, wl, r)
+        write_spd(spd / f"{name}.spd", wl, r)
     var = variety.resolve(args, CAR_MODELS, args.cam_lane)
     variety.activate(var)
     variety.write_paints(var, spd, wl, reflectance, write_spd)
@@ -571,6 +594,10 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         raise SystemExit(
             "--sky hosek / prague / --sky-spectrum daylight are daytime skies; not supported with --time-of-day"
         )
+    if swir.enabled(args) and args.time_of_day == "day" and args.sky not in ("hosek", "prague"):
+        if args.sky_spectrum == "rgb":
+            print("SWIR spectra: --sky-spectrum daylight (an RGB sky map is black above 830 nm)", file=sys.stderr)
+        args.sky_spectrum = "daylight"
     sky_light = spectral_sky_light(args, sky_file, elev, out_dir, spd)
     if sky_light is not None:
         sky_file, sky_desc = sky_light["file"], sky_light["description"]
@@ -582,7 +609,10 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
     if args.global_illuminance_lux is not None:
         k = float(args.global_illuminance_lux) / e_ref
         e_dn, e_sky_h, e_ref = e_dn * k, e_sky_h * k, float(args.global_illuminance_lux)
-    write_spd(spd / "sun.spd", wl, solar_direct_spectrum(wl, elev))
+    sun_spd = solar_direct_spectrum(wl, elev)
+    if swir.enabled(args):
+        sun_spd = swir.sun_spectrum(wl, sun_spd)
+    write_spd(spd / "sun.spd", wl, sun_spd)
     haze = atmosphere.params_from_args(args)
     rain_notes = rain.check_args(args)
     snow_notes = snow.check_args(args)
@@ -600,7 +630,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
             wl=wl,
             spd_dir=spd,
             sky_rgb_equal_area=sky_light["rgb"] if sky_light else read_rgb_exr(sky_file),
-            sun_spd=solar_direct_spectrum(wl, elev),
+            sun_spd=sun_spd,
             elev=elev,
             e_dn=e_dn,
             e_sky_h=e_sky_h,
@@ -1076,8 +1106,9 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
             **(
                 {
                     "nbuckets": args.spectral_nbuckets,
-                    "lambdamin": args.spectral_lambda_min,
-                    "lambdamax": args.spectral_lambda_max,
+                    "lambdamin": film_band(args)[0],
+                    "lambdamax": film_band(args)[1],
+                    "spectra_lambda_range_nm": [args.spectral_lambda_min, args.spectral_lambda_max],
                 }
                 if args.film == "spectral"
                 else {}
@@ -1144,6 +1175,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         **({"snow": snow_meta} if snow_meta else {}),
         "distant_terrain": "hills (tools/highway_backdrop.py)" if backdrop.enabled(args) else None,
         "variety": var.manifest(),
+        **({"swir": swir.manifest(args)} if swir.enabled(args) else {}),
         "assets": used_assets,
         "missing_assets_fallback": fallbacks,
         "approximations": [
@@ -1157,6 +1189,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
             if atm is None
             else "Atmosphere: horizontally uniform grid medium, single HG phase (Rayleigh folded into g); "
             "lights are at the top of the layer, road illuminance from a plane-parallel MC model.",
+            *([swir.approximation()] if swir.enabled(args) else []),
         ],
     }
     night.update_manifest(manifest, nopts, night_lighting, night_meta)
