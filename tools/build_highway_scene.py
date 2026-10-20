@@ -40,6 +40,7 @@ import highway_backdrop as backdrop  # noqa: E402
 import highway_incar  # noqa: E402
 import highway_materials as hmat  # noqa: E402
 import highway_night as night  # noqa: E402
+import highway_rain as rain  # noqa: E402
 import highway_signs as sign_scene  # noqa: E402
 import highway_snow as snow  # noqa: E402
 import highway_variety as variety  # noqa: E402
@@ -498,6 +499,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     highway_incar.add_args(ap)
     variety.add_arguments(ap)
     wet.add_args(ap)
+    rain.add_args(ap)
     snow.add_args(ap)
     hmat.add_arguments(ap)
     sign_scene.add_args(ap)
@@ -582,6 +584,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         e_dn, e_sky_h, e_ref = e_dn * k, e_sky_h * k, float(args.global_illuminance_lux)
     write_spd(spd / "sun.spd", wl, solar_direct_spectrum(wl, elev))
     haze = atmosphere.params_from_args(args)
+    rain_notes = rain.check_args(args)
     snow_notes = snow.check_args(args)
     wet.check_args(args, args.road_wear != "none")
     vru.check_args(args)
@@ -1028,6 +1031,11 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
     )
     L += night_lines
 
+    rain_meta = None
+    if rain.enabled(args):
+        fov = args.fov if args.camera != "realistic" else 90.0
+        rain_lines, rain_meta = rain.scene_lines(args, out_dir, eye, fov, args.xres / args.yres, rain_notes)
+        L += [*rain_lines, ""]
     snow_meta = None
     if snow.enabled(args):
         geo = {
@@ -1132,6 +1140,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         "cars": cars_meta,
         "vegetation": veg_meta,
         "atmosphere": atm["manifest"] if atm else None,
+        **({"rain": rain_meta} if rain_meta else {}),
         **({"snow": snow_meta} if snow_meta else {}),
         "distant_terrain": "hills (tools/highway_backdrop.py)" if backdrop.enabled(args) else None,
         "variety": var.manifest(),
