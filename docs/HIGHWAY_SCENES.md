@@ -730,6 +730,43 @@ PWM edges, with no band timing error. It refuses scenes whose manifest records a
 velocity. All renders share one `--seed`, so B and E_e are correlated and most of the path noise
 cancels in the difference.
 
+## Vulnerable road users: AEB pedestrian / cyclist targets (`tools/highway_vru.py`, opt-in)
+
+`--vru pedestrian|child|cyclist` adds one Euro NCAP-style AEB test target; the default (`none`) leaves
+the scene unchanged.
+
+```bash
+# obstructed child stepping out between two parked cars, 25 m ahead
+venv/bin/python tools/build_highway_scene.py --vru child --vru-obstruction parked-cars --vru-distance-m 25
+# cyclist riding away in the right lane, at night under the ego low beams
+venv/bin/python tools/build_highway_scene.py --vru cyclist --vru-motion along --vru-offset-m -1.2 --time-of-day night
+```
+
+| flag | meaning |
+|---|---|
+| `--vru-distance-m` | target distance ahead of the camera (default 30 m) |
+| `--vru-offset-m` | target centre from the right carriageway edge; negative = into the lane (default 0.4 m, i.e. on the shoulder) |
+| `--vru-motion` | `crossing` (facing right-to-left, nearside scenarios) or `along` (longitudinal) |
+| `--vru-gait-phase` | stride / pedal phase in [0, 1) |
+| `--vru-obstruction parked-cars` | two parked cars on the shoulder with a 1 m gap around the target |
+| `--vru-clothing` | `ncap` (black top, blue trousers, as the Euro NCAP targets), `dark`, `light`, `red`, `yellow` |
+| `--vru-skin-tau` | melanin optical depth of the skin reflectance (`iqlab.skin`) |
+
+- *Geometry:* procedural articulated meshes (ellipsoids and tapered tubes with smooth normals) built to
+  nominal target sizes: adult 1.80 m, child 1.154 m, bicycle about 1.8 m long with 0.70 m wheels. The
+  ISO 19206 / Euro NCAP documents are paywalled, so these sizes are nominal and were not checked against
+  the standard text. No third-party asset is used.
+- *Spectra:* measured USGS splib07a fabrics and plastics (`spectra/usgs_nir`, 350-1100 nm) for clothing;
+  ColorChecker light skin with a melanin tilt for skin. The ColorChecker data stop at 730 nm and are held
+  constant beyond, so skin NIR reflectance is too low (real skin rises towards ~800 nm). All diffuse, no
+  subsurface scattering, no fluorescence.
+- *Ground truth:* `highway_manifest.json` → `vru` has the target's world-space bounding box, anchor
+  point, distance, pose and obstruction cars.
+- *Traffic:* same-direction traffic cars within 12 m of the target are dropped so a moving car
+  does not hide it; the manifest lists them under `vru.removed_traffic`. Use `--traffic none` for an empty road.
+- *Not modelled:* target motion (the scene is static; use `--vehicle-speed-kmh` for ego motion blur),
+  bicycle retroreflectors, the soft EPT target's fabric texture.
+
 ## Falling rain (`--rain-mmh`; `tools/highway_rain.py`)
 
     venv/bin/python tools/build_highway_scene.py --rain-mmh 10 --time-of-day night --exposure-s 0.01
