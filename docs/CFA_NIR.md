@@ -128,3 +128,48 @@ Limits: single field samples (not population means); the curves are hemispherica
 reflectance used as Lambertian albedo; none of the materials is a colour reference like the
 ColorChecker, so ΔE-type colour metrics still use `spectra/xrite`.
 
+
+## In-cabin driver monitoring at 940 nm (`tools/build_cabin_scene.py`)
+
+A night-time DMS scene: camera on the steering column ~0.65 m from the driver, looking up at the
+face, lit only by a 940 nm (or `--led-nm 850`) LED next to the lens. It needs the NIR pbrt build
+(`PBRT_LAMBDA_MAX_NM=1100`); the film is spectral, 400–1100 nm.
+
+```bash
+python tools/build_cabin_scene.py --out-dir scenes/cabin_dms --skin light --gaze-yaw-deg 10 --glasses
+cd scenes/cabin_dms && ../../third_party/pbrt-v4/build-nir/pbrt cabin.pbrt
+```
+
+- **LED:** Lambertian disc (`--led-radius-mm`, default 2.5) with on-axis radiant intensity
+  `--led-w-sr` (default 0.5 W/sr, nominal) in absolute units. Patch 0015 lets `diffuse` area
+  lights take `"bool photometric" false`; without it pbrt divides by the ~0 photometric integral.
+  A disc rather than a point light is needed so the cornea can mirror it.
+- **Skin:** measured ColorChecker skin (`--skin light|dark`) up to 730 nm, then the measurement
+  times the relative shape of `tools/nir_skin.py` (two-layer melanin/blood/water model after
+  Jacques, OMLC; water: Hale & Querry 1973; haemoglobin: Prahl). The model's own absolute level is
+  too dark against the measured patches in the red (≈0.48 vs 0.73 at 730 nm), so only its shape is
+  used. Result: R(940) ≈ 0.66 (light), ≈ 0.24 (dark), with the water dip at 970 nm.
+- **Eyes:** sclera sphere, iris and pupil discs (`--pupil-mm`, default 6 mm at night) and a
+  dielectric cornea cap (η = 1.376, radius 7.8 mm). `--gaze-yaw-deg/--gaze-pitch-deg` rotate the
+  eyes; `--glasses` adds flat η = 1.5 spectacle lenses. Behind the lenses the eyes render dark
+  and noisy: shadow rays cannot pass a specular dielectric, so the eye region is lit only by
+  BSDF-sampled paths that happen to hit the small LED. Real lenses transmit ~92 %; treat
+  `--glasses` renders as showing the lens reflections, not the eye behind them. The manifest lists eye, cornea and pupil
+  centres (world space) as gaze ground truth.
+- **Corneal glint:** the virtual image of a 2.5 mm LED in the cornea is ~0.015 mm, far below a
+  pixel (~0.7 mm on the face), so a smooth cornea is almost never hit by a camera sample (a few
+  scattered bright samples at 128–1024 spp, or none). `--cornea-roughness` (GGX α, default 0.02)
+  spreads the reflection over ~1–3 px, where pbrt samples it with next-event estimation. The total
+  glint power stays the mirror-sphere value J = ρ E R²/4 (pbrt within 3 % for α = 0.02–0.05 on an
+  isolated cornea, `tests/test_cabin_dms.py`; in the full scene with black eye materials the glint
+  centroid is within 0.25 px of `glint.pixel_xy` and its power 1.01–1.03× the analytic value), so a sensor/lens model downstream sees the right
+  energy at the right place. The blob is wider than the true sub-pixel glint; `--cornea-roughness 0`
+  restores the smooth cornea. The manifest gives each eye's analytic glint (`glint.pixel_xy`,
+  `glint.camera_irradiance_w_m2`, Fresnel ρ, `on_cornea`) and `pupil_pixel_xy` for pupil-centre /
+  corneal-reflection gaze ground truth. Only the first Purkinje image is modelled; there is no lens
+  inside the eye. The rough cornea also lets next-event estimation light the iris through it, so
+  the iris shows bright render-noise specks at 512 spp that converge with more samples (with a
+  smooth cornea the iris is lit only by rare paths that hit the LED and stays under-converged).
+- **Nominal / not modelled:** head and eye geometry, sclera/iris/pupil reflectances and LED output
+  are nominal. No sunlight, no bright-pupil retinal retroreflection, no eyelids/brows/hair, no
+  subsurface blur in skin.

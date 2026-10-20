@@ -1,0 +1,14 @@
+--- a/src/pbrt/lights.cpp
++++ b/src/pbrt/lights.cpp
+@@ -915,7 +915,10 @@
+         L = &colorSpace->illuminant;
+ 
+     // scale so that radiance is equivalent to 1 nit
+-    scale /= SpectrumToPhotometric(L ? L : &colorSpace->illuminant);
++    // open-cam: "bool photometric" false keeps L in absolute radiometric units (NIR-only
++    // emitters such as 940 nm LEDs have a ~0 photometric integral).
++    if (parameters.GetOneBool("photometric", true))
++        scale /= SpectrumToPhotometric(L ? L : &colorSpace->illuminant);
+ 
+     Float phi_v = parameters.GetOneFloat("power", -1.0f);
+     if (phi_v > 0) {
