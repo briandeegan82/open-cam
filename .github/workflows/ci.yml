@@ -36,6 +36,25 @@ jobs:
       - name: Pipeline dry run
         run: python tools/run_pipeline.py --config config/pipeline.yaml --dry-run
 
+
+  studio-web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: gui/studio_web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: gui/studio_web/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+      - name: Committed bundle matches the sources
+        run: git diff --exit-code -- ../opencam_gui/studio/static && test -z "$(git status --porcelain -- ../opencam_gui/studio/static)"
   pbrt-e2e:
     runs-on: ubuntu-latest
     # A cold pbrt build plus the render tests; a stuck pbrt render fails here instead of

@@ -148,3 +148,9 @@ def test_accurate_colorchecker_frames_chart_like_fast_mode():
         **{**req.__dict__, "camera_model_config": repo / "config" / "camera_recipes" / "default.yaml"}
     )
     assert pl._realistic_cam_dist_matching_fast_framing(pinhole_req, {"lens_type_override": None}) is None
+
+
+def test_iq_target_electrons_step_uses_the_target_manifest():
+    steps = pl.build_plan(_request(scene_id="siemens_star", mode="pbrt_accurate"))
+    argv = steps[2].argv
+    assert argv[argv.index("--scene-manifest-json") + 1].endswith("iq_targets/siemens_star_manifest.json")

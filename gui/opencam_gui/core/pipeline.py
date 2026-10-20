@@ -428,6 +428,8 @@ def _pbrt_accurate_iq_target_steps(req: GenerationRequest, scene: Scene) -> list
         str(req.camera_model_config),
         "--out",
         str(npz_path),
+        "--scene-manifest-json",
+        str(scene_dir / f"{target}_manifest.json"),
     ]
     if req.target_illuminance_lux:
         forward_cmd.extend(["--target-illuminance-lux", str(req.target_illuminance_lux)])
