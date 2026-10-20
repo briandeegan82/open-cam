@@ -6,7 +6,8 @@ bilinear meshes a few millimetres proud of the hit surface. Assets without geome
 vehicles) use their flat bounding-box rear.
 
 Photometry is set per function at H-V (straight behind): tail R1 6 cd, stop S1 80 cd per side and centre
-high-mounted stop lamp S3 40 cd (UN ECE R7 ranges 4-17, 60-185 and 25-80 cd). Emitters are Lambertian, so
+high-mounted stop lamp S3 40 cd (UN ECE R7 ranges 4-17, 60-185 and 25-80 cd); optional rear fog lamp
+200 cd (R38 150-300 cd), one on the driver's (left, -x) side as R48 requires for a single lamp. Emitters are Lambertian, so
 L = I / A_projected. LED lamps light separate tail and stop elements; incandescent lamps light the whole
 chamber (dual filament) with a bulb hot spot behind a red filter (2856 K x red cut-on).
 """
@@ -24,6 +25,7 @@ REPO = Path(__file__).resolve().parents[1]
 DEFAULT_ASSET_ROOT = REPO / "scenes" / "assets" / "highway"
 
 TAIL_CD, STOP_CD, CHMSL_CD = 6.0, 80.0, 40.0
+FOG_CD = 200.0  # rear fog lamp, UN ECE R38: 150-300 cd at H-V
 HOTSPOT_FRACTION = 0.5  # incandescent: share of the intensity from the bulb image
 LENS_OFFSET_M, EMITTER_OFFSET_M = 0.002, 0.004
 CELL_M = 0.01
@@ -194,6 +196,7 @@ class LampLayout:
     (half width - value). Lens cells are the region cells whose ray hits one of ``lens_materials`` (any
     surface when empty). ``chambers`` splits the lens along ``chamber_axis`` (outer->inner or top->bottom)
     into red / amber / clear sections; only red emits. ``chmsl`` = (half width, y0, y1) centre stop lamp.
+    ``fog`` = rear fog lamp region (same convention as ``region``, left side only); None = not fitted.
     """
 
     tech: str
@@ -203,26 +206,50 @@ class LampLayout:
     from_edge: bool = False
     chambers: tuple[str, ...] = ("red",)
     chamber_axis: str = "x"
+    fog: tuple[float, float, float, float] | None = None
 
 
-_TRUCK = LampLayout("incandescent", (0.50, 0.06, 0.80, 0.95), from_edge=True, chambers=("amber", "red", "clear"))
+_TRUCK = LampLayout(
+    "incandescent",
+    (0.50, 0.06, 0.80, 0.95),
+    from_edge=True,
+    chambers=("amber", "red", "clear"),
+    fog=(0.85, 0.62, 0.80, 0.95),
+)
 LAYOUTS = {
     # BMW M6: LED contour light guide around the asset's own lamp glass, inner stop area, CHMSL atop the glass.
-    "car_bmw_m6": LampLayout("led", (0.40, 0.92, 0.66, 0.94), ("HeadLightGlass",), chmsl=(0.25, 1.265, 1.29)),
+    "car_bmw_m6": LampLayout(
+        "led", (0.40, 0.92, 0.66, 0.94), ("HeadLightGlass",), chmsl=(0.25, 1.265, 1.29), fog=(0.45, 0.70, 0.44, 0.50)
+    ),
     # Pontiac GTO 67: incandescent slot lamps behind the chrome louvres; vintage car: round fender lamps.
+    # Neither has a rear fog lamp (not fitted to cars of their era).
     "car_pontiac_gto": LampLayout("incandescent", (0.22, 0.80, 0.58, 0.79), ("Chrome",)),
     "car_vintage": LampLayout("incandescent", (0.55, 0.92, 0.42, 0.72), ("Seats",)),
-    "proxy": LampLayout("led", (0.45, 0.85, 0.80, 0.97), chmsl=(0.25, 1.43, 1.46)),
+    "proxy": LampLayout("led", (0.45, 0.85, 0.80, 0.97), chmsl=(0.25, 1.43, 1.46), fog=(0.45, 0.75, 0.38, 0.44)),
     "van_sprinter": LampLayout(
-        "incandescent", (0.17, 0.03, 0.62, 1.12), from_edge=True, chambers=("amber", "red", "clear"), chamber_axis="y"
+        "incandescent",
+        (0.17, 0.03, 0.62, 1.12),
+        from_edge=True,
+        chambers=("amber", "red", "clear"),
+        chamber_axis="y",
+        fog=(0.17, 0.03, 0.40, 0.50),
     ),
     "bus_town": LampLayout(
-        "led", (0.20, 0.05, 0.55, 1.15), from_edge=True, chambers=("amber", "red", "clear"), chamber_axis="y"
+        "led",
+        (0.20, 0.05, 0.55, 1.15),
+        from_edge=True,
+        chambers=("amber", "red", "clear"),
+        chamber_axis="y",
+        fog=(0.45, 0.30, 0.55, 0.70),
     ),
     "truck_box": _TRUCK,
     "trailer_box": _TRUCK,
     "truck_daf_cf_tractor": LampLayout(
-        "incandescent", (0.55, 0.10, 0.62, 0.76), from_edge=True, chambers=("amber", "red", "clear")
+        "incandescent",
+        (0.55, 0.10, 0.62, 0.76),
+        from_edge=True,
+        chambers=("amber", "red", "clear"),
+        fog=(0.85, 0.67, 0.62, 0.76),
     ),
 }
 
@@ -401,8 +428,47 @@ def _lamp_lines(g: _Grid, layout: LampLayout, braking: bool, outer_is_high: bool
     }
 
 
-def rear_lamp_lines(car: dict, braking: bool, asset_root: Path | str | None = None) -> tuple[list[str], dict]:
-    """pbrt lines (car frame) and manifest entry for one vehicle's rear lamps."""
+def _fog_lamp(
+    surf: RearSurface | None, layout: LampLayout, half_w: float, rear_z: float
+) -> tuple[list[str], dict | None]:
+    """Single rear fog lamp on the left (-x) side, or nothing if the layout has none."""
+    if layout.fog is None:
+        return [], None
+    ax0, ax1, y0, y1 = layout.fog
+    if layout.from_edge:
+        ax0, ax1 = half_w - ax0, half_w - ax1
+    g = _grid(surf, -ax0, -ax1, y0, y1, rear_z, ())
+    if not g.mask.any():
+        g = _grid(None, -ax0, -ax1, y0, y1, rear_z, ())
+    if layout.tech == "led":
+        groups = [(g.mask, FOG_CD / g.area(g.mask))]
+    else:
+        bins = _incandescent_bins(g, g.mask)
+        norm = sum(w * g.area(m) for m, w in bins)
+        groups = [(m, FOG_CD * w / norm) for m, w in bins]
+    out = ["AttributeBegin", f'    Material "coateddiffuse" "spectrum reflectance" "{LENS_SPD["red"]}"'
+           ' "float roughness" [0]', _patches(g, g.mask, LENS_OFFSET_M), "AttributeEnd"]  # fmt: skip
+    for cells, lum in groups:
+        out += [
+            "AttributeBegin",
+            f'    Material "coateddiffuse" "spectrum reflectance" "{LENS_SPD["red"]}" "float roughness" [0]',
+            f'    AreaLightSource "diffuse" "spectrum L" "{EMITTER_SPD[layout.tech]}" "float scale" [{_f(lum)}]',
+            _patches(g, cells, EMITTER_OFFSET_M),
+            "AttributeEnd",
+        ]
+    return out, {
+        "side": "left",
+        "intensity_cd": round(sum(lum * g.area(c) for c, lum in groups), 3),
+        "area_m2": round(g.area(g.mask), 5),
+        "peak_luminance_cd_m2": round(max(lum for _, lum in groups), 1),
+        "surface": g.surface,
+    }
+
+
+def rear_lamp_lines(
+    car: dict, braking: bool, asset_root: Path | str | None = None, rear_fog: bool = False
+) -> tuple[list[str], dict]:
+    """pbrt lines (car frame) and manifest entry for one vehicle's rear lamps (``rear_fog``: fog lamp lit)."""
     model = car.get("model", "proxy")
     layout = LAYOUTS.get(model, LAYOUTS["proxy"])
     half_w, half_l = car["width_m"] / 2, car["length_m"] / 2
@@ -444,6 +510,10 @@ def rear_lamp_lines(car: dict, braking: bool, asset_root: Path | str | None = No
                 "AttributeEnd",
             ]
         chmsl = {"intensity_cd": CHMSL_CD if braking else 0.0, "area_m2": round(g.area(g.mask), 5)}
+    fog_meta = None
+    if rear_fog:
+        fog_lines, fog_meta = _fog_lamp(surf, layout, half_w, rear_z)
+        lines += fog_lines
     return lines, {
         "car": car["id"],
         "braking": braking,
@@ -452,4 +522,5 @@ def rear_lamp_lines(car: dict, braking: bool, asset_root: Path | str | None = No
         "intensity_cd": sides[0]["intensity_cd"],
         "sides": sides,
         "chmsl": chmsl,
+        "rear_fog": fog_meta,
     }

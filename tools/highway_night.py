@@ -535,6 +535,12 @@ def add_night_args(ap: argparse.ArgumentParser) -> None:
         help="detailed = lens + light guides / bulbs following the car body (tools/highway_taillamps.py); "
         "simple = the old flat 0.30 x 0.10 m red quads.",
     )
+    g.add_argument(
+        "--rear-fog-lamps",
+        choices=("auto", "on", "none"),
+        default="auto",
+        help="Traffic rear fog lamps (200 cd, one on the left; detailed tail lamps only). auto = on with --haze fog.",
+    )
     g.add_argument("--streetlights", choices=("auto", "none", "led_4000k", "hps"), default="auto")
     g.add_argument("--retroreflective", choices=("auto", "on", "off"), default="auto")
 
@@ -548,6 +554,9 @@ def resolve(args: argparse.Namespace) -> dict:
         "streetlights": ("led_4000k" if dark else "none") if args.streetlights == "auto" else args.streetlights,
         "retroreflective": dark if args.retroreflective == "auto" else args.retroreflective == "on",
         "tail_lamps": getattr(args, "tail_lamps", "detailed"),
+        "rear_fog": {"on": True, "none": False}.get(
+            getattr(args, "rear_fog_lamps", "auto"), getattr(args, "haze", "none") == "fog"
+        ),
     }
 
 
@@ -774,7 +783,9 @@ def vehicle_light_lines(
             meta["headlamps"].append({"car": c["id"], "kind": kind, "lens_luminance_cd_m2": lens_l})
         braking = opts["brake"] == "all" or c["id"] == lead
         if opts.get("tail_lamps", "detailed") == "detailed":
-            tl_lines, tl_meta = taillamps.rear_lamp_lines(c, braking, opts.get("asset_root"))
+            tl_lines, tl_meta = taillamps.rear_lamp_lines(
+                c, braking, opts.get("asset_root"), rear_fog=opts.get("rear_fog", False)
+            )
             lines += [*tl_lines, "AttributeEnd"]
             meta["tail_lamps"].append(tl_meta)
             continue
