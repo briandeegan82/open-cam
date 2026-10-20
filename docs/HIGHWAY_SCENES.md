@@ -1024,5 +1024,17 @@ near zebra crossing by default).
   Fetch the assets with `tools/fetch_highway_assets.py` (ids `prop_*`, `cone_*`, `drum_*`,
   `signal_*`). Limitations: the props use their sRGB base-colour textures, not measured spectra.
   Cone and drum bands are diffuse, not retroreflective, so they don't light up in headlamps at night.
+* **Parked two-wheelers (opt-in):** `--two-wheelers parked` adds 21 Objaverse CC-BY models
+  (`tools/two_wheelers.py`): groups of 2-4 bicycles across the pavement next to the kerb, the odd
+  kick e-scooter parked along the kerb, and 2-3 motorbikes, mopeds or scooters in each empty parking
+  bay, angled 30 deg towards the traffic. Bicycle groups keep 1.2 m clear of street-light columns,
+  signal poles and street furniture. Each model is scaled to a nominal overall length for its type
+  (bicycles 1.6-1.85 m, motorbikes 2.0-2.3 m, scooters 1.6-1.8 m, kick e-scooter 1.08 m; not
+  checked against data sheets) and turned so its front faces the given heading. Placements use
+  their own RNG, so the rest of the seeded scene is unchanged, and `manifest["two_wheelers"]["items"]`
+  lists each model's asset, kind, position, heading and world box. Fetch the assets with
+  `tools/fetch_highway_assets.py` (ids `bike_*`, `moto_*`, `moped_*`, `scooter_*`,
+  `kickscooter_electric`). Limitations: sRGB base-colour textures, not measured spectra; no lamps,
+  and reflectors are diffuse, not retroreflective; no bike stands; nobody rides them.
   The Poly Haven hydrant and bin files contain two variants side by side, which are split into
   separate objects.
