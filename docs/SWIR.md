@@ -112,6 +112,11 @@ With SWIR enabled (`--spectral-lambda-max` > 830 nm), `tools/highway_swir.py` al
   in the G173 depth too and scale with the water vapour. Beer scaling of a 10 nm band average from
   the long solar path is a lower bound for short paths in saturated band centres. Without `--haze`
   there is no medium, so no path absorption.
+  The G173 sun and sky are ground-level spectra that already include these bands, so the builder
+  divides `sun.spd` and the sky basis SPDs by the haze layer's gas transmittance (layer column x air
+  mass; 1.66 for the sky) and only the scene paths keep the extra absorption (manifest
+  `atmosphere.swir_gas_compensation`). The sky seen directly near the horizon still crosses km of
+  layer and goes dark in the strong bands, as the real sky does.
 * **VRU skin** (`--vru`): above 830 nm the ColorChecker skin takes the shape of the
   `tools/nir_skin.py` two-layer tissue model, whose water absorption now continues past Hale &
   Querry's 1100 nm end with Segelstein (1981). It gives the 1.2 and 1.45 um water dips (about

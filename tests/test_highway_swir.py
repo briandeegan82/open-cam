@@ -121,6 +121,28 @@ class TestBuilder(unittest.TestCase):
             self.assertGreater(np.interp(1380.0, w, sa), 20 * np.interp(1250.0, w, sa))
             self.assertEqual(m["swir"]["path_gas_absorption"]["h2o_gm3"], swir.H2O_DEFAULT_GM3)
 
+    def test_gas_compensation_on_sun(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            m, _, d = build_offline(
+                Path(td),
+                "--sky",
+                "analytic",
+                "--spectral-lambda-max",
+                "1600",
+                "--film-lambda-min",
+                "900",
+                "--spectral-nbuckets",
+                "36",
+                "--haze",
+                "hazy",
+            )
+            comp = m["atmosphere"]["swir_gas_compensation"]
+            w, sun = read_spd(d / "spd" / "sun.spd")
+            sun0 = swir.sun_spectrum(w, hw.solar_direct_spectrum(w, m["lighting"]["sun"]["elevation_deg"]))
+            np.testing.assert_allclose(sun[w <= 830.0], sun0[w <= 830.0], rtol=1e-4)
+            k = np.exp(swir.gas_sigma_a(1380.0, swir.H2O_DEFAULT_GM3) * comp["layer_column_m"] * comp["sun_airmass"])
+            self.assertAlmostEqual(np.interp(1380.0, w, sun) / np.interp(1380.0, w, sun0), k, delta=0.02 * k)
+
     def test_gas_sigma_a(self) -> None:
         wl = np.array([550.0, 820.0, 1250.0, 1380.0, 1870.0])
         sa = swir.gas_sigma_a(wl, 10.0)
