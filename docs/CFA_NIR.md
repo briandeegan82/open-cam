@@ -151,10 +151,17 @@ cd scenes/cabin_dms && ../../third_party/pbrt-v4/build-nir/pbrt cabin.pbrt
   used. Result: R(940) ≈ 0.66 (light), ≈ 0.24 (dark), with the water dip at 970 nm.
 - **Eyes:** sclera sphere, iris and pupil discs (`--pupil-mm`, default 6 mm at night) and a
   dielectric cornea cap (η = 1.376, radius 7.8 mm). `--gaze-yaw-deg/--gaze-pitch-deg` rotate the
-  eyes; `--glasses` adds flat η = 1.5 spectacle lenses. Behind the lenses the eyes render dark
-  and noisy: shadow rays cannot pass a specular dielectric, so the eye region is lit only by
-  BSDF-sampled paths that happen to hit the small LED. Real lenses transmit ~92 %; treat
-  `--glasses` renders as showing the lens reflections, not the eye behind them. The manifest lists eye, cornea and pupil
+  eyes; `--glasses` adds flat η = 1.5 spectacle lenses 20 mm in front of the eyes. By default
+  (`--glasses-model thin`) each lens is one `thindielectric` surface with `"bool passthrough"
+  true` (pbrt patch 0017, volpath integrator only). Shadow rays pass it with the two-face
+  transmittance 1 − R_slab(θ) (0.923 at normal incidence, incoherent multiple reflections). A
+  path that hits it is reflected with probability R_slab, and otherwise continues as through a
+  null interface, so the light-sampling and BSDF-sampling estimates stay consistent. The eye
+  behind the lens is then lit by the LED through the lens, as in a real car. Not modelled:
+  lens power (prescription), AR coatings and NIR-absorbing tints, and the lateral offset of a
+  2 mm slab. `--glasses-model slab` keeps the old 2 mm `dielectric` box. Shadow rays can't pass
+  that, so the eyes are lit only by BSDF paths that happen to hit the small LED, and render
+  dark and noisy. The manifest lists eye, cornea and pupil
   centres (world space) as gaze ground truth.
 - **Corneal glint:** the virtual image of a 2.5 mm LED in the cornea is ~0.015 mm, far below a
   pixel (~0.7 mm on the face), so a smooth cornea is almost never hit by a camera sample (a few
