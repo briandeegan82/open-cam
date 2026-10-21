@@ -142,6 +142,31 @@ class TestImportedRider(unittest.TestCase):
         self.assertIn("vru:hair", names)
 
 
+class TestBicycleReflectors(unittest.TestCase):
+    def test_reflectors_only_when_asked(self) -> None:
+        names = {f"vru:reflex_{k}" for k in vru.REFLECTORS}
+        self.assertFalse(names & set(vru.cyclist(1.8, 0.0).parts))
+        parts = vru.cyclist(1.8, 0.0, reflectors=True).parts
+        self.assertTrue(names <= set(parts))
+        self.assertEqual(len(parts["vru:reflex_pedal"]), 2)
+        self.assertEqual(len(parts["vru:reflex_spoke"]), 2)
+        for k in names:
+            for _, _, n in parts[k]:
+                self.assertTrue(np.allclose(np.linalg.norm(n, axis=1), 1.0))
+
+    def test_reflector_materials(self) -> None:
+        import highway_night as night
+
+        with tempfile.TemporaryDirectory() as td:
+            spd = Path(td) / "spd"
+            spd.mkdir()
+            lines = vru.reflector_material_lines(spd, Path(td), night.LIGHT_WL)
+            self.assertTrue((spd / "vru_reflex_red.spd").exists())
+        made = [ln.split('"')[1] for ln in lines if ln.startswith("MakeNamedMaterial")]
+        self.assertEqual(made, [f"vru:reflex_{k}" for k in vru.REFLECTORS])
+        self.assertTrue(all('"retroreflective"' in ln for ln in lines if ln.startswith("MakeNamedMaterial")))
+
+
 if __name__ == "__main__":
     unittest.main()
 

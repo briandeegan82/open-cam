@@ -176,6 +176,25 @@ class Parts:
     def add(self, mat: str, p: np.ndarray, t: np.ndarray, n: np.ndarray) -> None:
         self.parts.setdefault(mat, []).append((p, t, n))
 
+    def plate(self, mat: str, c, u, v, w) -> None:
+        """Box centred on ``c`` with half-extent vectors ``u``, ``v``, ``w`` (mutually orthogonal)."""
+        c, axes = np.asarray(c, float), [np.asarray(a, float) for a in (u, v, w)]
+        pts, nrm, tri = [], [], []
+        for k in range(3):
+            a, b, n = axes[k], axes[(k + 1) % 3], axes[(k + 2) % 3]
+            for sgn in (-1.0, 1.0):
+                f = c + sgn * n
+                q = (
+                    [f - a - b, f + a - b, f + a + b, f - a + b]
+                    if sgn > 0
+                    else [f - a - b, f - a + b, f + a + b, f + a - b]
+                )
+                i = len(pts)
+                pts += q
+                nrm += [sgn * n / np.linalg.norm(n)] * 4
+                tri += [(i, i + 1, i + 2), (i, i + 2, i + 3)]
+        self.add(mat, np.array(pts), np.array(tri), np.array(nrm))
+
     def ellipsoid(self, mat: str, c, r, n_u: int = 18, n_v: int = 10) -> None:
         u = np.linspace(0.0, 2 * np.pi, n_u, endpoint=False)
         v = np.linspace(0.0, np.pi, n_v + 1)
@@ -320,11 +339,63 @@ def pedestrian(height: float, phase: float, child: bool = False) -> Parts:
     return parts.stand(height)
 
 
-def cyclist(height: float, phase: float, wheels: list | None = None) -> Parts:
+# 16 CFR 1512.16 bicycle reflectors: name -> (colour, REFLEX_CIL_MCD table, face width, face height) [m].
+REFLECTORS = {
+    "rear": ("red", "cpsc1512", 0.06, 0.04),
+    "front": ("white", "cpsc1512", 0.06, 0.04),
+    "pedal": ("amber", "cpsc1512_pedal", 0.05, 0.015),
+    "spoke": ("amber", "cpsc1512", 0.07, 0.025),
+}
+
+
+def reflector_material_lines(spd_dir: Path, out_dir: Path, wl: np.ndarray) -> list[str]:
+    """Retroreflective ``vru:reflex_<name>`` materials for the procedural bicycle's REFLECTORS."""
+    import highway_night as night
+    import highway_taillamps as taillamps
+
+    lens = taillamps.lens_reflectances(wl)
+    out = []
+    for name, (colour, table, w, h) in REFLECTORS.items():
+        r = lens["clear" if colour == "white" else colour]
+        night._write_spd(spd_dir / f"vru_reflex_{colour}.spd", wl, r)
+        cil = night.REFLEX_CIL_MCD[table][colour]
+        p = night.REFLEX_PEDAL if name == "pedal" else night.REFLEX_BICYCLE
+        out += night.reflex_material_lines(
+            f"vru:reflex_{name}", f"vru_reflex_{colour}", cil, w * h, spd_dir, out_dir, wl, p, spectrum=r
+        )
+    return out
+
+
+def _bicycle_reflectors(parts: Parts, rear, front, rw: float, seat, bar, pedals, wheels=None) -> None:
+    """Rear (red), front (white), pedal and spoke (amber) reflectors; faces sized as REFLECTORS.
+
+    With ``cyclist``'s ``wheels`` list the spoke reflectors go on the wheel parts (about their axles), so they roll."""
+
+    def half(name: str) -> tuple[float, float]:
+        return REFLECTORS[name][2] / 2, REFLECTORS[name][3] / 2
+
+    w, h = half("rear")
+    parts.plate("vru:reflex_rear", seat + [0.0, -0.17, -0.07], (w, 0, 0), (0, h, 0), (0, 0, 0.006))
+    w, h = half("front")
+    parts.plate("vru:reflex_front", bar + [0.0, -0.06, 0.03], (w, 0, 0), (0, h, 0), (0, 0, 0.006))
+    w, h = half("pedal")
+    for side, p in zip((-1.0, 1.0), pedals):
+        parts.plate("vru:reflex_pedal", p + [side * 0.03, -0.02, 0.0], (w, 0, 0), (0, h, 0), (0, 0, 0.045))
+    w, h = half("spoke")
+    hubs = [(w_parts, np.zeros(3)) for _, w_parts in wheels] if wheels else [(parts, rear), (parts, front)]
+    for p_, c in hubs:
+        d = np.array([0.0, math.cos(math.pi / 6), math.sin(math.pi / 6)])
+        e = np.array([0.0, -d[2], d[1]])
+        p_.plate("vru:reflex_spoke", c + d * (rw - 0.12), d * w, e * h, (0.006, 0, 0))
+
+
+def cyclist(height: float, phase: float, wheels: list | None = None, reflectors: bool = False) -> Parts:
     """Bicycle (axles along x, travelling +z) with a seated rider; total height ~``height``.
 
     With a ``wheels`` list the wheels are built about their own axle centres and appended to it as
-    ``(centre, Parts)`` (for rolling them), instead of being part of the returned mesh."""
+    ``(centre, Parts)`` (for rolling them), instead of being part of the returned mesh.
+    ``reflectors``: add the 16 CFR 1512 reflector set (materials from reflector_material_lines).
+    """
     s = height / 1.80
     parts = Parts()
     rw = WHEEL_D / 2
@@ -364,6 +435,8 @@ def cyclist(height: float, phase: float, wheels: list | None = None) -> Parts:
     ]
     grips = [bar + [side * 0.22, 0.0, 0.0] for side in (-1.0, 1.0)]
     _seated_rider(parts, s, hip, pedals, grips, 40.0)
+    if reflectors:
+        _bicycle_reflectors(parts, rear, front, rw, seat, bar, pedals, wheels)
     return parts
 
 
@@ -449,11 +522,19 @@ def clear_traffic(args, traffic: list[tuple]) -> tuple[list[tuple], list[dict]]:
 
 
 def scene_lines(
-    args, road_edge_x: float, place, car_body, asset=None, out_dir=None, span: float | None = None
+    args,
+    road_edge_x: float,
+    place,
+    car_body,
+    asset=None,
+    out_dir=None,
+    reflex_lines: list[str] | None = None,
+    span: float | None = None,
 ) -> tuple[list[str], dict]:
     """pbrt lines for the target (+ obstruction cars) and manifest metadata.
 
     ``car_body(inst, model, paint) -> (include_rel, yaw_model_deg)`` builds a parked car include.
+    ``reflex_lines``: reflector_material_lines() output (night); the procedural bicycle then carries reflectors.
     ``span``: shutter-open to last-row-close time [s] of an animated scene (None: static).
     """
     kind = args.vru
@@ -474,7 +555,7 @@ def scene_lines(
     if bike is not None:
         parts = imported_rider(args.vru_bike, args.vru_gait_phase)
     elif kind in RIDERS:
-        parts = cyclist(height, args.vru_gait_phase, wheels)
+        parts = cyclist(height, args.vru_gait_phase, wheels, reflectors=reflex_lines is not None)
     else:
         parts = pedestrian(height, args.vru_gait_phase, child=kind == "child")
     x, z = road_edge_x + args.vru_offset_m, args.vru_distance_m
@@ -500,6 +581,7 @@ def scene_lines(
     L = [
         "# ---- vulnerable road user (tools/highway_vru.py)",
         *material_lines(),
+        *(reflex_lines if reflex_lines is not None and bike is None and kind in RIDERS else []),
         *defs,
         "AttributeBegin",
         *place(x, 0.0, z),
@@ -557,6 +639,15 @@ def scene_lines(
         if v == 0
         else "rigid translation over the exposure span (bbox_world_m at shutter open); procedural bicycle "
         "wheels roll; limbs, cranks and imported-model wheels keep their pose",
+        **(
+            {
+                "reflectors": {
+                    k: {"colour": c, "cil_table": t, "face_m": [w, h]} for k, (c, t, w, h) in REFLECTORS.items()
+                }
+            }
+            if reflex_lines is not None and bike is None and kind in RIDERS
+            else {}
+        ),
         "geometry": "procedural, nominal Euro NCAP/ISO 19206 target sizes (not checked against the standard)",
     }
     if bike_meta is not None:

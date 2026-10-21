@@ -433,8 +433,11 @@ def signal_lines(args, out_dir: Path, heads: list[dict], window, head_obj=None) 
     return L + [""], emitters
 
 
-def furniture_lines(args, asset, out_dir: Path, zone) -> tuple[list[str], list[dict]]:
-    """Opt-in pavement props and a work-zone lane closure; own RNG so the default scene is unchanged."""
+def furniture_lines(args, asset, out_dir: Path, zone, retro: bool = False) -> tuple[list[str], list[dict]]:
+    """Opt-in pavement props and a work-zone lane closure; own RNG so the default scene is unchanged.
+
+    ``retro``: the white bands of cones and drums use the retroreflective ``sheet_white`` (night).
+    """
     rng = np.random.default_rng([args.seed, 7])
     L, meta, defined = ["# ---- street furniture"], [], {}
 
@@ -447,7 +450,8 @@ def furniture_lines(args, asset, out_dir: Path, zone) -> tuple[list[str], list[d
                 prep = raw.parent.parent / "prepared" / aid
                 defined[aid] = sf.variants(aid, info, prep)
                 for v in defined[aid]:
-                    L.extend(sf.object_lines(v["name"], info, prep, raw, out_dir, v["shapes"]))
+                    band = retro and sf.PROPS[aid][0] in ("cone", "drum")
+                    L.extend(sf.object_lines(v["name"], info, prep, raw, out_dir, v["shapes"], band))
         if not defined[aid]:
             return
         v = defined[aid][vk % len(defined[aid])]
@@ -789,7 +793,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
     zone = (8.0, 20.0) if args.work_zone != "none" else None
     furniture_meta: list[dict] = []
     if args.street_furniture != "none" or zone:
-        fl, furniture_meta = furniture_lines(args, asset, out_dir, zone)
+        fl, furniture_meta = furniture_lines(args, asset, out_dir, zone, nopts["retroreflective"])
         L += fl
 
     # ---- cars: parked along both kerbs, one waiting on the cross street, one oncoming

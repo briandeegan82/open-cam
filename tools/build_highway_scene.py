@@ -1079,8 +1079,9 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
             return os.path.relpath(inc, out_dir), yaw_model
 
         vru_spectra = vru.write_spectra(args, spd, wl, write_spd, reflectance)
+        reflex = vru.reflector_material_lines(spd, out_dir, wl) if nopts["retroreflective"] else None
         vru_lines, vru_meta = vru.scene_lines(
-            args, Layout.right_edge, variety.place, parked_car, asset, out_dir, span=fx.span
+            args, Layout.right_edge, variety.place, parked_car, asset, out_dir, reflex, span=fx.span
         )
         vru_meta["spectra"] = vru_spectra
         vru_meta["removed_traffic"] = vru_cleared
