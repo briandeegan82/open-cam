@@ -1,0 +1,110 @@
+diff --git a/src/pbrt/media.cpp b/src/pbrt/media.cpp
+index ddae6aa..3fdc396 100644
+--- a/src/pbrt/media.cpp
++++ b/src/pbrt/media.cpp
+@@ -95,6 +95,36 @@ void GridMedium::SetHorizontalModulation(const std::vector<Float> &v, int nx, in
+     modZ1 = p1.y;
+ }
+ 
++void GridMedium::SetRayleighComponent(const std::vector<Float> &dr, Spectrum sigma_r, int nx,
++                                      int ny, int nz, Allocator alloc) {
++    if (dr.empty())
++        return;
++    if (int(dr.size()) != nx * ny * nz)
++        ErrorExit("\"rayleighdensity\" needs nx*ny*nz = %d values, got %d.", nx * ny * nz,
++                  dr.size());
++    if (!sigma_r)
++        ErrorExit("\"rayleighdensity\" needs \"spectrum sigma_rayleigh\".");
++    for (Float v : dr)
++        if (!(v >= 0))
++            ErrorExit("\"rayleighdensity\" values must be >= 0.");
++    rayleighGrid = alloc.new_object<SampledGrid<Float>>(dr, nx, ny, nz, alloc);
++    sigma_r_spec = alloc.new_object<DenselySampledSpectrum>(sigma_r, alloc);
++    sigR550 = (*sigma_r_spec)(550.f);
++    sigS550 = sigma_s_spec(550.f);
++    rayleighPhases = alloc.allocate_object<HGPhaseFunction>(NRayleighPhases);
++    for (int i = 0; i < NRayleighPhases; ++i) {
++        new (&rayleighPhases[i]) HGPhaseFunction(phase);
++        rayleighPhases[i].SetRayleighFraction(Float(i) / (NRayleighPhases - 1));
++    }
++    for (int z = 0; z < majorantGrid.res.z; ++z)
++        for (int y = 0; y < majorantGrid.res.y; ++y)
++            for (int x = 0; x < majorantGrid.res.x; ++x) {
++                Bounds3f vb = majorantGrid.VoxelBounds(x, y, z);
++                majorantGrid.Set(x, y, z,
++                                 std::max(majorantGrid.Lookup(x, y, z), rayleighGrid->MaxValue(vb)));
++            }
++}
++
+ void HGPhaseFunction::SetTable(const std::vector<Float> &th, const std::vector<Float> &v,
+                                Allocator alloc) {
+     if (th.empty() && v.empty())
+@@ -402,6 +432,11 @@ GridMedium *GridMedium::Create(const ParameterDictionary &parameters,
+                                     parameters.GetOneInt("modnz", 0),
+                                     parameters.GetOnePoint2f("modp0", Point2f(0, 0)),
+                                     parameters.GetOnePoint2f("modp1", Point2f(1, 1)), alloc);
++    // After the phase setup: the per-point phase copies take g, the table and the lobe from it.
++    medium->SetRayleighComponent(
++        parameters.GetFloatArray("rayleighdensity"),
++        parameters.GetOneSpectrum("sigma_rayleigh", nullptr, SpectrumType::Unbounded, alloc), nx, ny,
++        nz, alloc);
+     return medium;
+ }
+ 
+diff --git a/src/pbrt/media.h b/src/pbrt/media.h
+index 6718aa2..c06f1e3 100644
+--- a/src/pbrt/media.h
++++ b/src/pbrt/media.h
+@@ -357,6 +357,17 @@ class GridMedium {
+         sigma_a *= d;
+         sigma_s *= d;
+ 
++        // open-cam: optional molecular component with its own density grid; the phase
++        // function's Rayleigh share follows the local sigma_s ratio at 550 nm.
++        const HGPhaseFunction *ph = &phase;
++        if (rayleighGrid) {
++            Float dr = rayleighGrid->Lookup(p);
++            sigma_s += dr * sigma_r_spec->Sample(lambda);
++            Float a = sigR550 * dr, b = sigS550 * d;
++            if (a + b > 0)
++                ph = &rayleighPhases[int(a / (a + b) * (NRayleighPhases - 1) + 0.5f)];
++        }
++
+         // Compute grid emission _Le_ at _p_
+         SampledSpectrum Le(0.f);
+         if (isEmissive) {
+@@ -376,7 +387,7 @@ class GridMedium {
+             }
+         }
+ 
+-        return MediumProperties{sigma_a, sigma_s, &phase, Le};
++        return MediumProperties{sigma_a, sigma_s, ph, Le};
+     }
+ 
+     PBRT_CPU_GPU
+@@ -394,6 +405,8 @@ class GridMedium {
+         SampledSpectrum sigma_s = sigma_s_spec.Sample(lambda);
+ 
+         SampledSpectrum sigma_t = sigma_a + sigma_s;
++        if (rayleighGrid)  // majorant grid holds max(density, rayleighdensity) per voxel
++            sigma_t += sigma_r_spec->Sample(lambda);
+         return DDAMajorantIterator(ray, tMin, tMax, &majorantGrid, sigma_t);
+     }
+ 
+@@ -430,6 +443,16 @@ class GridMedium {
+     void SetHorizontalModulation(const std::vector<Float> &v, int nx, int nz, Point2f p0,
+                                  Point2f p1, Allocator alloc);
+ 
++    // open-cam: "float rayleighdensity" (nx*ny*nz) + "spectrum sigma_rayleigh": a second,
++    // non-absorbing scattering component (Rayleigh phase) with its own density grid.
++    void SetRayleighComponent(const std::vector<Float> &dr, Spectrum sigma_r, int nx, int ny,
++                              int nz, Allocator alloc);
++    static constexpr int NRayleighPhases = 257;
++    const SampledGrid<Float> *rayleighGrid = nullptr;
++    const DenselySampledSpectrum *sigma_r_spec = nullptr;
++    Float sigR550 = 0, sigS550 = 0;
++    HGPhaseFunction *rayleighPhases = nullptr;
++
+     PBRT_CPU_GPU
+     Float Modulation(Point3f p) const {
+         if (!modVals)

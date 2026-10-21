@@ -26,6 +26,13 @@ The medium is parameterised the way visibility is reported in meteorology:
   patch 0011, ``"float rayleighfraction"``). This matters in clear air, where the effective g
   under-weights side and back scatter; in fog w_R ~ 0 and the two agree. pbrt's phase function
   is wavelength-independent, so w_R is taken at 550 nm (the real fraction rises toward blue).
+  ``--haze-phase two-component`` (opt-in) gives the molecules their own density grid with the
+  air's scale height (8.43 km, US Standard Atmosphere 1976 at 288 K) next to the aerosol profile,
+  so the Rayleigh share of the phase function grows with height (pbrt patch 0019,
+  ``"float rayleighdensity"`` + ``"spectrum sigma_rayleigh"``). The ground-level sun spectrum
+  already includes the whole molecular column, so the sun SPD is divided by the layer's
+  molecular transmittance (:func:`rayleigh_sun_compensation`) and the sky dome is scaled so that a
+  molecules-only layer gives the no-medium road illuminance (its colour is not changed).
 * Single-scattering albedo omega of the aerosol (0.9-0.95 continental haze, ~1 for water
   droplets; Hess, Koepke & Schult 1998, OPAC).
 
@@ -65,6 +72,8 @@ GRID_HALF_WIDTH_M = 200_000.0
 GRID_NXZ = 4
 GRID_NY = 256
 ROAD_REF_HEIGHT_M = 1.35  # visibility V is defined at camera height
+RAYLEIGH_SCALE_HEIGHT_M = 8434.0  # R T / (M g) at 288.15 K (US Standard Atmosphere 1976)
+PHASE_MODES = ("effective", "mixed", "two-component")
 
 
 @dataclass(frozen=True)
@@ -77,7 +86,7 @@ class HazeParams:
     profile: str  # "exponential" (scale height) or "layer" (uniform up to height, cosine taper)
     height_m: float
     description: str = ""
-    phase: str = "effective"  # "effective" (one HG lobe) or "mixed" (Rayleigh + HG)
+    phase: str = "effective"  # "effective" (one HG lobe), "mixed" (Rayleigh + HG), "two-component"
     visibility_definition: str = "mor"  # "mor" (WMO, 5 %) or "koschmieder" (2 % visual range)
     droplets: str = "none"  # "none" (Angstrom + HG) or a fog_mie.DROPLETS size distribution (Mie)
     bank: tuple[float, float] | None = None  # fog bank [z0, z1] m along the road (camera z = 0)
@@ -113,9 +122,11 @@ def add_cli_args(ap: argparse.ArgumentParser) -> None:
     g.add_argument("--haze-g", type=float, default=None, help="Henyey-Greenstein asymmetry g.")
     g.add_argument(
         "--haze-phase",
-        choices=("effective", "mixed"),
+        choices=PHASE_MODES,
         default=None,
-        help="effective: one HG lobe with the scattering-weighted g (default); mixed: Rayleigh + HG mixture.",
+        help="effective: one HG lobe with the scattering-weighted g (default); mixed: Rayleigh + HG "
+        "mixture sharing the aerosol profile; two-component: aerosol HG + molecules with their own "
+        "8.4 km density profile (sun and sky compensated for the layer's molecules).",
     )
     g.add_argument(
         "--fog-bank",
@@ -269,6 +280,17 @@ def extinction_550(p: HazeParams) -> float:
 
 def coefficients(p: HazeParams, wl_nm) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """(sigma_a, sigma_s, sigma_ext) [1/m] at ground level (density 1)."""
+    sa, ss_aer, ray = components(p, wl_nm)
+    return sa, ss_aer + ray, sa + ss_aer + ray
+
+
+def two_component(p: HazeParams) -> bool:
+    """Molecules in their own density grid (droplet fog keeps one Mie component)."""
+    return p.phase == "two-component" and p.droplets == "none"
+
+
+def components(p: HazeParams, wl_nm) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """(aerosol sigma_a, aerosol sigma_s, Rayleigh sigma_s) [1/m] at ground level."""
     wl = np.asarray(wl_nm, dtype=np.float64)
     sig550 = extinction_550(p)
     aer550 = max(sig550 - RAYLEIGH_550_PER_M, 0.0)
@@ -279,9 +301,7 @@ def coefficients(p: HazeParams, wl_nm) -> tuple[np.ndarray, np.ndarray, np.ndarr
     else:
         aer = aer550 * (wl / 550.0) ** (-p.angstrom)
         albedo = p.albedo
-    sa = (1.0 - albedo) * aer
-    ss = albedo * aer + ray
-    return sa, ss, sa + ss
+    return (1.0 - albedo) * aer, albedo * aer, ray
 
 
 def effective_g(p: HazeParams) -> float:
@@ -307,8 +327,10 @@ def phase_params(p: HazeParams) -> tuple[float, float]:
         return fog_mie.asymmetry(*fog_mie.phase_table(p.droplets)), 0.0
     if p.phase == "mixed":
         return p.g, rayleigh_fraction(p)
+    if p.phase == "two-component":
+        return p.g, 0.0  # the Rayleigh share is set per point by pbrt from the two density grids
     if p.phase != "effective":
-        raise ValueError(f"haze phase must be effective|mixed, got {p.phase!r}")
+        raise ValueError(f"haze phase must be {'|'.join(PHASE_MODES)}, got {p.phase!r}")
     return effective_g(p), 0.0
 
 
@@ -344,22 +366,45 @@ def grid_profile(p: HazeParams) -> tuple[np.ndarray, np.ndarray]:
     return yc, rho / np.interp(ROAD_REF_HEIGHT_M, yc, rho)
 
 
+def grid_profile_rayleigh(p: HazeParams) -> tuple[np.ndarray, np.ndarray]:
+    """(y centres, molecular density samples) on the same grid: exp(-y / 8.43 km), 1 at the road."""
+    _, _, yc = grid_y(p)
+    rho = np.exp(-np.clip(yc, 0.0, None) / RAYLEIGH_SCALE_HEIGHT_M)
+    rho[-1] = 0.0
+    return yc, rho / np.interp(ROAD_REF_HEIGHT_M, yc, rho)
+
+
 def profile_density(p: HazeParams, y) -> np.ndarray:
     """Density pbrt evaluates at height y (piecewise-linear interpolation of the grid samples)."""
     yc, rho = grid_profile(p)
     return np.interp(np.asarray(y, dtype=np.float64), yc, rho, left=rho[0], right=0.0)
 
 
-def column_density_m(p: HazeParams) -> float:
-    """Integral of the relative density from the ground to the top [m]."""
-    yc, rho = grid_profile(p)
+def profile_density_rayleigh(p: HazeParams, y) -> np.ndarray:
+    yc, rho = grid_profile_rayleigh(p)
+    return np.interp(np.asarray(y, dtype=np.float64), yc, rho, left=rho[0], right=0.0)
+
+
+def _column(p: HazeParams, dens) -> float:
+    yc, _ = grid_profile(p)
     y = np.linspace(0.0, yc[-1], 20001)
-    d = profile_density(p, y)
+    d = dens(p, y)
     return float(np.sum(0.5 * (d[1:] + d[:-1]) * np.diff(y)))
 
 
+def column_density_m(p: HazeParams) -> float:
+    """Integral of the relative (aerosol) density from the ground to the top [m]."""
+    return _column(p, profile_density)
+
+
+def column_density_rayleigh_m(p: HazeParams) -> float:
+    """Molecular column inside the layer [m] (two-component; else the aerosol column)."""
+    return _column(p, profile_density_rayleigh) if two_component(p) else column_density_m(p)
+
+
 def optical_depth_vertical(p: HazeParams, wl_nm: float = 550.0) -> float:
-    return float(coefficients(p, wl_nm)[2]) * column_density_m(p)
+    sa, ss, ray = (float(v) for v in components(p, wl_nm))
+    return (sa + ss) * column_density_m(p) + ray * column_density_rayleigh_m(p)
 
 
 # ---- pbrt output
@@ -381,16 +426,37 @@ def _phase_table_lines(p: HazeParams) -> list[str]:
     ]
 
 
-def pbrt_medium_lines(p: HazeParams, sigma_a_spd: str, sigma_s_spd: str) -> list[str]:
-    """After ``Camera`` and before ``WorldBegin`` (pbrt resolves the camera medium at WorldBegin)."""
+def _grid_values(rho: np.ndarray) -> np.ndarray:
+    return np.tile(np.repeat(rho, GRID_NXZ)[None, :], (GRID_NXZ, 1)).ravel()  # index (z*ny + y)*nx + x
+
+
+def pbrt_medium_lines(
+    p: HazeParams, sigma_a_spd: str, sigma_s_spd: str, sigma_r_spd: str = "spd/haze_sigma_rayleigh.spd"
+) -> list[str]:
+    """After ``Camera`` and before ``WorldBegin`` (pbrt resolves the camera medium at WorldBegin).
+
+    Two-component media: ``sigma_s_spd`` is the aerosol part only and ``sigma_r_spd`` the molecules.
+    """
     y0, y1, _ = grid_y(p)
     _, rho = grid_profile(p)
-    vals = np.tile(np.repeat(rho, GRID_NXZ)[None, :], (GRID_NXZ, 1)).ravel()  # index (z*ny + y)*nx + x
+    vals = _grid_values(rho)
     w = GRID_HALF_WIDTH_M
+    molecular = []
+    if two_component(p):
+        molecular = [
+            f'    "spectrum sigma_rayleigh" "{sigma_r_spd}"',
+            '    "float rayleighdensity" [ '
+            + " ".join(f"{v:.6g}" for v in _grid_values(grid_profile_rayleigh(p)[1]))
+            + " ]",
+        ]
     return [
         f"# Atmosphere: {p.name} (V = {p.visibility_m:g} m {p.visibility_definition}, alpha = {p.angstrom:g}, g = {phase_params(p)[0]:.3f},"
-        f" Rayleigh fraction = {phase_params(p)[1]:.3f},"
-        f" omega = {p.albedo:g}, {p.profile} {p.height_m:g} m)",
+        + (
+            f" molecules in their own {RAYLEIGH_SCALE_HEIGHT_M:g} m profile,"
+            if two_component(p)
+            else f" Rayleigh fraction = {phase_params(p)[1]:.3f},"
+        )
+        + f" omega = {p.albedo:g}, {p.profile} {p.height_m:g} m)",
         "Identity",  # medium in world space (the CTM still holds the LookAt here)
         'MakeNamedMedium "haze" "string type" "uniformgrid"',
         f'    "spectrum sigma_a" "{sigma_a_spd}" "spectrum sigma_s" "{sigma_s_spd}" "float scale" [1]',
@@ -405,6 +471,7 @@ def pbrt_medium_lines(p: HazeParams, sigma_a_spd: str, sigma_s_spd: str) -> list
         f'    "integer nx" [{GRID_NXZ}] "integer ny" [{GRID_NY}] "integer nz" [{GRID_NXZ}]',
         f'    "point3 p0" [{-w:.6g} {y0:.6g} {-w:.6g}] "point3 p1" [{w:.6g} {y1:.6g} {w:.6g}]',
         '    "float density" [ ' + " ".join(f"{v:.6g}" for v in vals) + " ]",
+        *molecular,
     ]
 
 
@@ -456,13 +523,19 @@ def slab_flux_mc(
     HG scattering with single-scattering albedo, Lambertian ground reflection with absorption
     weight; photons leaving through the top are lost. Every downward ground crossing counts.
     """
-    sa, ss, se = (float(v) for v in coefficients(p, wl_nm))
-    omega = ss / se
+    tc = two_component(p)
+    if tc:
+        sa, ss, sr = (float(v) for v in components(p, wl_nm))
+        se = sa + ss  # aerosol extinction; the molecules are a second, non-absorbing component
+        _, rho_r = grid_profile_rayleigh(p)
+    else:
+        sa, ss, se = (float(v) for v in coefficients(p, wl_nm))
+    omega = ss / se if se > 0 else 1.0
     g, w_r = phase_params(p)
     table = fog_mie.phase_table(p.droplets) if p.droplets != "none" else None
     yc, rho = grid_profile(p)
     top = float(yc[-1])
-    sig_maj = se * float(rho.max())
+    sig_maj = se * float(rho.max()) + (sr * float(rho_r.max()) if tc else 0.0)
     n = mu0.size
     y = np.full(n, top)
     mu = -np.asarray(mu0, dtype=np.float64)
@@ -480,13 +553,20 @@ def slab_flux_mc(
             total += float(w[hit].sum())
             direct += float(w[hit & ~scattered].sum())
         coll = ~hit & ~out
-        real = coll & (rng.random(y.size) * float(rho.max()) < profile_density(p, y_new))
+        if tc:
+            u = rng.random(y.size) * sig_maj
+            k_aer = se * profile_density(p, y_new)
+            real = coll & (u < k_aer + sr * profile_density_rayleigh(p, y_new))
+            ray_ev = real & (u >= k_aer)
+        else:
+            real = coll & (rng.random(y.size) * float(rho.max()) < profile_density(p, y_new))
+            ray_ev = np.zeros(y.size, dtype=bool)
         y = np.where(hit, 0.0, np.where(coll, y_new, y))
-        w = np.where(hit, w * ground_albedo, np.where(real, w * omega, w))
+        w = np.where(hit, w * ground_albedo, np.where(real & ~ray_ev, w * omega, w))
         mu = np.where(hit, np.sqrt(rng.random(y.size)), mu)
         if real.any():
             idx = np.flatnonzero(real)
-            ray = rng.random(idx.size) < w_r
+            ray = ray_ev[idx] if tc else rng.random(idx.size) < w_r
             if table is not None:
                 k = idx[~ray]
                 mu[k] = _rotate(mu[k], fog_mie.sample_cos(*table, rng.random(k.size)), rng)
@@ -586,7 +666,53 @@ def manifest_entry(p: HazeParams, wl_nm: np.ndarray) -> dict:
         "phase_mie_table_bins": int(fog_mie.phase_table(p.droplets)[1].size) if p.droplets != "none" else 0,
         "medium_top_m": medium_top_m(p),
         "vertical_optical_depth_550": optical_depth_vertical(p, 550.0),
+        "molecular_profile": (
+            {
+                "scale_height_m": RAYLEIGH_SCALE_HEIGHT_M,
+                "layer_column_m": column_density_rayleigh_m(p),
+                "vertical_optical_depth_550": float(components(p, 550.0)[2]) * column_density_rayleigh_m(p),
+            }
+            if two_component(p)
+            else "same profile as the aerosol"
+        ),
         "pbrt_medium": "uniformgrid 'haze' (camera, lights and surfaces inside), integrator volpath",
+    }
+
+
+def write_medium_spds(p: HazeParams, wl: np.ndarray, spd_dir) -> dict:
+    """Write the medium spectra; returns their scene-relative paths (manifest ``spectra``)."""
+    if two_component(p):
+        sa, ss, sr = components(p, wl)
+        vals = {"sigma_a": sa, "sigma_s": ss, "sigma_rayleigh": sr}
+    else:
+        sa, ss, _ = coefficients(p, wl)
+        vals = {"sigma_a": sa, "sigma_s": ss}
+    out = {}
+    for key, val in vals.items():
+        name = f"haze_{key}.spd"
+        (spd_dir / name).write_text("\n".join(f"{w:.1f} {v:.6g}" for w, v in zip(wl, val)) + "\n")
+        out[key] = f"spd/{name}"
+    return out
+
+
+def _medium_lines(p: HazeParams, spectra: dict) -> list[str]:
+    return pbrt_medium_lines(p, spectra["sigma_a"], spectra["sigma_s"], spectra.get("sigma_rayleigh", ""))
+
+
+def rayleigh_sun_compensation(p: HazeParams, wl: np.ndarray, sun_spd: np.ndarray, elev_deg: float):
+    """(top-of-layer sun SPD, manifest note): the ground-level sun divided by the layer's molecular
+    transmittance along the sun path (two-component only; the sun already crossed those molecules)."""
+    if not two_component(p):
+        return np.asarray(sun_spd, dtype=np.float64), None
+    m = 1.0 / math.sin(math.radians(max(elev_deg, 5.0)))
+    col = column_density_rayleigh_m(p)
+    spd = np.asarray(sun_spd, dtype=np.float64) * np.exp(components(p, wl)[2] * col * m)
+    return spd, {
+        "layer_column_m": col,
+        "sun_airmass": m,
+        "tau_550": float(components(p, 550.0)[2]) * col,
+        "note": "sun SPD divided by the layer's molecular transmittance; sky scaled by sky_scale so a "
+        "molecules-only layer reproduces the no-medium road illuminance",
     }
 
 
@@ -610,9 +736,15 @@ def setup_scene(
     """
     from colour_science import CMF_WAVELENGTH_NM, CMF_Y
 
-    sa, ss, _ = coefficients(p, wl)
-    for name, val in (("haze_sigma_a", sa), ("haze_sigma_s", ss)):
-        (spd_dir / f"{name}.spd").write_text("\n".join(f"{w:.1f} {v:.6g}" for w, v in zip(wl, val)) + "\n")
+    spectra = write_medium_spds(p, wl, spd_dir)
+    sun_top, sun_comp = rayleigh_sun_compensation(p, wl, sun_spd, elev)
+    if sun_comp is not None:
+        y = np.interp(wl, CMF_WAVELENGTH_NM, CMF_Y, left=0.0, right=0.0)
+        vis = (wl >= 360.0) & (wl <= 830.0)
+        sun_comp["illuminance_ratio"] = float(np.sum((y * sun_top)[vis]) / np.sum((y * sun_spd)[vis]))
+        e_dn = e_dn * sun_comp["illuminance_ratio"]
+        sun_spd = sun_top
+        (spd_dir / "sun.spd").write_text("".join(f"{w:g} {v:.6g}\n" for w, v in zip(wl, sun_spd)))
     wl_mc = np.arange(400.0, 701.0, 20.0)
     weight = np.interp(wl_mc, CMF_WAVELENGTH_NM, CMF_Y) * np.interp(wl_mc, wl, sun_spd)
     cz, w = sky_flux_distribution(sky_rgb_equal_area)
@@ -627,6 +759,37 @@ def setup_scene(
         wl_nm=wl_mc,
         spectral_weight=weight,
     )
+    if sun_comp is not None:
+        # The layer's molecules also scatter sunlight down as sky light that the ground-level sky
+        # already contains: scale the sky so a molecules-only layer gives the no-medium road value.
+        mol = replace(p, visibility_m=-math.log(VISIBILITY_CONTRAST[p.visibility_definition]) / RAYLEIGH_550_PER_M)
+        r_mol = road_illuminance(
+            mol,
+            sun_elevation_deg=elev,
+            e_sun_normal_top=e_dn,
+            e_sky_horizontal_top=e_sky_h,
+            sky_cos_zenith=cz,
+            sky_weights=w,
+            ground_albedo=args.haze_ground_albedo,
+            wl_nm=wl_mc,
+            spectral_weight=weight,
+        )
+        sun_part = r_mol["sun_horizontal_top_lux"] * r_mol["sun_total_transmittance"]
+        sky_part = e_sky_h * r_mol["sky_total_transmittance"]
+        k_sky = float(np.clip((e_ref - sun_part) / max(sky_part, 1e-12), 0.0, 1.0))
+        sun_comp["sky_scale"] = k_sky
+        e_sky_h *= k_sky
+        road = road_illuminance(
+            p,
+            sun_elevation_deg=elev,
+            e_sun_normal_top=e_dn,
+            e_sky_horizontal_top=e_sky_h,
+            sky_cos_zenith=cz,
+            sky_weights=w,
+            ground_albedo=args.haze_ground_albedo,
+            wl_nm=wl_mc,
+            spectral_weight=weight,
+        )
     k = 1.0
     if args.haze_light_reference == "road":
         k = e_ref / road["road_lux"]
@@ -640,7 +803,8 @@ def setup_scene(
             "no_medium_horizontal_illuminance_lux": e_ref,
             "road_illuminance": road,
             "volpath_maxdepth": maxdepth,
-            "spectra": {"sigma_a": "spd/haze_sigma_a.spd", "sigma_s": "spd/haze_sigma_s.spd"},
+            "spectra": spectra,
+            "sun_rayleigh_compensation": sun_comp,
         }
     )
     return {
@@ -649,7 +813,7 @@ def setup_scene(
         "e_ref": float(road["road_lux"]),
         "maxdepth": maxdepth,
         "camera_lines": pbrt_camera_lines(),
-        "medium_lines": pbrt_medium_lines(p, "spd/haze_sigma_a.spd", "spd/haze_sigma_s.spd"),
+        "medium_lines": _medium_lines(p, spectra),
         "manifest": entry,
     }
 
@@ -720,9 +884,7 @@ def setup_scene_night(p: HazeParams, args: argparse.Namespace, *, wl: np.ndarray
     """
     from highway_night import LIGHT_WL
 
-    sa, ss, _ = coefficients(p, wl)
-    for name, val in (("haze_sigma_a", sa), ("haze_sigma_s", ss)):
-        (spd_dir / f"{name}.spd").write_text("\n".join(f"{w:.1f} {v:.6g}" for w, v in zip(wl, val)) + "\n")
+    spectra = write_medium_spds(p, wl, spd_dir)
     road = road_illuminance_sources(p, sources, ground_albedo=args.haze_ground_albedo, spd_wl=LIGHT_WL)
     e0 = road["no_medium_horizontal_illuminance_lux"]
     k = e0 / road["road_lux"] if args.haze_light_reference == "road" else 1.0
@@ -740,7 +902,7 @@ def setup_scene_night(p: HazeParams, args: argparse.Namespace, *, wl: np.ndarray
             "no_medium_horizontal_illuminance_lux": e0,
             "road_illuminance": road,
             "volpath_maxdepth": maxdepth,
-            "spectra": {"sigma_a": "spd/haze_sigma_a.spd", "sigma_s": "spd/haze_sigma_s.spd"},
+            "spectra": spectra,
         }
     )
     return {
@@ -748,6 +910,6 @@ def setup_scene_night(p: HazeParams, args: argparse.Namespace, *, wl: np.ndarray
         "e_ref": float(road["road_lux"]),
         "maxdepth": maxdepth,
         "camera_lines": pbrt_camera_lines(),
-        "medium_lines": pbrt_medium_lines(p, "spd/haze_sigma_a.spd", "spd/haze_sigma_s.spd"),
+        "medium_lines": _medium_lines(p, spectra),
         "manifest": entry,
     }

@@ -22,9 +22,45 @@ def _hg(c: float, g: float) -> float:
 
 
 class TestPhaseParams(unittest.TestCase):
-    def test_default_is_effective_single_lobe(self):
-        p = atm.PRESETS["clear"]
+    def test_effective_single_lobe(self):
+        p = atm.replace(atm.PRESETS["clear"], phase="effective")
         self.assertEqual(atm.phase_params(p), (atm.effective_g(p), 0.0))
+
+    def test_default_two_component_molecular_profile(self):
+        self.assertEqual(atm.PRESETS["hazy"].phase, "effective")
+        p = atm.replace(atm.PRESETS["hazy"], phase="two-component")
+        self.assertEqual(atm.phase_params(p), (p.g, 0.0))
+        lines = atm.pbrt_medium_lines(p, "a.spd", "s.spd", "r.spd")
+        self.assertIn('    "spectrum sigma_rayleigh" "r.spd"', lines)
+        self.assertFalse(any("rayleighfraction" in ln for ln in lines))
+        # Molecules: 8.43 km scale height (vs the aerosol's 1 km) -> larger layer column, same road value.
+        self.assertAlmostEqual(float(atm.profile_density_rayleigh(p, 1.35)), 1.0, places=3)
+        top = atm.medium_top_m(p)
+        expect = atm.RAYLEIGH_SCALE_HEIGHT_M * (1 - math.exp(-top / atm.RAYLEIGH_SCALE_HEIGHT_M))
+        self.assertAlmostEqual(atm.column_density_rayleigh_m(p) / expect, 1.0, delta=0.02)
+        self.assertGreater(atm.column_density_rayleigh_m(p), 3 * atm.column_density_m(p))
+        # Totals at the road are unchanged, so V still holds.
+        old = atm.replace(p, phase="mixed")
+        for a, b in zip(atm.coefficients(p, [450.0, 550.0]), atm.coefficients(old, [450.0, 550.0]), strict=True):
+            np.testing.assert_allclose(a, b)
+        # Droplet fog keeps one Mie component.
+        self.assertFalse(
+            atm.two_component(atm.replace(atm.PRESETS["fog"], phase="two-component", droplets="radiation"))
+        )
+
+    def test_sun_compensation_and_mc(self):
+        p = atm.replace(atm.PRESETS["hazy"], phase="two-component")
+        wl = np.array([400.0, 550.0, 800.0])
+        spd, note = atm.rayleigh_sun_compensation(p, wl, np.ones(3), 30.0)
+        tau = atm.components(p, wl)[2] * atm.column_density_rayleigh_m(p)
+        np.testing.assert_allclose(spd, np.exp(2.0 * tau), rtol=1e-6)
+        self.assertGreater(spd[0], spd[2])
+        self.assertIsNone(atm.rayleigh_sun_compensation(atm.replace(p, phase="mixed"), wl, np.ones(3), 30.0)[1])
+        # MC: direct transmittance equals exp(-tau / mu) with both components.
+        rng = np.random.default_rng(0)
+        mu0 = np.full(40_000, 0.5)
+        _, direct = atm.slab_flux_mc(p, 450.0, mu0, 0.0, rng)
+        self.assertAlmostEqual(direct, math.exp(-atm.optical_depth_vertical(p, 450.0) / 0.5), delta=0.006)
         self.assertFalse(any("rayleighfraction" in ln for ln in atm.pbrt_medium_lines(p, "a.spd", "s.spd")))
 
     def test_mixed_uses_aerosol_g_and_molecular_share(self):
@@ -55,7 +91,9 @@ class TestPhaseParams(unittest.TestCase):
 
 @unittest.skipUnless(PBRT.is_file(), f"pbrt binary not built ({PBRT}); see docs/BUILD_PBRT.txt")
 class TestPbrtPhaseMixture(unittest.TestCase):
-    def _render(self, tmp: Path, name: str, light: str, medium: str, maxdepth: int, spp: int) -> float:
+    def _render(
+        self, tmp: Path, name: str, light: str, medium: str, maxdepth: int, spp: int, kind: str = "homogeneous"
+    ) -> float:
         (tmp / f"{name}.pbrt").write_text(
             f"""LookAt 0 0 5  0 0 0  0 1 0
 Camera "orthographic" "float screenwindow" [-0.5 0.5 -0.5 0.5]
@@ -64,7 +102,7 @@ Film "rgb" "integer xresolution" [16] "integer yresolution" [16] "string filenam
 Integrator "volpath" "integer maxdepth" [{maxdepth}]
 WorldBegin
 {light}
-MakeNamedMedium "m" "string type" "homogeneous" "rgb sigma_a" [0 0 0] {medium}
+MakeNamedMedium "m" "string type" "{kind}" "rgb sigma_a" [0 0 0] {medium}
 AttributeBegin
 MediumInterface "m" ""
 Material "interface"
@@ -102,6 +140,42 @@ AttributeEnd
                 32,
             )
             self.assertAlmostEqual(furnace, 1.0, delta=0.01)
+
+    def test_grid_rayleigh_component(self):
+        """patch 0019: the Rayleigh share follows the two density grids (here 1:1 -> w_R = 0.5)."""
+        grid = (
+            '"integer nx" [2] "integer ny" [2] "integer nz" [2] "point3 p0" [-2 -2 -2] "point3 p1" [2 2 2]'
+            ' "float density" [1 1 1 1 1 1 1 1] "float rayleighdensity" [{r}]'
+        )
+        with tempfile.TemporaryDirectory() as d:
+            tmp = Path(d)
+            ones = " ".join(["1"] * 8)
+            for th in (30.0, 90.0):
+                t = math.radians(th)
+                light = (
+                    f'LightSource "distant" "point3 from" [{math.sin(t):.6f} 0 {-math.cos(t):.6f}]'
+                    ' "point3 to" [0 0 0] "rgb L" [1 1 1]'
+                )
+                # Reference: the same grid with one aerosol component and a fixed 0.5 Rayleigh share.
+                ref = self._render_grid(
+                    tmp,
+                    f"ref{th:.0f}",
+                    light,
+                    '"rgb sigma_s" [0.01 0.01 0.01] "float g" [0.6] "float rayleighfraction" [0.5] '
+                    + grid.format(r=ones).split(' "float rayleighdensity"')[0],
+                )
+                two = self._render_grid(
+                    tmp,
+                    f"two{th:.0f}",
+                    light,
+                    '"rgb sigma_s" [0.005 0.005 0.005] "float g" [0.6]'
+                    ' "spectrum sigma_rayleigh" [300 0.005 900 0.005] ' + grid.format(r=ones),
+                )
+                self.assertAlmostEqual(two / ref, 1.0, delta=0.015)
+
+    def _render_grid(self, tmp: Path, name: str, light: str, medium: str) -> float:
+        hom = self._render.__func__  # same scene, uniformgrid medium
+        return hom(self, tmp, name, light, medium, 1, 256, kind="uniformgrid")
 
 
 if __name__ == "__main__":
