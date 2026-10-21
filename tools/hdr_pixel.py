@@ -255,7 +255,12 @@ SECOND_ORDER_KEYS = (
     "adc_inl_dn",
     "spd_crosstalk_fraction",
     "spd_offset_e",
+    "spd_centroid_offset_x_px",
+    "spd_centroid_offset_y_px",
+    "lofic_knee_e",
+    "adc_dnl_lsb",
 )
+SIGNED_SECOND_ORDER_KEYS = ("spd_offset_e", "spd_centroid_offset_x_px", "spd_centroid_offset_y_px")
 
 
 def _second_order_cfg(d: dict | None, arch_name: str) -> dict:
@@ -266,12 +271,16 @@ def _second_order_cfg(d: dict | None, arch_name: str) -> dict:
     if unknown:
         raise ValueError(f"unknown noise.hdr.second_order keys {sorted(unknown)}")
     out = {k: float(d.get(k, 0.0)) for k in SECOND_ORDER_KEYS}
-    if any(out[k] < 0 for k in SECOND_ORDER_KEYS if k != "spd_offset_e"):
-        raise ValueError("noise.hdr.second_order values must be >= 0 (except spd_offset_e)")
+    if any(out[k] < 0 for k in SECOND_ORDER_KEYS if k not in SIGNED_SECOND_ORDER_KEYS):
+        raise ValueError(f"noise.hdr.second_order values must be >= 0 (except {', '.join(SIGNED_SECOND_ORDER_KEYS)})")
     if out["blooming_fraction"] > 0.5:
         raise ValueError("noise.hdr.second_order.blooming_fraction must be <= 0.5 (per vertical neighbour)")
     if (out["spd_crosstalk_fraction"] or out["spd_offset_e"]) and arch_name != "split_pixel":
         raise ValueError("spd_crosstalk_fraction / spd_offset_e need architecture: split_pixel")
+    if (out["spd_centroid_offset_x_px"] or out["spd_centroid_offset_y_px"]) and arch_name != "split_pixel":
+        raise ValueError("spd_centroid_offset_x_px / _y_px need architecture: split_pixel")
+    if out["lofic_knee_e"] and arch_name != "lofic":
+        raise ValueError("lofic_knee_e needs architecture: lofic")
     return out
 
 
@@ -284,6 +293,65 @@ def _pink_rows(rng: np.random.Generator, n: int, std: float) -> np.ndarray:
     x = np.fft.irfft(np.fft.rfft(rng.standard_normal(n)) / np.sqrt(f), n)
     x -= x.mean()
     return std * x / max(float(x.std()), 1e-12)
+
+
+def _fourier_shift(a: np.ndarray, dx: float, dy: float) -> np.ndarray:
+    """``out[y, x] = a[y + dy, x + dx]`` for sub-pixel (dx, dy): band-limited (Fourier) shift on axes 0, 1.
+
+    The image is mirrored to twice its size first, so the periodic FFT sees no jump at the borders."""
+    h, w = a.shape[:2]
+    p = np.pad(a, [(0, h), (0, w)] + [(0, 0)] * (a.ndim - 2), mode="symmetric")
+    fy = np.fft.fftfreq(p.shape[0])[:, None]
+    fx = np.fft.fftfreq(p.shape[1])[None, :]
+    ph = np.exp(2j * np.pi * (fx * dx + fy * dy))
+    if a.ndim > 2:
+        ph = ph.reshape(ph.shape + (1,) * (a.ndim - 2))
+    return np.fft.ifft2(np.fft.fft2(p, axes=(0, 1)) * ph, axes=(0, 1)).real[:h, :w]
+
+
+def spd_centroid_shift(signal_e: np.ndarray, dx: float, dy: float, bayer_pattern: str | None = None) -> np.ndarray:
+    """The optical signal sampled at the small photodiode's centroid, offset (dx, dy) pixels from the large one.
+
+    A Bayer mosaic is shifted per colour plane (each plane by (dx/2, dy/2) of its 2-px pitch), so colours do not
+    mix; the planes are aliased, so this is approximate above their Nyquist. Negative ringing is clipped."""
+    a = np.asarray(signal_e, dtype=np.float64)
+    if not (dx or dy) or a.ndim < 2 or min(a.shape[:2]) < 2:
+        return a
+    if bayer_pattern and a.ndim == 2:
+        out = np.empty_like(a)
+        for i in (0, 1):
+            for j in (0, 1):
+                out[i::2, j::2] = _fourier_shift(a[i::2, j::2], dx / 2.0, dy / 2.0)
+    else:
+        out = _fourier_shift(a, dx, dy)
+    return np.maximum(out, 0.0)
+
+
+def dnl_transitions(max_dn: float, dnl_lsb: float, rng: np.random.Generator) -> np.ndarray:
+    """ADC code transition levels (DN) with differential non-linearity (DNL), one fixed table per converter.
+
+    Each transition between codes k-1 and k sits at ``k - 0.5 + e_k`` with independent
+    ``e_k ~ N(0, dnl_lsb / sqrt 2)``, so the code widths (DNL) have rms ``dnl_lsb`` and the INL stays
+    bounded at about ``dnl_lsb``. The first and last transitions are exact. A transition that falls below
+    the one before it is a missing code (width 0). ``np.searchsorted(t, dn, side="right")`` is the output
+    code; with dnl_lsb = 0 that is ``rint`` (rounding exact halves up)."""
+    n = int(max_dn)
+    t = np.arange(n, dtype=np.float64) + 0.5
+    if n > 2 and dnl_lsb > 0:
+        t[1:-1] += (dnl_lsb / math.sqrt(2.0)) * rng.standard_normal(n - 2)
+        t = np.clip(np.maximum.accumulate(t), None, t[-1])
+    return t
+
+
+def lofic_soft_split(q: np.ndarray, full_well_e: float, knee_e: float) -> np.ndarray:
+    """Photodiode charge of a LOFIC pixel whose overflow barrier turns on gradually (soft knee, width ``knee_e``).
+
+    A smooth minimum of the collected charge and the full well, ``-k ln(exp(-Q/k) + exp(-FW/k))``: it follows
+    Q well below FW, approaches FW from below, and is k ln 2 short of FW at Q = FW. The difference has
+    already gone into the capacitor, so the photodiode + capacitor (LCG) charge is unchanged."""
+    if knee_e <= 0:
+        return np.minimum(q, full_well_e)
+    return np.clip(-knee_e * np.logaddexp(-q / knee_e, -full_well_e / knee_e), 0.0, full_well_e)
 
 
 def _vertical_neighbours(x: np.ndarray) -> np.ndarray:
@@ -476,12 +544,20 @@ def simulate_captures(
             rowcol[r.name] = so["row_fpn_e"] * spatial_rng.standard_normal((shape[0], 1)) + so[
                 "col_fpn_e"
             ] * spatial_rng.standard_normal((1, shape[1]))
+    dnl: dict[str, np.ndarray] = {}
+    if so and so["adc_dnl_lsb"] > 0:
+        for r in arch.readouts:  # one fixed code table per readout chain's ADC
+            dnl[r.name] = dnl_transitions(r.max_dn, so["adc_dnl_lsb"], spatial_rng)
+    spd_shift = (so.get("spd_centroid_offset_x_px", 0.0), so.get("spd_centroid_offset_y_px", 0.0)) if so else (0, 0)
     out: dict[str, np.ndarray] = {}
     for c in arch.collectors:
         if c.name in capture_signal_e:
             sig = np.asarray(capture_signal_e[c.name], dtype=np.float64)
             if sig.shape != shape:
                 raise ValueError(f"capture {c.name!r} electrons shape {sig.shape} != {shape}")
+        elif c.pd == "spd" and any(spd_shift):
+            # The SPD sits off-centre in the pixel, so it samples the optical image at an offset centroid.
+            sig = spd_centroid_shift(signal_e, *spd_shift, bayer_pattern) * response_map(c, shape, bayer_pattern)
         else:
             sig = signal_e * response_map(c, shape, bayer_pattern)
         if so.get("spd_crosstalk_fraction") and c.pd == "spd":
@@ -496,8 +572,11 @@ def simulate_captures(
         if so.get("blooming_fraction") and two_d and c.overflow_capacity_e <= 0 and math.isfinite(c.full_well_e):
             # Charge above full well spills into the two column neighbours; the rest is drained.
             q = q + so["blooming_fraction"] * _vertical_neighbours(np.maximum(q - c.full_well_e, 0.0))
-        q_pd = np.minimum(q, c.full_well_e)
-        q_ov = np.clip(q - c.full_well_e, 0.0, c.overflow_capacity_e) if c.overflow_capacity_e > 0 else None
+        if c.overflow_capacity_e > 0:
+            q_pd = lofic_soft_split(q, c.full_well_e, so.get("lofic_knee_e", 0.0) if so else 0.0)
+            q_ov = np.clip(q - q_pd, 0.0, c.overflow_capacity_e)
+        else:
+            q_pd, q_ov = np.minimum(q, c.full_well_e), None
         d_cap = None
         for r in arch.readouts:
             if r.collector != c.name:
@@ -521,7 +600,10 @@ def simulate_captures(
                 # Bow-shaped integral non-linearity, peak adc_inl_dn at mid-scale, zero at both ends.
                 x = np.clip((dn - r.black_DN) / (r.max_dn - r.black_DN), 0.0, 1.0)
                 dn = dn + so["adc_inl_dn"] * 4.0 * x * (1.0 - x)
-            out[r.name] = np.clip(np.rint(dn), 0.0, r.max_dn)
+            if r.name in dnl:
+                out[r.name] = np.searchsorted(dnl[r.name], dn, side="right").astype(np.float64)
+            else:
+                out[r.name] = np.clip(np.rint(dn), 0.0, r.max_dn)
     return out
 
 

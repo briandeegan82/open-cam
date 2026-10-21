@@ -173,6 +173,10 @@ noise:
       adc_inl_dn: 1.5                     # bow INL: +adc_inl_dn at mid-scale, 0 at ends
       spd_crosstalk_fraction: 0.002       # split pixel: LPD photo-charge leaking into the SPD
       spd_offset_e: 5.0                   # split pixel: uncorrected SPD offset (e-)
+      spd_centroid_offset_x_px: 0.3       # split pixel: SPD centroid offset from the LPD (px, signed)
+      spd_centroid_offset_y_px: 0.3
+      lofic_knee_e: 300.0                 # LOFIC: width of the soft overflow knee (e-)
+      adc_dnl_lsb: 0.3                    # rms differential non-linearity of each readout's ADC (LSB)
 ```
 
 * **Stochastic switching.** Each pixel's switch-over threshold is `thr·(1 + s·z + t·n)`. `z` is
@@ -184,6 +188,26 @@ noise:
 * **Blooming.** On photodiodes without an overflow capacitor, a share `f` of the charge above
   full well spills into each of the two column neighbours. The rest goes to the anti-blooming drain.
 * **ADC INL** is applied to each readout before rounding.
+* **SPD centroid offset.** The small photodiode sits off-centre in the pixel, so it samples the
+  optical image at a point offset by (`spd_centroid_offset_x_px`, `_y_px`) from the large one
+  (Deegan 2014). The SPD signal is the input image shifted by that amount, using a band-limited
+  Fourier shift with mirrored borders, so the shift adds no blur. A Bayer mosaic is shifted one
+  colour plane at a time, so colours don't mix; this is approximate above each plane's Nyquist
+  frequency. Where the merge switches from LPD to SPD, an edge or texture jumps by the offset,
+  which distorts slanted-edge MTF measurements across the transition. A per-capture SPD input
+  (`capture_electrons_npz`) is taken as already rendered from the SPD position and is not shifted.
+  The smaller SPD aperture (its pixel-aperture MTF) is not modelled.
+* **LOFIC soft knee.** The overflow barrier turns on gradually rather than at exactly the full
+  well. The photodiode keeps a smooth minimum of the collected charge and the full well,
+  `Q_pd = −k ln(e^(−Q/k) + e^(−FW/k))`, which is `k ln 2` short of FW at `Q = FW`. The rest goes to
+  the capacitor, so the LCG (photodiode + capacitor) charge is unchanged. HCG is compressed
+  below its transition, so the merged response bends just below the knee.
+* **ADC DNL.** Each readout chain's ADC gets one fixed table of code transitions, drawn from the
+  spatial seed, so it is the same in every frame. Each transition is at `k − ½ + e_k`, with
+  independent `e_k ~ N(0, adc_dnl_lsb/√2)`, so the code widths have an rms of `adc_dnl_lsb`, the
+  INL stays bounded at about that level, and the end points are exact. A transition that falls
+  below the previous one gives a missing code (about Φ(−1/adc_dnl_lsb) of codes). Column-parallel
+  ADCs, each with their own table, are not modelled; the smooth bow is `adc_inl_dn`.
 * **SPD offset and crosstalk** bias the merged signal wherever the SPD dominates, by
   `offset / r_spd` and `f·(r_lpd / r_spd)·μ`. Because the bias appears only above the LPD
   transition, it makes the merged response non-linear across the knee.
@@ -197,6 +221,9 @@ first-order model, as an ISP calibrated on the nominal model would be.
 - 1/f PSD slope;
 - column-only blooming of `f·(Q − FW)`;
 - the SPD offset and crosstalk bias;
+- the SPD centroid shift (a 0.5 px offset moves a merged edge above the LPD transition by 0.5 px);
+- the LOFIC knee (`k ln 2` at FW, an unchanged LCG and the HCG deficit at 0.85 FW);
+- DNL code widths (rms, bounded INL, missing-code rate and exact end points);
 - the switching spread (Φ(−1) at 1σ below threshold).
 
 ## Approximations and not modelled
@@ -205,16 +232,17 @@ first-order model, as an ISP calibrated on the nominal model would be.
   real per-pixel switching is stochastic and biased (truncation). The Monte Carlo shows this
   (plus comparator offsets with `second_order`), but the theory does not.
 * The single-exposure noise extras are not reused in HDR mode. Their HDR counterparts are in
-  `second_order`, with per-chain row/column FPN, 1/f, blooming and INL; DNL is not modelled.
+  `second_order`, with per-chain row/column FPN, 1/f, blooming, INL and DNL (one table per readout chain).
   Blooming spreads along columns only. ISO gain applies only through the base defaults. Defect
   pixels and crosstalk act on the shared input signal; per-capture inputs get crosstalk but no defects.
 * PRNU/DSNU are Gaussian (no log-normal dark-current tails). Readouts of one photodiode share
   fully correlated patterns, and split-pixel photodiodes have independent patterns.
-* Split pixel: LPD→SPD crosstalk is in-pixel only (`spd_crosstalk_fraction`), and there is no
-  spatial centroid offset of the SPD (the MTF effect discussed by Deegan 2014). The per-channel SPD ratio is supported but not populated,
+* Split pixel: LPD→SPD crosstalk is in-pixel only (`spd_crosstalk_fraction`). The SPD centroid
+  offset (`spd_centroid_offset_*_px`) is a pure shift, with no change to the SPD's aperture MTF. The per-channel SPD ratio is supported but not populated,
   because no verified spectral data was available.
-* LOFIC: ideal overflow at exactly the photodiode full well (no soft knee, no transfer
-  inefficiency, linear capacitor), and capacitor dark charge does not consume capacity.
+* LOFIC: the overflow is ideal at the photodiode full well unless `lofic_knee_e` is set (soft
+  knee, smooth-minimum shape, not fitted to a measured pixel). There is no transfer inefficiency,
+  the capacitor is linear, and capacitor dark charge does not consume capacity.
 * DCG: independent read noise for the two gains, and no gain-dependent non-linearity.
 * Multi-exposure: complete reset between windows. Motion and flicker appear only through
   per-capture inputs. There is no deghosting or motion detection in the merge.
