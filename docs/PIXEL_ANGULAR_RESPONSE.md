@@ -107,12 +107,40 @@ Validation figure and numbers:
   1%, and the real chief ray matches the paraxial exit-pupil CRA within 0.01° near the axis
   (wide_22mm and fisheye.10mm).
 
+## Wave-optics table (`response_table`)
+
+Below about 2 µm pitch the geometric microlens model (step 2) is only qualitative. To use
+FDTD/RCWA results or measurements instead, set `response_table: path/to/table.csv` (relative to
+the repo, or absolute) in the `pixel_angular_response` block. The table replaces step 2. The
+incidence distribution, CRA, microlens-shift design, IRCF shift and normalisation work as before.
+
+CSV columns `wavelength_nm, angle_x_deg, angle_y_deg, own`, plus optional neighbour windows
+`n_<ky>_<kx>` (`ky, kx` ∈ `m1, 0, p1`) for optical crosstalk. Each row is the absolute fraction
+of a collimated plane wave collected by the own (or neighbouring) window of an unshifted pixel.
+The plane wave arrives at projected air angles `angle_x = atan(a/c)` and `angle_y = atan(b/c)`,
+where `a`, `b` and `c` are its direction cosines along x, y and the optical axis (+x right,
++y up on the film). The rows must fill a regular wavelength × angle_x × angle_y grid.
+Interpolation is multilinear, and angles outside the grid are clamped to its edge. Each film
+point's cone is averaged with its projected-solid-angle weights. `normalize: normal_incidence`
+divides by the table at 0°, 0°.
+
+`export_response_table(path, stack, lambdas_nm, angles_deg)` writes the geometric model in this
+format. Use it as a template for exporting a simulation, and as a check: the round trip
+matches the geometric model to 1 % of the peak for a 15° cone
+(`tests/test_pixel_angular_response.py`).
+
+Approximation: a shifted microlens is modelled by offsetting the table's angles by the design
+chief ray (a lens shifted to accept θ_d behaves like the unshifted pixel at θ − θ_d). Tables
+with a shift dimension aren't supported. The repo ships no FDTD/RCWA data; the table has to
+come from the sensor's stack simulation or a measurement.
+
 ## Not modelled / approximations
 
 * The microlens is ideal and thin (no aberrations, no Fresnel or AR-coating angular loss). A
   planar stack of one index is assumed.
 * Diffraction is a Gaussian approximation. Below about 2 µm pitch, wave-optical effects
-  (FDTD) dominate [3], so treat results there as qualitative.
+  (FDTD) dominate [3], so treat results there as qualitative, or load a wave-optics
+  `response_table`.
 * The colour filter is lumped at the microlens. Metal shadowing is lumped into
   `window_fraction`. There is no polarisation and no carrier diffusion (see
   `cfa.spatial_crosstalk`).
