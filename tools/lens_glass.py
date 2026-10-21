@@ -51,7 +51,7 @@ MAX_ND_MISMATCH = 0.03
 
 
 # Internal transmittance tau_i (bulk only, no surface reflection) of a 10 mm sample, wavelength nm ->
-# tau_i, 300-1060 nm: SCHOTT optical glass overview (Excel, 2025-11-13, TAUI10 columns, as shipped in
+# tau_i, 300-2500 nm: SCHOTT optical glass overview (Excel, 2025-11-13, TAUI10 columns, as shipped in
 # ``opticalglass`` 2.0.2).  Wavelengths below the shortest listed value are opaque in the catalogue.
 SCHOTT_TAUI10: dict[str, dict[int, float]] = {
     "F2": {
@@ -75,6 +75,10 @@ SCHOTT_TAUI10: dict[str, dict[int, float]] = {
         660: 0.999,
         700: 0.999,
         1060: 0.999,
+        1530: 0.996,
+        1970: 0.949,
+        2325: 0.859,
+        2500: 0.809,
     },
     "F5": {
         310: 0,
@@ -97,6 +101,10 @@ SCHOTT_TAUI10: dict[str, dict[int, float]] = {
         660: 0.998,
         700: 0.999,
         1060: 0.999,
+        1530: 0.995,
+        1970: 0.941,
+        2325: 0.842,
+        2500: 0.787,
     },
     "N-BAF10": {
         350: 0.176,
@@ -116,6 +124,10 @@ SCHOTT_TAUI10: dict[str, dict[int, float]] = {
         660: 0.996,
         700: 0.998,
         1060: 0.998,
+        1530: 0.992,
+        1970: 0.967,
+        2325: 0.857,
+        2500: 0.727,
     },
     "N-BAK2": {
         300: 0.398,
@@ -139,6 +151,10 @@ SCHOTT_TAUI10: dict[str, dict[int, float]] = {
         660: 0.9976,
         700: 0.998,
         1060: 0.9988,
+        1530: 0.994,
+        1970: 0.937,
+        2325: 0.831,
+        2500: 0.758,
     },
     "N-LAF34": {
         300: 0.069,
@@ -162,6 +178,10 @@ SCHOTT_TAUI10: dict[str, dict[int, float]] = {
         660: 0.998,
         700: 0.998,
         1060: 0.999,
+        1530: 0.989,
+        1970: 0.945,
+        2325: 0.726,
+        2500: 0.454,
     },
     "N-LAK10": {
         334: 0.06,
@@ -182,6 +202,10 @@ SCHOTT_TAUI10: dict[str, dict[int, float]] = {
         660: 0.998,
         700: 0.998,
         1060: 0.998,
+        1530: 0.991,
+        1970: 0.95,
+        2325: 0.72,
+        2500: 0.428,
     },
     "N-LAK22": {
         300: 0.433,
@@ -205,6 +229,10 @@ SCHOTT_TAUI10: dict[str, dict[int, float]] = {
         660: 0.9978,
         700: 0.9984,
         1060: 0.999,
+        1530: 0.994,
+        1970: 0.967,
+        2325: 0.85,
+        2500: 0.715,
     },
     "N-LAK8": {
         300: 0.044,
@@ -228,6 +256,10 @@ SCHOTT_TAUI10: dict[str, dict[int, float]] = {
         660: 0.998,
         700: 0.9984,
         1060: 0.9976,
+        1530: 0.992,
+        1970: 0.95,
+        2325: 0.707,
+        2500: 0.398,
     },
     "N-SF15": {
         365: 0.044,
@@ -246,6 +278,10 @@ SCHOTT_TAUI10: dict[str, dict[int, float]] = {
         660: 0.993,
         700: 0.995,
         1060: 0.998,
+        1530: 0.99,
+        1970: 0.954,
+        2325: 0.837,
+        2500: 0.764,
     },
     "N-SF6": {
         365: 0.004,
@@ -264,6 +300,10 @@ SCHOTT_TAUI10: dict[str, dict[int, float]] = {
         660: 0.9903,
         700: 0.9932,
         1060: 0.9984,
+        1530: 0.991,
+        1970: 0.941,
+        2325: 0.81,
+        2500: 0.776,
     },
 }
 
@@ -385,3 +425,66 @@ def abbe_number(g: GlassDispersion) -> float:
     """nu_d actually realised by :meth:`GlassDispersion.n` (for tests / reports)."""
     nd, nf, nc = (float(g.n(lam)) for lam in (LAMBDA_D_NM, LAMBDA_F_NM, LAMBDA_C_NM))
     return (nd - 1.0) / (nf - nc) if not math.isclose(nf, nc) else math.inf
+
+
+def lens_transmittance(lens_path: str | Path, lam_nm, coating="uncoated", design_nm: float = 550.0) -> np.ndarray:
+    """On-axis spectral transmittance of a traced lens: normal-incidence transmittance of every
+    surface times the SCHOTT bulk transmittance over each element's centre thickness.
+
+    ``coating`` is a ``lens_coatings`` spec (``uncoated``, ``mgf2``, ``qhq``) applied to every
+    glass surface, designed at ``design_nm`` (coated surfaces use each glass's n_d). Needs the
+    ``<lens>.glass.yaml`` sidecar for the glass names. No vignetting or off-axis path lengths;
+    usable as ``calibration.optics_transmittance_csv``. Single pass: inter-surface reflections
+    that re-enter the image (ghosts) are not counted.
+    """
+    lens_path = Path(lens_path)
+    lam = np.atleast_1d(np.asarray(lam_nm, dtype=np.float64))
+    disp = load_dispersion(lens_path)
+    if disp is None:
+        raise ValueError(f"{lens_path}: needs a {glass_map_path(lens_path).name} sidecar naming its glasses")
+    air = np.ones_like(lam)
+    media = [air, *(d.n(lam) if d is not None else air for d in disp), air]
+    t = np.ones_like(lam)
+    n_d = [1.0, *(d.n_file if d is not None else 1.0 for d in disp), 1.0]
+    for i, (a, b) in enumerate(zip(media[:-1], media[1:], strict=True)):
+        if n_d[i] == n_d[i + 1]:
+            continue
+        if coating in (None, "uncoated"):
+            t *= 1.0 - ((a - b) / (a + b)) ** 2
+            continue
+        from lens_coatings import coating_for_interface, interface_rt
+
+        lo, hi = sorted((n_d[i], n_d[i + 1]))
+        _, tt = interface_rt(lam, np.zeros(1), lo, hi, coating_for_interface(coating, lo, hi, design_nm))
+        t *= np.asarray(tt, dtype=np.float64).reshape(lam.size, -1)[:, 0]
+    for d, row in zip(disp, _lens_rows(lens_path), strict=True):
+        if d is None:
+            continue
+        if d.glass not in SCHOTT_TAUI10:
+            raise ValueError(f"{lens_path.name}: no SCHOTT internal transmittance for {d.glass}")
+        t *= internal_transmittance(d.glass, lam, row[1])
+    return t
+
+
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+
+    ap = argparse.ArgumentParser(description="Write a lens's on-axis spectral transmittance CSV (lens_transmittance).")
+    ap.add_argument("lensfile", help="pbrt lens file with a .glass.yaml sidecar")
+    ap.add_argument("--out", required=True, help="CSV path (wavelength_nm, transmittance)")
+    ap.add_argument("--lambda-min", type=float, default=360.0)
+    ap.add_argument("--lambda-max", type=float, default=2500.0)
+    ap.add_argument("--step-nm", type=float, default=5.0)
+    ap.add_argument("--coating", default="uncoated", help="uncoated | mgf2 | qhq (lens_coatings), on every surface")
+    ap.add_argument("--design-nm", type=float, default=550.0, help="coating design wavelength")
+    a = ap.parse_args(argv)
+    lam = np.arange(a.lambda_min, a.lambda_max + 1e-9, a.step_nm)
+    t = lens_transmittance(a.lensfile, lam, a.coating, a.design_nm)
+    head = f"# {Path(a.lensfile).name}: on-axis, {a.coating} @ {a.design_nm:g} nm (tools/lens_glass.py)\n"
+    Path(a.out).write_text(head + "".join(f"{x:g}, {v:.5f}\n" for x, v in zip(lam, t, strict=True)))
+    print(f"wrote {a.out}: T(550)={np.interp(550, lam, t):.3f} T(1550)={np.interp(1550, lam, t):.3f}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

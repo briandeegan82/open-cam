@@ -156,3 +156,13 @@ def test_internal_transmittance_catalogue_and_lambert_beer(name):
 
 def test_every_sidecar_glass_has_transmittance_data():
     assert set(lg.SCHOTT_TAUI10) >= set(lg.SCHOTT_SELLMEIER)
+
+
+def test_lens_transmittance_swir() -> None:
+    assert all(max(t) == 2500 for t in lg.SCHOTT_TAUI10.values())
+    lens = REPO / "config" / "lenses" / "wide_22mm.dat"
+    w = np.array([550.0, 1550.0, 2500.0])
+    bare = lg.lens_transmittance(lens, w)
+    assert 0.4 < bare[0] < 0.7 and bare[2] < 0.6 * bare[1]  # 14 bare surfaces; glass absorbs at 2.5 um
+    ar = lg.lens_transmittance(lens, w, "qhq")
+    assert ar[0] > 0.95 and ar[1] < bare[1]  # visible AR coating is poor in the SWIR

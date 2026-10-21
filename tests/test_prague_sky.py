@@ -150,3 +150,23 @@ def test_builder_prague_needs_dataset(tmp_path: Path, monkeypatch: pytest.Monkey
     monkeypatch.delenv(DATASET_ENV, raising=False)
     with pytest.raises(SystemExit, match=DATASET_ENV):
         build_offline(tmp_path, "--sky", "prague")
+
+
+def test_highway_swir_prague_tails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import test_prague_sky as tp
+    from test_highway_spectral_sky import build_offline
+
+    monkeypatch.setattr(tp, "N_CH", 31)  # 380-1620 nm
+    ds = tmp_path / "swir.dat"
+    tp._write_synthetic(ds)
+    monkeypatch.setenv(DATASET_ENV, str(ds))
+    m, _ = build_offline(
+        tmp_path,
+        "--sky", "prague", "--sun-elevation", "40",
+        "--spectral-lambda-max", "1600", "--film-lambda-min", "900", "--spectral-nbuckets", "36",
+    )  # fmt: skip
+    tails = m["lighting"]["sky"]["spectral"]["swir_tails"]
+    assert tails["channels_nm"][0] == 880.0 and tails["fit_relative_rms"] < 0.05
+    assert "Prague" in m["swir"]["sky"]
+    b = np.loadtxt(tmp_path / "scene" / "spd" / "sky_basis_0.spd")
+    assert b[-1, 0] == 1600.0 and np.all(b[:, 1] >= 0.0)
