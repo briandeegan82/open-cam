@@ -11,6 +11,8 @@ and a sub-interval of that band's exposure window (shutter open/close), and comp
 * LED flicker: every PWM emitter in ``manifest["emitters"]`` (tools/highway_incar.py
   ``write_emitter``) is switched to its "on"/"off" include for each sub-interval between PWM
   edges inside the window, so a short exposure can miss an LED's on-pulse entirely.
+  Mains-ripple emitters (``MainsRipple``, e.g. the garage luminaires) step through ``s0``…``sN``
+  includes, one constant level per step of the ripple period.
 
 Each slice renders the time-averaged radiance over its sub-interval; the composite weights it by
 ``duration / integration_time``, so the result is the exposure-averaged radiance, in the same
@@ -47,7 +49,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from exr_multispectral import read_separate_exr_channels, write_separate_channels_exr  # noqa: E402
-from highway_incar import PWM  # noqa: E402
+from highway_incar import waveform_from_dict  # noqa: E402
 
 
 @dataclass
@@ -69,7 +71,7 @@ def plan_slices(
     line = float(exposure.get("rolling_shutter_line_time_s", 0.0))
     nb = 1 if line <= 0 else max(1, min(int(bands), yres))
     edges = np.linspace(0, yres, nb + 1).round().astype(int)
-    pwms = {e["id"]: PWM(**e["pwm"]) for e in emitters if flicker and e.get("pwm")}
+    pwms = {e["id"]: waveform_from_dict(e["pwm"]) for e in emitters if flicker and e.get("pwm")}
     out: list[Slice] = []
     for y0, y1 in zip(edges[:-1], edges[1:]):
         if y1 <= y0:
@@ -79,7 +81,7 @@ def plan_slices(
         cuts = sorted({a, b, *(x for p in pwms.values() for x in p.edges(a, b))})
         for t0, t1 in zip(cuts[:-1], cuts[1:]):
             mid = 0.5 * (t0 + t1)
-            states = {eid: "on" if p.is_on(mid) else "off" for eid, p in pwms.items()}
+            states = {eid: p.state(mid) for eid, p in pwms.items()}
             w = (t1 - t0) / t_int
             out.append(Slice(int(y0), int(y1), t0, t1, w, states, max(1, round(spp * w))))
     return out
@@ -90,11 +92,14 @@ SHUTTER_RE = re.compile(r'"float shutteropen" \[[^\]]*\] "float shutterclose" \[
 
 
 def slice_scene_text(scene: str, sl: Slice, emitters: list[dict]) -> str:
-    if not SHUTTER_RE.search(scene):
-        raise ValueError("scene has no shutter (build it with --exposure-s)")
-    text = SHUTTER_RE.sub(f'"float shutteropen" [{sl.t0:.9g}] "float shutterclose" [{sl.t1:.9g}]', scene, count=1)
-    # Keep each slice in radiance units (pbrt multiplies by shutter duration x ISO / 100).
-    text = ISO_RE.sub(f'"float iso" [{100.0 / (sl.t1 - sl.t0):.9g}]', text, count=1)
+    if SHUTTER_RE.search(scene):
+        text = SHUTTER_RE.sub(f'"float shutteropen" [{sl.t0:.9g}] "float shutterclose" [{sl.t1:.9g}]', scene, count=1)
+        # Keep each slice in radiance units (pbrt multiplies by shutter duration x ISO / 100).
+        text = ISO_RE.sub(f'"float iso" [{100.0 / (sl.t1 - sl.t0):.9g}]', text, count=1)
+    elif MOTION_RE.search(scene):
+        raise ValueError("scene has motion but no shutter (build it with --exposure-s)")
+    else:  # static scene without a shutter (urban, garage): time only enters via the emitter states
+        text = scene
     for e in emitters:
         st = sl.states.get(e["id"])
         if st is None:
@@ -125,8 +130,11 @@ def scene_is_static(manifest: dict, scene_text: str) -> bool:
 
 
 def scene_name(scene_dir: Path) -> str:
-    """``highway`` (tools/build_highway_scene.py) or ``urban`` (tools/build_urban_scene.py)."""
-    return "urban" if not (scene_dir / "highway.pbrt").is_file() and (scene_dir / "urban.pbrt").is_file() else "highway"
+    """``highway``, ``urban`` or ``garage`` (tools/build_{highway,urban,garage}_scene.py)."""
+    for name in ("highway", "urban", "garage"):
+        if (scene_dir / f"{name}.pbrt").is_file():
+            return name
+    return "highway"
 
 
 def linear_plan(exposure: dict, emitters: list[dict], yres: int) -> tuple[list[str], np.ndarray]:
@@ -134,7 +142,7 @@ def linear_plan(exposure: dict, emitters: list[dict], yres: int) -> tuple[list[s
     t_int = float(exposure["integration_time_s"])
     t_open = float(exposure.get("shutter_open_s", 0.0))
     line = float(exposure.get("rolling_shutter_line_time_s", 0.0))
-    pwms = [(e["id"], PWM(**e["pwm"])) for e in emitters if e.get("pwm")]
+    pwms = [(e["id"], waveform_from_dict(e["pwm"])) for e in emitters if e.get("pwm")]
     starts = t_open + np.arange(yres) * line
     frac = np.array([[p.on_fraction(a, a + t_int) for a in starts] for _, p in pwms], dtype=np.float64)
     return [eid for eid, _ in pwms], frac.reshape(len(pwms), yres)

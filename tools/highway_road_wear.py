@@ -75,7 +75,7 @@ WEAR_SPECTRA = {
     "asphalt_patch": lambda wl: _lin(wl, 0.058, 0.025),
     # Hot-poured rubberised crack sealant, near-black and spectrally flat.
     "crack_sealant": lambda wl: _lin(wl, 0.038, 0.006),
-    # RPM lenses: acrylic over metallised prisms; daytime diffuse appearance only (no retroreflection).
+    # RPM lenses: acrylic over metallised prisms; diffuse appearance (retroreflective at night).
     "rpm_lens_clear": lambda wl: _lin(wl, 0.30, 0.03),
     "rpm_lens_red": lambda wl: _sig(wl, 0.03, 0.32, 605.0, 10.0),
     "rpm_lens_amber": lambda wl: _sig(wl, 0.03, 0.36, 565.0, 12.0),
@@ -529,7 +529,7 @@ class RoadWear:
                 b = 4 * i
                 tri += [(b, b + 2, b + 1), (b, b + 3, b + 2)]
             L += (mesh_fn or _mesh)(np.array(pts), np.array(tri), np.array(uv)) + [""]
-        L += self._rpm_lines(groups, dash, gap, place_fn or _translate)
+        L += self._rpm_lines(groups, dash, gap, place_fn or _translate, retro)
         return L
 
     def _marking_wear(self, level: float, pm: float) -> np.ndarray:
@@ -546,7 +546,30 @@ class RoadWear:
         q = np.quantile(f, 1.0 - level)
         return np.clip((f - q) / 0.25 + 0.5, 0.0, 0.97).astype(np.float32)
 
-    def _rpm_lines(self, groups: dict[str, list[tuple]], dash: float, gap: float, place_fn) -> list[str]:
+    def _rpm_reflex_lines(self, lens_area_m2: float) -> list[str]:
+        """Cube-corner RPM lenses (ASTM D4280 minima). The prisms' axis is along the road, not normal to the
+        sloped lens face, so the entrance exponent is 0 (no fall-off with the face's own entrance angle)."""
+        import highway_night as night
+
+        spd, wl = self.out_dir / "spd", np.loadtxt(self.out_dir / "spd" / "rpm_lens_clear.spd")[:, 0]
+        p, cil = dict(night.REFLEX, q=0.0), night.REFLEX_CIL_MCD["astm_d4280"]
+        self.summary["rpm_retroreflection"] = {
+            "standard": f"ASTM D4280 minima (commonly cited; standard text not checked) x {night.REFLEX_MARGIN}",
+            "cil_mcd_lx": {k: round(v, 1) for k, v in cil.items()},
+            "lens_area_m2": round(lens_area_m2, 6),
+            **p,
+        }
+        out = []
+        for lens, colour in (("clear", "white"), ("red", "red"), ("amber", "yellow")):
+            out += night.reflex_material_lines(
+                f"rw:rpm_lens_{lens}", f"rpm_lens_{lens}", cil[colour], lens_area_m2, spd, self.out_dir, wl, p,
+                WEAR_SPECTRA[f"rpm_lens_{lens}"](wl),
+            )  # fmt: skip
+        return out
+
+    def _rpm_lines(
+        self, groups: dict[str, list[tuple]], dash: float, gap: float, place_fn, retro: bool = False
+    ) -> list[str]:
         rng = self.rng
         L = [
             'MakeNamedMaterial "rw:rpm_lens_clear" "string type" "coateddiffuse"'
@@ -562,6 +585,8 @@ class RoadWear:
         ]
         # 100 x 100 mm footprint, 18 mm tall; sloped lens faces towards -z (approaching traffic) and +z.
         b, t, h, zt = 0.05, 0.04, 0.018, 0.02
+        if retro:
+            L = self._rpm_reflex_lines((b + t) * math.hypot(h, b - zt)) + L[3:]
         front = [(-b, 0, -b), (b, 0, -b), (t, h, -zt), (-t, h, -zt)]
         back = [(b, 0, b), (-b, 0, b), (-t, h, zt), (t, h, zt)]
         body = [

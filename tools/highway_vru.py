@@ -7,8 +7,9 @@ with 0.70 m wheels); the standards are paywalled, so the sizes here are nominal 
 against the standard text. Placement follows the AEB VRU nearside scenarios: the target stands at
 ``--vru-distance-m`` ahead of the camera, ``--vru-offset-m`` from the right edge of the carriageway
 (negative = into the lane), optionally between two parked cars on the hard shoulder
-(``--vru-obstruction parked-cars``, as in the Euro NCAP obstructed-child test). The scene is static
-(the target is posed mid-stride at ``--vru-gait-phase``), so motion blur of the target is not modelled.
+(``--vru-obstruction parked-cars``, as in the Euro NCAP obstructed-child test). Without ``--exposure-s``
+the scene is static (posed at ``--vru-gait-phase``). With it the target moves at ``--vru-speed-kmh`` during
+the exposure (rigid motion blur) and the procedural bicycle's wheels roll; the limbs keep their pose.
 
 Spectra (all diffuse, no subsurface scattering):
 
@@ -37,6 +38,10 @@ USGS = REPO / "spectra" / "usgs_nir"
 
 HEIGHT_M = {"pedestrian": 1.80, "child": 1.154, "cyclist": 1.80, "motorcyclist": 1.80}
 RIDERS = ("cyclist", "motorcyclist")
+# Nominal target speeds [km/h] during an exposure (typical Euro NCAP VRU test speeds; not checked
+# against the protocol text).
+NOMINAL_SPEED_KMH = {"pedestrian": 5.0, "child": 5.0, "cyclist": 15.0, "motorcyclist": 30.0}
+MAX_WHEEL_ROTATION_DEG = 150.0  # pbrt interpolates the rotation between shutter open and close
 DEFAULT_MOTO = "moto_80s"
 WHEEL_D, WHEELBASE = 0.70, 1.05
 CLOTHING = {
@@ -66,6 +71,13 @@ def add_args(ap: argparse.ArgumentParser) -> None:
         help="crossing: moving right-to-left across the road; along: moving away in the road direction.",
     )
     g.add_argument("--vru-gait-phase", type=float, default=0.25, help="Stride / pedal phase in [0, 1).")
+    g.add_argument(
+        "--vru-speed-kmh",
+        type=float,
+        default=None,
+        help="Target speed during the exposure (with --exposure-s; motion blur, rolling wheels). Default: "
+        "nominal 5 km/h walking, 15 km/h cycling, 30 km/h motorcycling; 0 = static.",
+    )
     g.add_argument(
         "--vru-bike",
         choices=sorted(tw.RIDER),
@@ -97,6 +109,13 @@ def check_args(args: argparse.Namespace) -> None:
         raise SystemExit("--vru-distance-m must be > 2 m")
     if not 0.0 <= args.vru_gait_phase < 1.0:
         raise SystemExit("--vru-gait-phase must be in [0, 1)")
+    if getattr(args, "vru_speed_kmh", None) is not None and args.vru_speed_kmh < 0:
+        raise SystemExit("--vru-speed-kmh must be >= 0")
+
+
+def speed_kmh(args: argparse.Namespace) -> float:
+    v = getattr(args, "vru_speed_kmh", None)
+    return NOMINAL_SPEED_KMH[args.vru] if v is None else v
 
 
 # ---------------------------------------------------------------- spectra
@@ -156,6 +175,25 @@ class Parts:
 
     def add(self, mat: str, p: np.ndarray, t: np.ndarray, n: np.ndarray) -> None:
         self.parts.setdefault(mat, []).append((p, t, n))
+
+    def plate(self, mat: str, c, u, v, w) -> None:
+        """Box centred on ``c`` with half-extent vectors ``u``, ``v``, ``w`` (mutually orthogonal)."""
+        c, axes = np.asarray(c, float), [np.asarray(a, float) for a in (u, v, w)]
+        pts, nrm, tri = [], [], []
+        for k in range(3):
+            a, b, n = axes[k], axes[(k + 1) % 3], axes[(k + 2) % 3]
+            for sgn in (-1.0, 1.0):
+                f = c + sgn * n
+                q = (
+                    [f - a - b, f + a - b, f + a + b, f - a + b]
+                    if sgn > 0
+                    else [f - a - b, f - a + b, f + a + b, f + a - b]
+                )
+                i = len(pts)
+                pts += q
+                nrm += [sgn * n / np.linalg.norm(n)] * 4
+                tri += [(i, i + 1, i + 2), (i, i + 2, i + 3)]
+        self.add(mat, np.array(pts), np.array(tri), np.array(nrm))
 
     def ellipsoid(self, mat: str, c, r, n_u: int = 18, n_v: int = 10) -> None:
         u = np.linspace(0.0, 2 * np.pi, n_u, endpoint=False)
@@ -301,19 +339,77 @@ def pedestrian(height: float, phase: float, child: bool = False) -> Parts:
     return parts.stand(height)
 
 
-def cyclist(height: float, phase: float) -> Parts:
-    """Bicycle (axles along x, travelling +z) with a seated rider; total height ~``height``."""
+# 16 CFR 1512.16 bicycle reflectors: name -> (colour, REFLEX_CIL_MCD table, face width, face height) [m].
+REFLECTORS = {
+    "rear": ("red", "cpsc1512", 0.06, 0.04),
+    "front": ("white", "cpsc1512", 0.06, 0.04),
+    "pedal": ("amber", "cpsc1512_pedal", 0.05, 0.015),
+    "spoke": ("amber", "cpsc1512", 0.07, 0.025),
+}
+
+
+def reflector_material_lines(spd_dir: Path, out_dir: Path, wl: np.ndarray) -> list[str]:
+    """Retroreflective ``vru:reflex_<name>`` materials for the procedural bicycle's REFLECTORS."""
+    import highway_night as night
+    import highway_taillamps as taillamps
+
+    lens = taillamps.lens_reflectances(wl)
+    out = []
+    for name, (colour, table, w, h) in REFLECTORS.items():
+        r = lens["clear" if colour == "white" else colour]
+        night._write_spd(spd_dir / f"vru_reflex_{colour}.spd", wl, r)
+        cil = night.REFLEX_CIL_MCD[table][colour]
+        p = night.REFLEX_PEDAL if name == "pedal" else night.REFLEX_BICYCLE
+        out += night.reflex_material_lines(
+            f"vru:reflex_{name}", f"vru_reflex_{colour}", cil, w * h, spd_dir, out_dir, wl, p, spectrum=r
+        )
+    return out
+
+
+def _bicycle_reflectors(parts: Parts, rear, front, rw: float, seat, bar, pedals, wheels=None) -> None:
+    """Rear (red), front (white), pedal and spoke (amber) reflectors; faces sized as REFLECTORS.
+
+    With ``cyclist``'s ``wheels`` list the spoke reflectors go on the wheel parts (about their axles), so they roll."""
+
+    def half(name: str) -> tuple[float, float]:
+        return REFLECTORS[name][2] / 2, REFLECTORS[name][3] / 2
+
+    w, h = half("rear")
+    parts.plate("vru:reflex_rear", seat + [0.0, -0.17, -0.07], (w, 0, 0), (0, h, 0), (0, 0, 0.006))
+    w, h = half("front")
+    parts.plate("vru:reflex_front", bar + [0.0, -0.06, 0.03], (w, 0, 0), (0, h, 0), (0, 0, 0.006))
+    w, h = half("pedal")
+    for side, p in zip((-1.0, 1.0), pedals):
+        parts.plate("vru:reflex_pedal", p + [side * 0.03, -0.02, 0.0], (w, 0, 0), (0, h, 0), (0, 0, 0.045))
+    w, h = half("spoke")
+    hubs = [(w_parts, np.zeros(3)) for _, w_parts in wheels] if wheels else [(parts, rear), (parts, front)]
+    for p_, c in hubs:
+        d = np.array([0.0, math.cos(math.pi / 6), math.sin(math.pi / 6)])
+        e = np.array([0.0, -d[2], d[1]])
+        p_.plate("vru:reflex_spoke", c + d * (rw - 0.12), d * w, e * h, (0.006, 0, 0))
+
+
+def cyclist(height: float, phase: float, wheels: list | None = None, reflectors: bool = False) -> Parts:
+    """Bicycle (axles along x, travelling +z) with a seated rider; total height ~``height``.
+
+    With a ``wheels`` list the wheels are built about their own axle centres and appended to it as
+    ``(centre, Parts)`` (for rolling them), instead of being part of the returned mesh.
+    ``reflectors``: add the 16 CFR 1512 reflector set (materials from reflector_material_lines).
+    """
     s = height / 1.80
     parts = Parts()
     rw = WHEEL_D / 2
     rear, front = np.array([0.0, rw, -WHEELBASE / 2]), np.array([0.0, rw, WHEELBASE / 2])
-    for c in (rear, front):
-        parts.torus("vru:tyre", c, rw - 0.016, 0.016)
-        parts.torus("vru:rim", c, rw - 0.04, 0.008, n_v=6)
+    for centre in (rear, front):
+        w, c = (Parts(), np.zeros(3)) if wheels is not None else (parts, centre)
+        w.torus("vru:tyre", c, rw - 0.016, 0.016)
+        w.torus("vru:rim", c, rw - 0.04, 0.008, n_v=6)
         for k in range(6):  # spoke stand-ins
             a = math.pi * k / 6
             d = np.array([0.0, math.cos(a), math.sin(a)]) * (rw - 0.045)
-            parts.tube("vru:rim", c - d, c + d, 0.003, caps=False, n_u=4)
+            w.tube("vru:rim", c - d, c + d, 0.003, caps=False, n_u=4)
+        if wheels is not None:
+            wheels.append((centre, w))
     bb = np.array([0.0, 0.28, -0.05])
     seat = np.array([0.0, 0.88, -0.25])
     head = np.array([0.0, 0.98, 0.38])
@@ -339,6 +435,8 @@ def cyclist(height: float, phase: float) -> Parts:
     ]
     grips = [bar + [side * 0.22, 0.0, 0.0] for side in (-1.0, 1.0)]
     _seated_rider(parts, s, hip, pedals, grips, 40.0)
+    if reflectors:
+        _bicycle_reflectors(parts, rear, front, rw, seat, bar, pedals, wheels)
     return parts
 
 
@@ -423,10 +521,21 @@ def clear_traffic(args, traffic: list[tuple]) -> tuple[list[tuple], list[dict]]:
     return keep, removed
 
 
-def scene_lines(args, road_edge_x: float, place, car_body, asset=None, out_dir=None) -> tuple[list[str], dict]:
+def scene_lines(
+    args,
+    road_edge_x: float,
+    place,
+    car_body,
+    asset=None,
+    out_dir=None,
+    reflex_lines: list[str] | None = None,
+    span: float | None = None,
+) -> tuple[list[str], dict]:
     """pbrt lines for the target (+ obstruction cars) and manifest metadata.
 
     ``car_body(inst, model, paint) -> (include_rel, yaw_model_deg)`` builds a parked car include.
+    ``reflex_lines``: reflector_material_lines() output (night); the procedural bicycle then carries reflectors.
+    ``span``: shutter-open to last-row-close time [s] of an animated scene (None: static).
     """
     kind = args.vru
     height = HEIGHT_M[kind]
@@ -441,16 +550,26 @@ def scene_lines(args, road_edge_x: float, place, car_body, asset=None, out_dir=N
             "scale": None if bike is None else round(float(bike["scale"]), 5),
             "missing": bike is None,  # --allow-missing-assets: procedural bicycle instead
         }
+    v = speed_kmh(args) / 3.6 if span else 0.0
+    wheels = [] if v > 0 and kind in RIDERS and bike is None else None
     if bike is not None:
         parts = imported_rider(args.vru_bike, args.vru_gait_phase)
     elif kind in RIDERS:
-        parts = cyclist(height, args.vru_gait_phase)
+        parts = cyclist(height, args.vru_gait_phase, wheels, reflectors=reflex_lines is not None)
     else:
         parts = pedestrian(height, args.vru_gait_phase, child=kind == "child")
     x, z = road_edge_x + args.vru_offset_m, args.vru_distance_m
     yaw = -90.0 if args.vru_motion == "crossing" else 0.0  # local +z -> world -x (towards the median)
     lo, hi = parts.bounds()
-    if bike is not None:
+    for centre, w in wheels or []:
+        wlo, whi = w.bounds()
+        lo, hi = np.minimum(lo, wlo + centre), np.maximum(hi, whi + centre)
+    wheel_deg = math.degrees(v * span / (WHEEL_D / 2)) if wheels else None
+    if wheel_deg is not None and wheel_deg > MAX_WHEEL_ROTATION_DEG:
+        raise SystemExit(
+            f"--vru-speed-kmh: the wheels turn {wheel_deg:.0f} deg during the exposure (max "
+            f"{MAX_WHEEL_ROTATION_DEG:.0f}); shorten --exposure-s or the rolling-shutter readout"
+        )
         lo = np.minimum(lo, (bike["lo"] - bike["c"]) * bike["scale"])
         hi = np.maximum(hi, (bike["hi"] - bike["c"]) * bike["scale"])
     c, s_ = math.cos(math.radians(yaw)), math.sin(math.radians(yaw))
@@ -462,11 +581,25 @@ def scene_lines(args, road_edge_x: float, place, car_body, asset=None, out_dir=N
     L = [
         "# ---- vulnerable road user (tools/highway_vru.py)",
         *material_lines(),
+        *(reflex_lines if reflex_lines is not None and bike is None and kind in RIDERS else []),
         *defs,
         "AttributeBegin",
         *place(x, 0.0, z),
     ]
-    L += [f"Rotate {yaw:.6g} 0 1 0", *parts.lines()]
+    L += [f"Rotate {yaw:.6g} 0 1 0"]
+    if v > 0:  # rigid motion along the target's heading (local +z) during the exposure
+        L += ["ActiveTransform EndTime", f"Translate 0 0 {v * span:.6g}", "ActiveTransform All"]
+    L += parts.lines()
+    for centre, w in wheels or []:  # rolling: rotation about the axle (x), top of the wheel moving forward
+        L += [
+            "AttributeBegin",
+            f"Translate {centre[0]:.6g} {centre[1]:.6g} {centre[2]:.6g}",
+            "ActiveTransform EndTime",
+            f"Rotate {wheel_deg:.6g} 1 0 0",
+            "ActiveTransform All",
+            *w.lines(),
+            "AttributeEnd",
+        ]
     if bike is not None:
         L += sf.instance_lines(bike["name"], (0.0, 0.0, 0.0), bike["yaw0"], bike["scale"], bike["origin"])
     L += ["AttributeEnd"]
@@ -497,7 +630,24 @@ def scene_lines(args, road_edge_x: float, place, car_body, asset=None, out_dir=N
         "bbox_world_m": [world.min(0).round(4).tolist(), world.max(0).round(4).tolist()],
         "triangles": int(sum(len(t) for v in parts.parts.values() for _, t, _ in v)),
         "obstruction": obstruction,
-        "static": True,
+        "static": v == 0,
+        "speed_kmh": round(v * 3.6, 4),
+        "velocity_world_mps": [round(v * s_, 6), 0.0, round(v * c, 6)],
+        "displacement_m": round(v * span, 6) if v else 0.0,
+        "wheel_rotation_deg": None if wheel_deg is None else round(wheel_deg, 4),
+        "motion_model": None
+        if v == 0
+        else "rigid translation over the exposure span (bbox_world_m at shutter open); procedural bicycle "
+        "wheels roll; limbs, cranks and imported-model wheels keep their pose",
+        **(
+            {
+                "reflectors": {
+                    k: {"colour": c, "cil_table": t, "face_m": [w, h]} for k, (c, t, w, h) in REFLECTORS.items()
+                }
+            }
+            if reflex_lines is not None and bike is None and kind in RIDERS
+            else {}
+        ),
         "geometry": "procedural, nominal Euro NCAP/ISO 19206 target sizes (not checked against the standard)",
     }
     if bike_meta is not None:
