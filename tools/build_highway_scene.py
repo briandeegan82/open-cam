@@ -47,6 +47,7 @@ import highway_swir as swir  # noqa: E402
 import highway_variety as variety  # noqa: E402
 import highway_vru as vru  # noqa: E402
 import highway_wet as wet  # noqa: E402
+import plant_variants  # noqa: E402
 import road_rtable as rt  # noqa: E402
 from fetch_highway_assets import cache_root, load_asset_manifest  # noqa: E402
 from highway_road_wear import WEAR_LEVELS, RoadWear, linear_normal_map  # noqa: E402
@@ -333,8 +334,12 @@ def proxy_car(paint_spd: str, inst: str) -> list[str]:
     return out
 
 
-def vegetation_object(name: str, info: dict, raw_dir: Path, out_dir: Path) -> list[str]:
-    out = [f'ObjectBegin "{name}"']
+def vegetation_object(
+    name: str, info: dict, raw_dir: Path, out_dir: Path, plants: list[dict] | None = None
+) -> list[str]:
+    """One pbrt object for the whole file, or with ``plants`` (``plant_variants.split``) materials plus
+    one object ``<name>#<k>`` per plant."""
+    out = [] if plants else [f'ObjectBegin "{name}"']
     for k, m in enumerate(info["materials"]):
         mn = f"{name}:{k}"
         tex = m.get("base_color_texture")
@@ -359,9 +364,20 @@ def vegetation_object(name: str, info: dict, raw_dir: Path, out_dir: Path) -> li
             ]
         else:
             out.append(f'MakeNamedMaterial "{mn}" "string type" "diffuse" "spectrum reflectance" "spd/bark.spd"')
-    for sh in info["shapes"]:
-        out += [f'NamedMaterial "{name}:{sh["material"]}"', f'Shape "plymesh" "string filename" "{sh["ply_rel"]}"']
-    out.append("ObjectEnd")
+
+    def shape_lines(idx) -> list[str]:
+        lines = []
+        for sh in (info["shapes"][k] for k in idx):
+            lines += [
+                f'NamedMaterial "{name}:{sh["material"]}"',
+                f'Shape "plymesh" "string filename" "{sh["ply_rel"]}"',
+            ]
+        return lines
+
+    if not plants:
+        return out + shape_lines(range(len(info["shapes"]))) + ["ObjectEnd"]
+    for k, pl in enumerate(plants):
+        out += [f'ObjectBegin "{name}#{k}"', *shape_lines(pl["shapes"]), "ObjectEnd"]
     return out
 
 
@@ -952,6 +968,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
 
     # ---- vegetation (instanced)
     rng = np.random.default_rng(7 if args.seed is None else args.seed)
+    plant_rng = np.random.default_rng((7 if args.seed is None else args.seed) + 104729)
     veg_meta = []
     for vid, kind in var.species:
         if args.vegetation == "none" or (args.vegetation == "shrubs" and kind == "tree"):
@@ -963,7 +980,11 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         prep = aroot / "prepared" / vid
         for sh in info["shapes"]:
             sh["ply_rel"] = os.path.relpath(prep / sh["ply"], out_dir)
-        L += vegetation_object(vid, info, raw, out_dir)
+        plants = plant_variants.split(vid, info, prep) if args.plant_variants == "split" else None
+        if plants is not None and len(plants) < 2:
+            plants = None
+        L += vegetation_object(vid, info, raw, out_dir, plants)
+        n_var = len(plants) if plants else 1  # one plant per placement: same plant count as the row
         n = 0
         for side, edge in ((1.0, Layout.right_paved), (-1.0, Layout.opp_paved)):
             z = 8.0 + rng.uniform(0, 10)
@@ -971,11 +992,11 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
                 if kind == "tree":
                     d = rng.uniform(10.0, 36.0) + (z / 900.0) * 30.0
                     s = rng.uniform(2.6, 3.8)
-                    z += rng.uniform(9.0, 26.0) * var.species_spacing("tree")
+                    z += rng.uniform(9.0, 26.0) * var.species_spacing("tree") / n_var
                 else:
                     d = rng.uniform(6.5, 12.0)
                     s = rng.uniform(0.8, 1.4)
-                    z += rng.uniform(6.0, 22.0) * var.species_spacing("shrub")
+                    z += rng.uniform(6.0, 22.0) * var.species_spacing("shrub") / n_var
                 x = edge + side * d
                 y = float(terrain_height(np.array(x), np.array(z), edge, side)) - 0.15
                 L += [
@@ -983,11 +1004,16 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
                     *variety.place(x, y, z),
                     f"Rotate {_f(rng.uniform(0, 360))} 0 1 0",
                     f"Scale {_f(s * var.species_scale(vid))} {_f(s * var.species_scale(vid))} {_f(s * var.species_scale(vid))}",
-                    f'ObjectInstance "{vid}"',
-                    "AttributeEnd",
                 ]
+                if plants:
+                    k = int(plant_rng.integers(n_var))
+                    c = plants[k]["centre"]
+                    L += [f"Translate {_f(-c[0])} 0 {_f(-c[2])}", f'ObjectInstance "{vid}#{k}"']
+                else:
+                    L.append(f'ObjectInstance "{vid}"')
+                L.append("AttributeEnd")
                 n += 1
-        veg_meta.append({"asset": vid, "instances": n})
+        veg_meta.append({"asset": vid, "instances": n, "plants_in_file": n_var})
     L.append("")
 
     # ---- traffic
