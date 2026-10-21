@@ -63,8 +63,22 @@ def variants(aid: str, info: dict, prep: Path) -> list[dict]:
     return out
 
 
-def object_lines(name: str, info: dict, prep: Path, raw: Path, out_dir: Path, shapes: list[int]) -> list[str]:
-    """ObjectBegin block in prepared coordinates (instances add the placement transform)."""
+def retro_band_mask(texture: Path) -> np.ndarray:
+    """White sheeting bands of a cone/drum base-colour texture: bright, near-neutral texels (0/1)."""
+    from PIL import Image
+
+    rgb = np.asarray(Image.open(texture).convert("RGB"), dtype=np.float32) / 255.0
+    lo, hi = rgb.min(-1), rgb.max(-1)
+    return ((lo > 0.55) & (hi - lo < 0.2)).astype(np.float32)
+
+
+def object_lines(
+    name: str, info: dict, prep: Path, raw: Path, out_dir: Path, shapes: list[int], retro_bands: bool = False
+) -> list[str]:
+    """ObjectBegin block in prepared coordinates (instances add the placement transform).
+
+    ``retro_bands``: texels of retro_band_mask() use the builder's (retroreflective) ``sheet_white``.
+    """
     out = [f'ObjectBegin "{name}"']
     used = sorted({info["shapes"][k]["material"] for k in shapes}, key=str)
     names = [m["name"] for m in info["materials"]]
@@ -72,7 +86,20 @@ def object_lines(name: str, info: dict, prep: Path, raw: Path, out_dir: Path, sh
         k = mk if isinstance(mk, int) else names.index(mk)
         m = info["materials"][k]
         mn = f"{name}:{k}"
-        if m.get("base_color_texture"):
+        if m.get("base_color_texture") and retro_bands:
+            from highway_road_wear import write_float_exr
+
+            rel = os.path.relpath(raw / m["base_color_texture"], out_dir)
+            f = out_dir / "textures" / "retro_bands" / f"{name.replace(':', '_')}_{k}.exr"
+            write_float_exr(f, retro_band_mask(raw / m["base_color_texture"]))
+            out += [
+                f'Texture "{mn}:c" "spectrum" "imagemap" "string filename" "{rel}" "string encoding" "sRGB"',
+                f'Texture "{mn}:band" "float" "imagemap" "string filename" "{os.path.relpath(f, out_dir)}"',
+                f'MakeNamedMaterial "{mn}:base" "string type" "diffuse" "texture reflectance" "{mn}:c"',
+                f'MakeNamedMaterial "{mn}" "string type" "mix" "string materials" ["{mn}:base" "sheet_white"]'
+                f' "texture amount" "{mn}:band"',
+            ]
+        elif m.get("base_color_texture"):
             rel = os.path.relpath(raw / m["base_color_texture"], out_dir)
             out += [
                 f'Texture "{mn}:c" "spectrum" "imagemap" "string filename" "{rel}" "string encoding" "sRGB"',
