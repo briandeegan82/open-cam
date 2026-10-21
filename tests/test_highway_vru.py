@@ -169,3 +169,47 @@ class TestBicycleReflectors(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestMotion(unittest.TestCase):
+    def test_static_without_exposure(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            v = build_without_assets(Path(td), "--vru", "cyclist")["vru"]
+            self.assertTrue(v["static"])
+            self.assertEqual(v["displacement_m"], 0.0)
+            self.assertIsNone(v["wheel_rotation_deg"])
+
+    def test_crossing_cyclist_moves_and_wheels_roll(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            v = build_without_assets(Path(td), "--vru", "cyclist", "--exposure-s", "0.01")["vru"]
+            txt = (Path(td) / "scene" / "highway.pbrt").read_text()
+        ms = 15.0 / 3.6
+        self.assertFalse(v["static"])
+        self.assertAlmostEqual(v["displacement_m"], ms * 0.01, places=6)
+        np.testing.assert_allclose(v["velocity_world_mps"], [-ms, 0.0, 0.0], atol=1e-6)  # right-to-left
+        deg = np.degrees(ms * 0.01 / (vru.WHEEL_D / 2))
+        self.assertAlmostEqual(v["wheel_rotation_deg"], deg, places=3)
+        self.assertIn(f"Translate 0 0 {ms * 0.01:.6g}", txt)
+        self.assertEqual(txt.count(f"Rotate {deg:.6g} 1 0 0"), 2)
+
+    def test_speed_zero_and_wheel_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            v = build_without_assets(Path(td), "--vru", "pedestrian", "--exposure-s", "0.01", "--vru-speed-kmh", "0")[
+                "vru"
+            ]
+            self.assertTrue(v["static"])
+        with tempfile.TemporaryDirectory() as td, self.assertRaises(SystemExit):
+            build_without_assets(Path(td), "--vru", "cyclist", "--exposure-s", "0.25")
+
+    def test_separate_wheels_keep_geometry(self) -> None:
+        wheels: list = []
+        joint = vru.cyclist(1.80, 0.25)
+        body = vru.cyclist(1.80, 0.25, wheels)
+        self.assertEqual(len(wheels), 2)
+        lo, hi = body.bounds()
+        for c, w in wheels:
+            wlo, whi = w.bounds()
+            lo, hi = np.minimum(lo, wlo + c), np.maximum(hi, whi + c)
+        jlo, jhi = joint.bounds()
+        np.testing.assert_allclose(lo, jlo, atol=1e-9)
+        np.testing.assert_allclose(hi, jhi, atol=1e-9)
