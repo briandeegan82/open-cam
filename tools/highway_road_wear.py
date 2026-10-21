@@ -627,7 +627,11 @@ def _mesh(p: np.ndarray, tri: np.ndarray, uv: np.ndarray | None = None) -> list[
     def pts(a: np.ndarray) -> str:
         return " ".join(f"{v:.6g}" for v in np.asarray(a, dtype=np.float64).ravel())
 
-    out = ['Shape "trianglemesh"', f'    "point3 P" [ {pts(p)} ]', f'    "integer indices" [ {pts(tri)} ]']
+    out = [
+        'Shape "trianglemesh"',
+        f'    "point3 P" [ {pts(p)} ]',
+        f'    "integer indices" [ {" ".join(map(str, np.asarray(tri, dtype=np.int64).ravel()))} ]',
+    ]
     if uv is not None:
         out.append(f'    "point2 uv" [ {pts(uv)} ]')
     return out

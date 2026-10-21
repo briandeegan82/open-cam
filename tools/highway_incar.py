@@ -445,7 +445,11 @@ def _pts(a) -> str:
 
 
 def mesh_lines(p: np.ndarray, tri: np.ndarray, n: np.ndarray | None = None, uv: np.ndarray | None = None) -> list[str]:
-    out = ['Shape "trianglemesh"', f'    "point3 P" [ {_pts(p)} ]', f'    "integer indices" [ {_pts(tri)} ]']
+    out = [
+        'Shape "trianglemesh"',
+        f'    "point3 P" [ {_pts(p)} ]',
+        f'    "integer indices" [ {" ".join(map(str, np.asarray(tri, dtype=np.int64).ravel()))} ]',
+    ]
     if n is not None:
         out.append(f'    "normal N" [ {_pts(n)} ]')
     if uv is not None:
