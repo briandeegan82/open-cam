@@ -320,6 +320,29 @@ class TestPbrtRetroreflection(unittest.TestCase):
             self.assertAlmostEqual(measured / expected, 1.0, delta=0.04, msg=f"{alpha}/{beta}")
             self.assertGreaterEqual(measured, r_min, f"{alpha}/{beta}")
 
+    def test_vehicle_reflex_cil_fmvss108_geometries(self) -> None:
+        p, area = night.REFLEX, 0.25 * 0.12 * 4
+        ra = night.reflex_ra_param(night.REFLEX_CIL_MCD["fmvss108"]["red"], area, p)
+        mat = RETRO_MAT.format(ra=ra, a0=p["alpha0_deg"], w=p["width_deg"], q=p["q"])
+        minima = {(0.2, 0): 420, (0.2, 20): 140, (1.5, 0): 6, (1.5, 20): 3}
+        d = 50.0
+        cam, look, up = np.zeros(3), np.array([0.0, 0.0, d]), np.array([0.0, 1.0, 0.0])
+        for (alpha, beta), cil_min in minima.items():
+            b = math.radians(beta)
+            n, t = np.array([-math.sin(b), 0.0, -math.cos(b)]), np.array([math.cos(b), 0.0, -math.sin(b)])
+            light = np.array([d * math.tan(math.radians(alpha)), 0.0, 0.0])
+            c_r, c_w = np.array([0.0, 0.14, d]), np.array([0.0, -0.14, d])
+            body = ["AttributeBegin", mat, _quad(c_r, 0.25 * t, np.array([0.0, 0.12, 0.0])), "AttributeEnd"]
+            body += ["AttributeBegin", WHITE_MAT, _quad(c_w, 0.25 * t, np.array([0.0, 0.12, 0.0])), "AttributeEnd"]
+            with tempfile.TemporaryDirectory() as td:
+                g = _render(Path(td), cam, look, up, light, body)["G"]
+            h = g.shape[0] // 2
+            a, ci, co = _cosines(c_r, n, cam, light)
+            measured = _patch_level(g[:h]) / _patch_level(g[h:]) * ci * co / math.pi
+            expected = float(night.retro_ra(a, ci, co, ra, **night._kw(p)))
+            self.assertAlmostEqual(measured / expected, 1.0, delta=0.05, msg=f"{alpha}/{beta}")
+            self.assertGreaterEqual(1e3 * measured * area, cil_min, f"{alpha}/{beta}")
+
     def test_marking_rl_en1436_geometry(self) -> None:
         p = night.MARKING
         ra = night.marking_ra_param(night.MARKING_RL["white"])
@@ -340,6 +363,55 @@ class TestPbrtRetroreflection(unittest.TestCase):
         _, ci, _ = _cosines(np.array([0.0, 0.0, d]), n, cam, light)
         r_l_mcd = 1e3 * lr / lw * ci / math.pi
         self.assertAlmostEqual(r_l_mcd / night.MARKING_RL["white"], 1.0, delta=0.05)
+
+
+class TestReflexReflectors(unittest.TestCase):
+    """Cube-corner reflex reflectors: every tabulated minimum is met (CIL = R_A x area)."""
+
+    @staticmethod
+    def _cil_mcd(table: str, colour: str, p: dict, obs_deg: float, ent_deg: float) -> float:
+        area = 0.01
+        ra = night.reflex_ra_param(night.REFLEX_CIL_MCD[table][colour], area, p)
+        c = math.cos(math.radians(ent_deg))
+        return 1e3 * area * float(night.retro_ra(math.radians(obs_deg), c, c, ra, **p))
+
+    def test_vehicle_reflex_meets_fmvss108(self) -> None:
+        # 49 CFR 571.108 Table XVI-a, red [mcd/lx]; amber/white scale as 2.5x / 4x.
+        minima = {(0.2, 0): 420, (0.2, 10): 280, (0.2, 20): 140, (1.5, 0): 6, (1.5, 10): 5, (1.5, 20): 3}
+        for colour, k in (("red", 1.0), ("amber", 2.5), ("white", 4.0)):
+            for (obs, ent), m in minima.items():
+                got = self._cil_mcd("fmvss108", colour, night.REFLEX, obs, ent)
+                self.assertGreaterEqual(got, k * m, f"{colour} {obs}/{ent}")
+
+    def test_bicycle_reflex_meets_cpsc1512(self) -> None:
+        # 16 CFR 1512 Tables 1 and 2, clear [cd/fc]; amber 5/8, red 1/4.
+        clear = {(0.2, 0): 27.0, (0.2, 10): 18.0, (0.2, 20): 9.0, (1.5, 0): 0.28, (1.5, 10): 0.20,
+                 (1.5, 20): 0.12, (0.2, 30): 8.0, (0.2, 40): 7.0, (0.2, 50): 6.0, (1.5, 30): 0.12,
+                 (1.5, 40): 0.12, (1.5, 50): 0.12}  # fmt: skip
+        pedal = {(0.2, 0): 7.5, (0.2, 10): 6.0, (0.2, 20): 3.0, (0.3, 0): 6.0, (0.3, 10): 4.8, (0.3, 20): 2.4,
+                 (1.5, 0): 0.28, (1.5, 10): 0.20, (1.5, 20): 0.12}  # fmt: skip
+        for table, p, minima, colours in (
+            ("cpsc1512", night.REFLEX_BICYCLE, clear, (("white", 1.0), ("amber", 0.625), ("red", 0.25))),
+            ("cpsc1512_pedal", night.REFLEX_PEDAL, pedal, (("white", 1.0), ("amber", 0.625))),
+        ):
+            for colour, k in colours:
+                for (obs, ent), m in minima.items():
+                    got = self._cil_mcd(table, colour, p, obs, ent)
+                    self.assertGreaterEqual(got, k * m * night.CD_PER_FC_TO_MCD_PER_LX, f"{table} {colour} {obs}/{ent}")
+
+    def test_reflex_material_lines(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            spd = Path(td) / "spd"
+            spd.mkdir()
+            red = night.taillamps.lens_reflectances(night.LIGHT_WL)["red"]
+            lines = night.reflex_material_lines(
+                "reflex:c0:L", "taillamp_lens_red", 420.0, 0.01, spd, Path(td), night.LIGHT_WL, spectrum=red
+            )
+            ra = np.loadtxt(spd / "ra_reflex_c0_L.spd")
+        self.assertIn('"string type" "retroreflective"', lines[0])
+        self.assertIn('"spectrum ra" "spd/ra_reflex_c0_L.spd"', lines[2])
+        self.assertTrue(np.all(ra[:, 1] >= 0))
+        self.assertGreater(ra[ra[:, 0] > 620, 1].mean(), 10 * ra[ra[:, 0] < 500, 1].mean())  # red
 
 
 if __name__ == "__main__":
