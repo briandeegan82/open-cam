@@ -1152,6 +1152,259 @@ assets:
       - url: https://huggingface.co/datasets/allenai/objaverse/resolve/556637099bf4fa79ea7b239d0d9c328b8a2e9ac8/glbs/000-125/631b573d26354f6abefc05f8f5d19364.glb
         path: 631b573d26354f6abefc05f8f5d19364.glb
         sha256: 644c01cce11991f354cfb7a550e92099bf9a832e0135f4719f6107a8f43d647d
+  # ---- two-wheelers (asset package 6): Objaverse/Sketchfab CC-BY-4.0
+  bike_roadster_old:
+    kind: glb
+    title: "Old Bicycle"
+    source: https://sketchfab.com/3d-models/17ab00cb733443a2b552a2b620a68087
+    author: tidominer (Sketchfab)
+    license: CC-BY-4.0
+    license_note: "Attribution required: 'Old Bicycle' by tidominer, https://sketchfab.com/3d-models/17ab00cb733443a2b552a2b620a68087, CC BY 4.0. Mirror: Objaverse (allenai/objaverse, ODC-By)."
+    glb: 17ab00cb733443a2b552a2b620a68087.glb
+    files:
+      - url: https://huggingface.co/datasets/allenai/objaverse/resolve/556637099bf4fa79ea7b239d0d9c328b8a2e9ac8/glbs/000-039/17ab00cb733443a2b552a2b620a68087.glb
+        path: 17ab00cb733443a2b552a2b620a68087.glb
+        sha256: c847039ac5df3f4b23bce846984b8f5c2a5283bf40802d5f6d713d1acd8a46c9
+  bike_cruiser_red:
+    kind: glb
+    title: "Bicycle"
+    source: https://sketchfab.com/3d-models/197dd882a69846e0825e80566996cbba
+    author: thedrone (Sketchfab)
+    license: CC-BY-4.0
+    license_note: "Attribution required: 'Bicycle' by thedrone, https://sketchfab.com/3d-models/197dd882a69846e0825e80566996cbba, CC BY 4.0. Mirror: Objaverse (allenai/objaverse, ODC-By)."
+    glb: 197dd882a69846e0825e80566996cbba.glb
+    files:
+      - url: https://huggingface.co/datasets/allenai/objaverse/resolve/556637099bf4fa79ea7b239d0d9c328b8a2e9ac8/glbs/000-120/197dd882a69846e0825e80566996cbba.glb
+        path: 197dd882a69846e0825e80566996cbba.glb
+        sha256: 5c55459bb481fb54f8d601e013190459bcd720618a29b99e1f80726e9e2ef8ef
+  bike_road:
+    kind: glb
+    title: "3D road bike"
+    source: https://sketchfab.com/3d-models/43860f8a9f174cb9b9cc15a3f6786fbf
+    author: jamielynne69 (Sketchfab)
+    license: CC-BY-4.0
+    license_note: "Attribution required: '3D road bike' by jamielynne69, https://sketchfab.com/3d-models/43860f8a9f174cb9b9cc15a3f6786fbf, CC BY 4.0. Mirror: Objaverse (allenai/objaverse, ODC-By)."
+    glb: 43860f8a9f174cb9b9cc15a3f6786fbf.glb
+    files:
+      - url: https://huggingface.co/datasets/allenai/objaverse/resolve/556637099bf4fa79ea7b239d0d9c328b8a2e9ac8/glbs/000-068/43860f8a9f174cb9b9cc15a3f6786fbf.glb
+        path: 43860f8a9f174cb9b9cc15a3f6786fbf.glb
+        sha256: 3c319601538012d6673888afa83c6d4e15c854b8bc2525888d37eda92233eb20
+  bike_beach_cruiser:
+    kind: glb
+    title: "Dirt bicycle 3D Model"
+    source: https://sketchfab.com/3d-models/5ebd3720da554fa2a60e0fa280c5ae7a
+    author: Jj.Mmhh (Sketchfab)
+    license: CC-BY-4.0
+    license_note: "Attribution required: 'Dirt bicycle 3D Model' by Jj.Mmhh, https://sketchfab.com/3d-models/5ebd3720da554fa2a60e0fa280c5ae7a, CC BY 4.0. Mirror: Objaverse (allenai/objaverse, ODC-By)."
+    glb: 5ebd3720da554fa2a60e0fa280c5ae7a.glb
+    files:
+      - url: https://huggingface.co/datasets/allenai/objaverse/resolve/556637099bf4fa79ea7b239d0d9c328b8a2e9ac8/glbs/000-076/5ebd3720da554fa2a60e0fa280c5ae7a.glb
+        path: 5ebd3720da554fa2a60e0fa280c5ae7a.glb
+        sha256: 2ac0b2c92b5d9e3014ba6bf043582993b9faf2f6946e37a01391cf9637adb01a
+  bike_family_basket:
+    kind: glb
+    title: "family bike"
+    source: https://sketchfab.com/3d-models/692d4d1536f647acb6c7f652a99ecca7
+    author: kreems (Sketchfab)
+    license: CC-BY-4.0
+    license_note: "Attribution required: 'family bike' by kreems, https://sketchfab.com/3d-models/692d4d1536f647acb6c7f652a99ecca7, CC BY 4.0. Mirror: Objaverse (allenai/objaverse, ODC-By)."
+    glb: 692d4d1536f647acb6c7f652a99ecca7.glb
+    files:
+      - url: https://huggingface.co/datasets/allenai/objaverse/resolve/556637099bf4fa79ea7b239d0d9c328b8a2e9ac8/glbs/000-069/692d4d1536f647acb6c7f652a99ecca7.glb
+        path: 692d4d1536f647acb6c7f652a99ecca7.glb
+        sha256: 8564e413c3f12d9aba4734c8d092ddf987c2c8808922a01b1c73d49cdea81814
+  bike_ardis_verona:
+    kind: glb
+    title: "Bike Ardis Verona 28'"
+    source: https://sketchfab.com/3d-models/99d6dce2e49e4ba185ac108ab044524d
+    author: oksana_grym (Sketchfab)
+    license: CC-BY-4.0
+    license_note: "Attribution required: 'Bike Ardis Verona 28'' by oksana_grym, https://sketchfab.com/3d-models/99d6dce2e49e4ba185ac108ab044524d, CC BY 4.0. Mirror: Objaverse (allenai/objaverse, ODC-By)."
+    glb: 99d6dce2e49e4ba185ac108ab044524d.glb
+    files:
+      - url: https://huggingface.co/datasets/allenai/objaverse/resolve/556637099bf4fa79ea7b239d0d9c328b8a2e9ac8/glbs/000-054/99d6dce2e49e4ba185ac108ab044524d.glb
+        path: 99d6dce2e49e4ba185ac108ab044524d.glb
+        sha256: ea89f5da6545ea57e4e14fc4e267e15e2a198c5a37f0bec470100b0b24f47e06
+  bike_peugeot_retro:
+    kind: glb
+    title: "Retro Peugot Bicycle"
+    source: https://sketchfab.com/3d-models/ee74fcdacb694abfb444cbcc5954526a
+    author: william.sayin (Sketchfab)
+    license: CC-BY-4.0
+    license_note: "Attribution required: 'Retro Peugot Bicycle' by william.sayin, https://sketchfab.com/3d-models/ee74fcdacb694abfb444cbcc5954526a, CC BY 4.0. Mirror: Objaverse (allenai/objaverse, ODC-By)."
+    glb: ee74fcdacb694abfb444cbcc5954526a.glb
+    files:
+      - url: https://huggingface.co/datasets/allenai/objaverse/resolve/556637099bf4fa79ea7b239d0d9c328b8a2e9ac8/glbs/000-022/ee74fcdacb694abfb444cbcc5954526a.glb
+        path: ee74fcdacb694abfb444cbcc5954526a.glb
+        sha256: 265f98a221b89c188c854828d50037edaa6954b5a1de3690a44a92b4f7073ba8
+  bike_bmx:
+    kind: glb
+    title: "BMX Bike"
+    source: https://sketchfab.com/3d-models/fe10f12853044affbdc9e835eabc2c81
+    author: erdemdagdelen (Sketchfab)
+    license: CC-BY-4.0
+    license_note: "Attribution required: 'BMX Bike' by erdemdagdelen, https://sketchfab.com/3d-models/fe10f12853044affbdc9e835eabc2c81, CC BY 4.0. Mirror: Objaverse (allenai/objaverse, ODC-By)."
+    glb: fe10f12853044affbdc9e835eabc2c81.glb
+    files:
+      - url: https://huggingface.co/datasets/allenai/objaverse/resolve/556637099bf4fa79ea7b239d0d9c328b8a2e9ac8/glbs/000-031/fe10f12853044affbdc9e835eabc2c81.glb
+        path: fe10f12853044affbdc9e835eabc2c81.glb
+        sha256: 6cef284bf464ec7a26bebee515b3eafbc1493e7c3223422eac7a33e66a105aeb
+  moto_sarolea_vintage:
+    kind: glb
+    title: "Sarolea motorcycle"
+    source: https://sketchfab.com/3d-models/414fcbd163784665a371908362f2e965
+    author: jmch (Sketchfab)
+    license: CC-BY-4.0
+    license_note: "Attribution required: 'Sarolea motorcycle' by jmch, https://sketchfab.com/3d-models/414fcbd163784665a371908362f2e965, CC BY 4.0. Mirror: Objaverse (allenai/objaverse, ODC-By)."
+    glb: 414fcbd163784665a371908362f2e965.glb
+    files:
+      - url: https://huggingface.co/datasets/allenai/objaverse/resolve/556637099bf4fa79ea7b239d0d9c328b8a2e9ac8/glbs/000-034/414fcbd163784665a371908362f2e965.glb
+        path: 414fcbd163784665a371908362f2e965.glb
+        sha256: c481e2869f505df04128d99d2158ff2b93f0a64e506061a352dc7ba12612420e
+  moped_puch_1978:
+    kind: glb
+    title: "MOPED 1978 Puch Moped Hero"
+    source: https://sketchfab.com/3d-models/b6c212a12d85425bb166f43cd3d70248
+    author: jake.martinez (Sketchfab)
+    license: CC-BY-4.0
+    license_note: "Attribution required: 'MOPED 1978 Puch Moped Hero' by jake.martinez, https://sketchfab.com/3d-models/b6c212a12d85425bb166f43cd3d70248, CC BY 4.0. Mirror: Objaverse (allenai/objaverse, ODC-By)."
+    glb: b6c212a12d85425bb166f43cd3d70248.glb
+    files:
+      - url: https://huggingface.co/datasets/allenai/objaverse/resolve/556637099bf4fa79ea7b239d0d9c328b8a2e9ac8/glbs/000-146/b6c212a12d85425bb166f43cd3d70248.glb
+        path: b6c212a12d85425bb166f43cd3d70248.glb
+        sha256: 08c80d947d5a149f3a3e5140c20fda72eee79ae9d25d0a43f7ac86b1349b8774
+  moto_yamaha_fz150:
+    kind: glb
+    title: "Yamaha FZH150 Motorbike Model"
+    source: https://sketchfab.com/3d-models/c9e5af9c1f094349b694c13c85cbebda
+    author: GTAY008 (Sketchfab)
+    license: CC-BY-4.0
+    license_note: "Attribution required: 'Yamaha FZH150 Motorbike Model' by GTAY008, https://sketchfab.com/3d-models/c9e5af9c1f094349b694c13c85cbebda, CC BY 4.0. Mirror: Objaverse (allenai/objaverse, ODC-By)."
+    glb: c9e5af9c1f094349b694c13c85cbebda.glb
+    files:
+      - url: https://huggingface.co/datasets/allenai/objaverse/resolve/556637099bf4fa79ea7b239d0d9c328b8a2e9ac8/glbs/000-132/c9e5af9c1f094349b694c13c85cbebda.glb
+        path: c9e5af9c1f094349b694c13c85cbebda.glb
+        sha256: 987366fc4f10ae1f6ac18b8e87614194d2d6f4e6942c811f022963ef5159076e
+  moto_80s:
+    kind: glb
+    title: "Motorcycle_80s"
+    source: https://sketchfab.com/3d-models/f623ab40922944f881caf38d057e5d9d
+    author: Maidenlel09 (Sketchfab)
+    license: CC-BY-4.0
+    license_note: "Attribution required: 'Motorcycle_80s' by Maidenlel09, https://sketchfab.com/3d-models/f623ab40922944f881caf38d057e5d9d, CC BY 4.0. Mirror: Objaverse (allenai/objaverse, ODC-By)."
+    glb: f623ab40922944f881caf38d057e5d9d.glb
+    files:
+      - url: https://huggingface.co/datasets/allenai/objaverse/resolve/556637099bf4fa79ea7b239d0d9c328b8a2e9ac8/glbs/000-154/f623ab40922944f881caf38d057e5d9d.glb
+        path: f623ab40922944f881caf38d057e5d9d.glb
+        sha256: 217380ac9207bc37242639ba291cb20dc5610176699df789f78df6a4da0d9814
+  moto_cruiser:
+    kind: glb
+    title: "Motorcycle"
+    source: https://sketchfab.com/3d-models/fab401e6e0a14c88a3f3bc994627e313
+    author: Jenna-W (Sketchfab)
+    license: CC-BY-4.0
+    license_note: "Attribution required: 'Motorcycle' by Jenna-W, https://sketchfab.com/3d-models/fab401e6e0a14c88a3f3bc994627e313, CC BY 4.0. Mirror: Objaverse (allenai/objaverse, ODC-By)."
+    glb: fab401e6e0a14c88a3f3bc994627e313.glb
+    files:
+      - url: https://huggingface.co/datasets/allenai/objaverse/resolve/556637099bf4fa79ea7b239d0d9c328b8a2e9ac8/glbs/000-054/fab401e6e0a14c88a3f3bc994627e313.glb
+        path: fab401e6e0a14c88a3f3bc994627e313.glb
+        sha256: 0e6fd54c2c2c1b33cc7f1ed30ac152ca622fb258b31408aeee8998802f92f455
+  scooter_vespa_yellow:
+    kind: glb
+    title: "Vespa"
+    source: https://sketchfab.com/3d-models/1b591374cba9494eabcb0dd21dd15ed9
+    author: kenzie.kosasih (Sketchfab)
+    license: CC-BY-4.0
+    license_note: "Attribution required: 'Vespa' by kenzie.kosasih, https://sketchfab.com/3d-models/1b591374cba9494eabcb0dd21dd15ed9, CC BY 4.0. Mirror: Objaverse (allenai/objaverse, ODC-By)."
+    glb: 1b591374cba9494eabcb0dd21dd15ed9.glb
+    files:
+      - url: https://huggingface.co/datasets/allenai/objaverse/resolve/556637099bf4fa79ea7b239d0d9c328b8a2e9ac8/glbs/000-036/1b591374cba9494eabcb0dd21dd15ed9.glb
+        path: 1b591374cba9494eabcb0dd21dd15ed9.glb
+        sha256: e9034e07dccf12e12346302b7a2b7c227095bed0e77883c324871fa13b494231
+  scooter_vespa_orange:
+    kind: glb
+    title: "Orange Vespa"
+    source: https://sketchfab.com/3d-models/32f1cf6a13a64742883282e90ef68c8a
+    author: alban (Sketchfab)
+    license: CC-BY-4.0
+    license_note: "Attribution required: 'Orange Vespa' by alban, https://sketchfab.com/3d-models/32f1cf6a13a64742883282e90ef68c8a, CC BY 4.0. Mirror: Objaverse (allenai/objaverse, ODC-By)."
+    glb: 32f1cf6a13a64742883282e90ef68c8a.glb
+    files:
+      - url: https://huggingface.co/datasets/allenai/objaverse/resolve/556637099bf4fa79ea7b239d0d9c328b8a2e9ac8/glbs/000-054/32f1cf6a13a64742883282e90ef68c8a.glb
+        path: 32f1cf6a13a64742883282e90ef68c8a.glb
+        sha256: 33f962a56df1a30dd40a25d79c4e272a03e591ff2d15ef76eb1612530d0109cb
+  scooter_honda_squash:
+    kind: glb
+    title: "Honda squash"
+    source: https://sketchfab.com/3d-models/70c5fe31e48743e5b36d739d6789ce2c
+    author: art_yom_3d (Sketchfab)
+    license: CC-BY-4.0
+    license_note: "Attribution required: 'Honda squash' by art_yom_3d, https://sketchfab.com/3d-models/70c5fe31e48743e5b36d739d6789ce2c, CC BY 4.0. Mirror: Objaverse (allenai/objaverse, ODC-By)."
+    glb: 70c5fe31e48743e5b36d739d6789ce2c.glb
+    files:
+      - url: https://huggingface.co/datasets/allenai/objaverse/resolve/556637099bf4fa79ea7b239d0d9c328b8a2e9ac8/glbs/000-056/70c5fe31e48743e5b36d739d6789ce2c.glb
+        path: 70c5fe31e48743e5b36d739d6789ce2c.glb
+        sha256: b83de3b69b44a43d2f1d386525a9213d339063cf1ab3903462e2a07a2acbdf37
+  scooter_vespa_ss180:
+    kind: glb
+    title: "Vespa Super Sport 180"
+    source: https://sketchfab.com/3d-models/74dfd9925fde4ae5882eb74c77c3c663
+    author: VforValensa (Sketchfab)
+    license: CC-BY-4.0
+    license_note: "Attribution required: 'Vespa Super Sport 180' by VforValensa, https://sketchfab.com/3d-models/74dfd9925fde4ae5882eb74c77c3c663, CC BY 4.0. Mirror: Objaverse (allenai/objaverse, ODC-By)."
+    glb: 74dfd9925fde4ae5882eb74c77c3c663.glb
+    files:
+      - url: https://huggingface.co/datasets/allenai/objaverse/resolve/556637099bf4fa79ea7b239d0d9c328b8a2e9ac8/glbs/000-074/74dfd9925fde4ae5882eb74c77c3c663.glb
+        path: 74dfd9925fde4ae5882eb74c77c3c663.glb
+        sha256: 1d8e86dda0067d77afeb4887b678ce207bf54fa485b0ff04b78d6027e29c0b76
+  scooter_vespa_50_special:
+    kind: glb
+    title: "Vespa 50 Special scooter"
+    source: https://sketchfab.com/3d-models/dcaddcc9fdb54ebe88785c425069044e
+    author: AlessioPassera (Sketchfab)
+    license: CC-BY-4.0
+    license_note: "Attribution required: 'Vespa 50 Special scooter' by AlessioPassera, https://sketchfab.com/3d-models/dcaddcc9fdb54ebe88785c425069044e, CC BY 4.0. Mirror: Objaverse (allenai/objaverse, ODC-By)."
+    glb: dcaddcc9fdb54ebe88785c425069044e.glb
+    files:
+      - url: https://huggingface.co/datasets/allenai/objaverse/resolve/556637099bf4fa79ea7b239d0d9c328b8a2e9ac8/glbs/000-025/dcaddcc9fdb54ebe88785c425069044e.glb
+        path: dcaddcc9fdb54ebe88785c425069044e.glb
+        sha256: 1c61f4bfc7cb416098be52b5df0dd501d461efeda33b683d0027b8188b17490c
+  moped_solifer_export:
+    kind: glb
+    title: "Solifer Export Moped"
+    source: https://sketchfab.com/3d-models/de33815904e241148f62f16ddf8bf931
+    author: deljackson (Sketchfab)
+    license: CC-BY-4.0
+    license_note: "Attribution required: 'Solifer Export Moped' by deljackson, https://sketchfab.com/3d-models/de33815904e241148f62f16ddf8bf931, CC BY 4.0. Mirror: Objaverse (allenai/objaverse, ODC-By)."
+    glb: de33815904e241148f62f16ddf8bf931.glb
+    files:
+      - url: https://huggingface.co/datasets/allenai/objaverse/resolve/556637099bf4fa79ea7b239d0d9c328b8a2e9ac8/glbs/000-142/de33815904e241148f62f16ddf8bf931.glb
+        path: de33815904e241148f62f16ddf8bf931.glb
+        sha256: c377b7969a369796ff663f3fc4abe1c222434029257c622d341de14218045d8b
+  scooter_vespa_200_rally:
+    kind: glb
+    title: "Vespa 200 Rally"
+    source: https://sketchfab.com/3d-models/e3bfc0046bcf4ecea6e1b291311b8280
+    author: fakevalerie (Sketchfab)
+    license: CC-BY-4.0
+    license_note: "Attribution required: 'Vespa 200 Rally' by fakevalerie, https://sketchfab.com/3d-models/e3bfc0046bcf4ecea6e1b291311b8280, CC BY 4.0. Mirror: Objaverse (allenai/objaverse, ODC-By)."
+    glb: e3bfc0046bcf4ecea6e1b291311b8280.glb
+    files:
+      - url: https://huggingface.co/datasets/allenai/objaverse/resolve/556637099bf4fa79ea7b239d0d9c328b8a2e9ac8/glbs/000-067/e3bfc0046bcf4ecea6e1b291311b8280.glb
+        path: e3bfc0046bcf4ecea6e1b291311b8280.glb
+        sha256: 22569a096736f2893cf4a0d61b174c38d3e08ed80dac6dc85463bbf2decec932
+  kickscooter_electric:
+    kind: glb
+    title: "Electric Scooter"
+    source: https://sketchfab.com/3d-models/f3785071e9244d83ba311b7da48a1085
+    author: gestLT (Sketchfab)
+    license: CC-BY-4.0
+    license_note: "Attribution required: 'Electric Scooter' by gestLT, https://sketchfab.com/3d-models/f3785071e9244d83ba311b7da48a1085, CC BY 4.0. Mirror: Objaverse (allenai/objaverse, ODC-By)."
+    glb: f3785071e9244d83ba311b7da48a1085.glb
+    files:
+      - url: https://huggingface.co/datasets/allenai/objaverse/resolve/556637099bf4fa79ea7b239d0d9c328b8a2e9ac8/glbs/000-059/f3785071e9244d83ba311b7da48a1085.glb
+        path: f3785071e9244d83ba311b7da48a1085.glb
+        sha256: dbfa3ab31d1a1cefb1905aa8efc82a5ac13d82d9f8a62a8f832ae81a1a0fa199
 
   # --- Building facade kits (Poly Haven glTF, assembled by tools/facade_kits.py) ---
   kit_urban_apartments:
