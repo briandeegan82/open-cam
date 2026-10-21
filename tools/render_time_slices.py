@@ -11,6 +11,8 @@ and a sub-interval of that band's exposure window (shutter open/close), and comp
 * LED flicker: every PWM emitter in ``manifest["emitters"]`` (tools/highway_incar.py
   ``write_emitter``) is switched to its "on"/"off" include for each sub-interval between PWM
   edges inside the window, so a short exposure can miss an LED's on-pulse entirely.
+  Mains-ripple emitters (``MainsRipple``, e.g. the garage luminaires) step through ``s0``…``sN``
+  includes, one constant level per step of the ripple period.
 
 Each slice renders the time-averaged radiance over its sub-interval; the composite weights it by
 ``duration / integration_time``, so the result is the exposure-averaged radiance, in the same
