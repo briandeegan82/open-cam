@@ -953,6 +953,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
     # ---- vegetation (instanced)
     rng = np.random.default_rng(7 if args.seed is None else args.seed)
     veg_meta = []
+    coat = snow.Coat(out_dir) if snow.coat_on(args) else None
     for vid, kind in var.species:
         if args.vegetation == "none" or (args.vegetation == "shrubs" and kind == "tree"):
             continue
@@ -963,7 +964,10 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         prep = aroot / "prepared" / vid
         for sh in info["shapes"]:
             sh["ply_rel"] = os.path.relpath(prep / sh["ply"], out_dir)
-        L += vegetation_object(vid, info, raw, out_dir)
+        vobj = vegetation_object(vid, info, raw, out_dir)
+        if coat is not None:  # mean instance scale below: trees 2.6-3.8, shrubs 0.8-1.4
+            vobj = coat.lines(vobj, vid, (3.2 if kind == "tree" else 1.1) * var.species_scale(vid))
+        L += vobj
         n = 0
         for side, edge in ((1.0, Layout.right_paved), (-1.0, Layout.opp_paved)):
             z = 8.0 + rng.uniform(0, 10)
@@ -1020,6 +1024,8 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
                 body = variety.proxy_vehicle(model, paint_spd, inst, mesh, box) or proxy_car(paint_spd, inst)
                 yaw_model = heading
             body = mats.car_body(body, var.paints.get(paint, (paint,))[0])
+            if coat is not None:
+                body = coat.lines(body, model)
             inc = car_dir / f"{inst}.pbrt"
             inc.write_text("\n".join(body) + "\n")
             motion, motion_meta = fx.car_lines(inst, lane, speeds[k], "\n".join(body))
@@ -1129,6 +1135,8 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         L[w + 1 : w + 1] = smats
         L += [*sgeom, ""]
         snow_meta["notes"] = snow_notes
+        if coat is not None:
+            snow_meta["coat"] = coat.meta()
     L += fx.windscreen_lines(out_dir, wl, eye)
     wet_meta = None
     if wet.enabled(args):  # last: also wets the road-wear marking materials emitted with the geometry

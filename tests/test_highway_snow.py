@@ -79,3 +79,63 @@ def test_rejects():
         hw.main([*BASE, "--snow", "packed", "--road-wetness", "wet"])
     with pytest.raises(SystemExit):
         hw.main([*BASE, "--snowfall-mmh", "-1"])
+
+
+def _write_box_ply(path: Path, x0, x1, y, z0, z1, up=True) -> None:
+    from fetch_highway_assets import write_ply
+
+    p = np.array([[x0, y, z0], [x1, y, z0], [x1, y, z1], [x0, y, z1]], float)
+    t = np.array([[0, 2, 1], [0, 3, 2]] if up else [[0, 1, 2], [0, 2, 3]])
+    write_ply(path, p, None, None, t)
+
+
+def test_top_faces_height_map():
+    # table top (y = 1) over a floor plate (y = 0) and a vertical wall: only the table top and the
+    # uncovered floor margin are tops; either winding counts.
+    pos = np.array(
+        [[0, 1, 0], [1, 1, 0], [1, 1, 1], [0, 1, 1]]  # table
+        + [[-1, 0, -1], [2, 0, -1], [2, 0, 2], [-1, 0, 2]]  # floor, larger than the table
+        + [[0.5, 0, 0.5], [0.5, 2, 0.5], [0.5, 2, 0.6]],  # wall triangle (vertical)
+        float,
+    )
+    tri = np.array([[0, 1, 2], [0, 2, 3], [4, 6, 5], [4, 7, 6], [8, 9, 10]])
+    cand = np.ones(len(tri), bool)
+    top = snow.top_faces(pos, tri, cand)
+    assert top[:2].all() and not top[4]
+    # floor triangles: their centroids lie under the table -> covered
+    assert not top[2] and not top[3]
+    assert not snow.top_faces(pos, tri, np.zeros(len(tri), bool)).any()
+
+
+def test_coat_lines(tmp_path):
+    _write_box_ply(tmp_path / "roof.ply", 0, 1, 1, 0, 1)
+    _write_box_ply(tmp_path / "glass.ply", 0, 1, 1.2, 1, 2, up=False)
+    lines = [
+        'MakeNamedMaterial "c:paint" "string type" "coateddiffuse"',
+        'MakeNamedMaterial "c:WindscreenGlass" "string type" "dielectric"',
+        "Scale 0.5 0.5 0.5",
+        'NamedMaterial "c:paint"',
+        'Shape "plymesh" "string filename" "roof.ply"',
+        'NamedMaterial "c:WindscreenGlass"',
+        'Shape "plymesh" "string filename" "glass.ply"',
+    ]
+    coat = snow.Coat(tmp_path)
+    out = coat.lines(lines, "car_x")
+    assert out[: len(lines)] == lines and out[-2] == 'NamedMaterial "snow:verge"'
+    from highway_taillamps import read_ply_mesh
+
+    p, t = read_ply_mesh(tmp_path / "snow_coat" / "car_x.ply")
+    assert len(t) == 2  # the roof only, not the glass
+    np.testing.assert_allclose(p[:, 1], 1.0 + snow.COAT_OFFSET_M / 0.5)
+    assert coat.meta()["assets"] == {"car_x": 2}
+    obj = coat.lines(['ObjectBegin "v"', *lines[3:5], "ObjectEnd"], "veg", 2.0)
+    assert obj[-1] == "ObjectEnd" and obj[-2].startswith('Shape "plymesh"')
+
+
+def test_snow_coat_args(tmp_path):
+    scene, m = _build(tmp_path, "--snow", "verges")
+    coated = m["snow"]["coat"]["assets"]  # empty without assets (CI); vegetation/cars where present
+    for k in coated:
+        assert f"snow_coat/{k}.ply" in scene and (tmp_path / "snow_coat" / f"{k}.ply").is_file()
+    scene2, m2 = _build(tmp_path / "n", "--snow", "verges", "--snow-coat", "none")
+    assert "coat" not in m2["snow"] and "snow_coat/" not in scene2

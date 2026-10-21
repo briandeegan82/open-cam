@@ -965,7 +965,14 @@ asphalt. `packed` covers the whole road with compacted snow, hiding the markings
   equivalent extinction (2 × geometric cross-section) and visibility (≈ 900 m at 1 mm/h); add
   `--haze mist --visibility-m <that>` for the snowfall beyond the flake range. Flakes are static
   (no motion streaks) and the count grows with range³ (≈ 0.34 M at 1 mm/h, 15 m, 31° fov).
-* **Not modelled:** snow on trees, cars and signs; snow-covered markings in `slush`.
+* **Snow coat** (`--snow-coat auto|none`, default `auto` with `--snow`): trees, shrubs and vehicles
+  carry fresh verge snow on their tops. For each asset, the triangles that face up within 50° of
+  horizontal (`COAT_MAX_SLOPE_DEG`, nominal) and are top-most in a 512-cell height map of the whole
+  asset are copied, lifted 1 cm and given `snow:verge`; glass, tyres and lamps stay bare (by material
+  name/type). The coat is a lifted sheet with no thickness, drifts or melt around warm engines, and
+  every instance of an asset gets the same coat. The manifest lists the coated triangles per asset
+  under `snow.coat`. `--snow-coat none` gives the bare assets.
+* **Not modelled:** snow on signs, barriers and rails; snow-covered markings in `slush`.
 
 ## Parking garage / surround-view fisheye (`tools/build_garage_scene.py`)
 

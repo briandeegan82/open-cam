@@ -12,6 +12,10 @@ grain diameter and an absorbing-impurity term ``alpha_dirt = a550 (lambda / 550 
 used as a Lambertian reflectance: the forward-scattering snow BRDF and sub-surface blur are not
 modelled.
 
+Snow coat (``--snow-coat auto``): the up-facing, unoccluded triangles of the vegetation and vehicle
+meshes (slope <= COAT_MAX_SLOPE_DEG, top-most in a height map of the whole asset) are copied, lifted by
+COAT_OFFSET_M and given the fresh verge snow, so trees, shrubs, roofs and bonnets carry snow.
+
 Falling snow: static flakes (spheres) inside the camera frustum out to ``--snowfall-range-m``,
 melted-diameter distribution N(D) = N0 exp(-Lambda D) of Gunn & Marshall (1958),
 N0 = 3.8e3 R^-0.87 m^-3 mm^-1, Lambda = 2.55 R^-0.48 mm^-1 (R = melted snowfall rate, mm/h); a
@@ -40,6 +44,10 @@ ROAD_DIRT = {"packed": "light", "slush": "heavy"}
 TRACK_HALF_SEP, TRACK_W = 0.85, 0.6  # wheel tracks at lane centre +- 0.85 m, 0.6 m wide (nominal)
 FLAKE_DMIN_MM = 0.3  # smallest melted diameter rendered as geometry
 MAX_FLAKES = 2_000_000
+COAT_MAX_SLOPE_DEG = 50.0  # nominal: steeper faces shed fresh snow
+COAT_OFFSET_M = 0.01  # lift of the coat sheet above the surface it covers
+COAT_GRID = 512  # height-map cells across the asset's larger horizontal extent
+COAT_SKIP = ("glass", "window", "tire", "tyre", "rubber", "light", "lamp")  # material names left bare
 
 
 def add_args(ap: argparse.ArgumentParser) -> None:
@@ -59,6 +67,12 @@ def add_args(ap: argparse.ArgumentParser) -> None:
     g.add_argument("--snowfall-mmh", type=float, default=0.0, help="Falling snow, melted-water rate [mm/h].")
     g.add_argument("--snowfall-range-m", type=float, default=15.0, help="Flakes are geometry out to this range [m].")
     g.add_argument("--snowflake-density", type=float, default=0.1, help="Flake bulk density [g/cm^3].")
+    g.add_argument(
+        "--snow-coat",
+        choices=("auto", "none"),
+        default="auto",
+        help="auto: with --snow, snow on the up-facing tops of trees, shrubs and vehicles; none: bare assets.",
+    )
 
 
 def enabled(args: argparse.Namespace) -> bool:
@@ -76,6 +90,10 @@ def check_args(args: argparse.Namespace) -> list[str]:
     if args.snow == "packed" and getattr(args, "road_wetness", "dry") != "dry":
         raise SystemExit("--snow packed covers the road: use a dry --road-wetness")
     return notes
+
+
+def coat_on(args: argparse.Namespace) -> bool:
+    return getattr(args, "snow", "none") != "none" and getattr(args, "snow_coat", "auto") == "auto"
 
 
 # ------------------------------------------------------------------ optics
@@ -152,6 +170,108 @@ def materials(args, wl: np.ndarray, spd_dir: Path) -> tuple[list[str], dict]:
                 f'MakeNamedMaterial "snow:{tag}" "string type" "diffuse" "spectrum reflectance" "spd/snow_{tag}.spd"'
             )
     return lines, meta
+
+
+def top_faces(
+    pos: np.ndarray, tri: np.ndarray, cand: np.ndarray, max_slope_deg: float = COAT_MAX_SLOPE_DEG
+) -> np.ndarray:
+    """Mask of the ``cand`` triangles that face up (either winding) within ``max_slope_deg`` and lie on
+    top of everything in ``pos``/``tri`` (y up): a height map of the whole mesh, rasterised by sampling."""
+    a, b, c = pos[tri[:, 0]], pos[tri[:, 1]], pos[tri[:, 2]]
+    n = np.cross(b - a, c - a)
+    area2 = np.linalg.norm(n, axis=1)
+    lo, hi = pos.min(0), pos.max(0)
+    cell = max(hi[0] - lo[0], hi[2] - lo[2], 1e-9) / COAT_GRID
+    k = np.clip(1 + (area2 / cell**2).astype(np.int64), 1, 64)
+    f = np.repeat(np.arange(len(tri)), k)
+    j = np.arange(len(f)) - np.repeat(np.cumsum(k) - k, k)
+    u = (j * 0.618034 + 0.31) % 1.0  # low-discrepancy points on each triangle
+    v = (j * 0.754878 + 0.17) % 1.0
+    flip = u + v > 1.0
+    u, v = np.where(flip, 1.0 - u, u), np.where(flip, 1.0 - v, v)
+    pts = np.concatenate([pos, a[f] + u[:, None] * (b - a)[f] + v[:, None] * (c - a)[f]])
+    shape = (int((hi[0] - lo[0]) / cell) + 1, int((hi[2] - lo[2]) / cell) + 1)
+
+    def cells(q):
+        ix = np.clip(((q[:, 0] - lo[0]) / cell).astype(np.int64), 0, shape[0] - 1)
+        iz = np.clip(((q[:, 2] - lo[2]) / cell).astype(np.int64), 0, shape[1] - 1)
+        return ix, iz
+
+    hmap = np.full(shape, -np.inf)
+    np.maximum.at(hmap, cells(pts), pts[:, 1])
+    cen = (a + b + c) / 3.0
+    up = np.abs(n[:, 1]) >= math.cos(math.radians(max_slope_deg)) * np.maximum(area2, 1e-30)
+    tol = 1.5 * cell * math.tan(math.radians(max_slope_deg)) + 1e-3 * (hi[1] - lo[1])
+    return cand & up & (cen[:, 1] >= hmap[cells(cen)] - tol)
+
+
+class Coat:
+    """Adds snow-coat shapes to asset pbrt lines (``NamedMaterial`` + ``plymesh`` pairs); one cap PLY per asset."""
+
+    def __init__(self, out_dir: Path):
+        self.out_dir = Path(out_dir)
+        self.cache: dict[tuple, tuple[str, int] | None] = {}
+        self.assets: dict[str, int] = {}
+
+    def lines(self, lines: list[str], key: str, scale: float | None = None) -> list[str]:
+        """``lines`` with the coat added (before ``ObjectEnd`` if any). ``scale``: object-to-world scale,
+        default the ``Scale`` line in ``lines``."""
+        from highway_taillamps import read_ply_mesh
+
+        shapes, mat, skip = [], None, set()
+        for ln in lines:
+            t = ln.strip()
+            if t.startswith("MakeNamedMaterial "):
+                name = t.split('"')[1]
+                if any(w in name.lower() for w in COAT_SKIP) or "dielectric" in t or "rubber.spd" in t:
+                    skip.add(name)
+            elif t.startswith("NamedMaterial "):
+                mat = t.split('"')[1]
+            elif t.startswith('Shape "plymesh"'):
+                shapes.append((mat, t.split('"string filename" "')[1].split('"')[0]))
+            elif t.startswith("Scale ") and scale is None:
+                scale = float(t.split()[1])
+        if not shapes:
+            return lines
+        ck = (key, tuple(shapes), scale)
+        if ck not in self.cache:
+            pos, tri, cand, n0 = [], [], [], 0
+            for m, rel in shapes:
+                p, t = read_ply_mesh(self.out_dir / rel, max_abs=1e9)
+                pos.append(p)
+                tri.append(t + n0)
+                cand.append(np.full(len(t), m not in skip))
+                n0 += len(p)
+            P, T = np.concatenate(pos), np.concatenate(tri)
+            T = T[top_faces(P, T, np.concatenate(cand))]
+            if len(T):
+                used, inv = np.unique(T, return_inverse=True)
+                q = P[used] + [0.0, COAT_OFFSET_M / (scale or 1.0), 0.0]
+                rel = f"snow_coat/{key}.ply"
+                from fetch_highway_assets import write_ply
+
+                write_ply(self.out_dir / rel, q, None, None, inv.reshape(-1, 3))
+                self.cache[ck] = (rel, len(T))
+            else:
+                self.cache[ck] = None
+        hit = self.cache[ck]
+        if hit is None:
+            return lines
+        self.assets[key] = hit[1]
+        add = ['NamedMaterial "snow:verge"', f'Shape "plymesh" "string filename" "{hit[0]}"']
+        if lines and lines[-1] == "ObjectEnd":
+            return [*lines[:-1], *add, "ObjectEnd"]
+        return [*lines, *add]
+
+    def meta(self) -> dict:
+        return {
+            "assets": dict(sorted(self.assets.items())),
+            "material": "snow:verge",
+            "max_slope_deg": COAT_MAX_SLOPE_DEG,
+            "offset_m": COAT_OFFSET_M,
+            "skipped_materials": "glass, tyres, lamps (by material name/type)",
+            "model": "up-facing triangles on top of the asset height map, lifted copy (no thickness, no drifts)",
+        }
 
 
 def road_rects(geo: dict, state: str, rng: np.random.Generator, z0: float, z1: float) -> list[tuple]:
@@ -272,7 +392,8 @@ def scene_lines(
         }
     m["approximations"] = [
         "Snow is Lambertian with the ART spherical albedo: no forward-scattering BRDF, no sub-surface blur.",
-        "Trees, cars and signs carry no snow; plough banks are smooth extrusions.",
+        "Signs, barriers and rails carry no snow; the tree/vehicle coat (--snow-coat) is a lifted copy of "
+        "the up-facing faces with no thickness or drifts; plough banks are smooth extrusions.",
         "Falling flakes are static spheres (no motion streaks); beyond the flake range only the optional haze.",
     ]
     return mats, geom, m
