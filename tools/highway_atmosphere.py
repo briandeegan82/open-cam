@@ -262,6 +262,15 @@ def integrator_maxdepth(p: HazeParams, base: int, override: int | None = None) -
 # ---- optical properties
 
 
+def swir_gas_sigma_a(args: argparse.Namespace, wl) -> np.ndarray:
+    """SWIR builds: gas-band absorption above 830 nm (tools/highway_swir.py); 0 otherwise."""
+    import highway_swir
+
+    if not highway_swir.enabled(args) or getattr(args, "swir_h2o_gm3", 0.0) <= 0:
+        return np.zeros(np.shape(wl))
+    return highway_swir.gas_sigma_a(wl, args.swir_h2o_gm3)
+
+
 def extinction_550(p: HazeParams) -> float:
     """Total extinction at 550 nm [1/m] at road level: -ln(C) / V."""
     return -math.log(VISIBILITY_CONTRAST[p.visibility_definition]) / p.visibility_m
@@ -611,6 +620,7 @@ def setup_scene(
     from colour_science import CMF_WAVELENGTH_NM, CMF_Y
 
     sa, ss, _ = coefficients(p, wl)
+    sa = sa + swir_gas_sigma_a(args, wl)
     for name, val in (("haze_sigma_a", sa), ("haze_sigma_s", ss)):
         (spd_dir / f"{name}.spd").write_text("\n".join(f"{w:.1f} {v:.6g}" for w, v in zip(wl, val)) + "\n")
     wl_mc = np.arange(400.0, 701.0, 20.0)
@@ -721,6 +731,7 @@ def setup_scene_night(p: HazeParams, args: argparse.Namespace, *, wl: np.ndarray
     from highway_night import LIGHT_WL
 
     sa, ss, _ = coefficients(p, wl)
+    sa = sa + swir_gas_sigma_a(args, wl)
     for name, val in (("haze_sigma_a", sa), ("haze_sigma_s", ss)):
         (spd_dir / f"{name}.spd").write_text("\n".join(f"{w:.1f} {v:.6g}" for w, v in zip(wl, val)) + "\n")
     road = road_illuminance_sources(p, sources, ground_albedo=args.haze_ground_albedo, spd_wl=LIGHT_WL)

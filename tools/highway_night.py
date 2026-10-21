@@ -179,6 +179,8 @@ def hps_spectrum(wl: np.ndarray) -> np.ndarray:
         + 1.2 * _g(wl, 466.5, 1.4)
         + 0.8 * _g(wl, 515.0, 1.4)
         + 0.70 * _g(wl, 819.5, 2.5)
+        + 0.80 * _g(wl, 1138.2, 2.5)  # Na 3p-4s doublet; SWIR builds only (nominal height)
+        + 0.60 * _g(wl, 1140.4, 2.5)
     )
     tail = 0.03 * np.clip((wl - 400.0) / 300.0, 0.0, 1.0)
     v = band + lines + tail
@@ -607,6 +609,7 @@ def resolve(args: argparse.Namespace) -> dict:
         "dark": dark,
         "headlamps": ("mixed" if dark else "off") if args.headlamps == "auto" else args.headlamps,
         "streetlights": ("led_4000k" if dark else "none") if args.streetlights == "auto" else args.streetlights,
+        "lambda_max": float(getattr(args, "spectral_lambda_max", 830.0)),
         "retroreflective": dark if args.retroreflective == "auto" else args.retroreflective == "on",
         "tail_lamps": getattr(args, "tail_lamps", "detailed"),
         "rear_fog": {"on": True, "none": False}.get(
@@ -740,12 +743,20 @@ def _quad_light(center, right, up, spd_rel: str, luminance: float) -> list[str]:
     ]
 
 
-def write_light_assets(out_dir: Path, spd_dir: Path, opts: dict, n: int = 1024, high_beam: bool = False) -> dict:
+def light_wl(lambda_max: float = 830.0) -> np.ndarray:
+    """1 nm emission grid, LIGHT_WL extended to ``lambda_max`` for SWIR builds."""
+    return np.arange(360.0, max(830.0, float(lambda_max)) + 0.5, 1.0)
+
+
+def write_light_assets(
+    out_dir: Path, spd_dir: Path, opts: dict, n: int = 1024, high_beam: bool = False, lambda_max: float = 830.0
+) -> dict:
     """Write lamp spectra and goniometric maps; returns their relative paths and fluxes."""
+    wl = light_wl(lambda_max)
     for name, fn in LAMP_SPECTRA.items():
-        _write_spd(spd_dir / f"lamp_{name}.spd", LIGHT_WL, fn(LIGHT_WL))
-    for name, r in taillamps.lens_reflectances(LIGHT_WL).items():
-        _write_spd(spd_dir / f"taillamp_lens_{name}.spd", LIGHT_WL, r)
+        _write_spd(spd_dir / f"lamp_{name}.spd", wl, fn(wl))
+    for name, r in taillamps.lens_reflectances(wl).items():
+        _write_spd(spd_dir / f"taillamp_lens_{name}.spd", wl, r)
     info = {}
     for kind in ("halogen", "led"):
         m = headlamp_map(n, kind)
@@ -1015,7 +1026,7 @@ def scene_lights(
     """
     if opts["headlamps"] == "off" and opts["streetlights"] == "none" and not opts["dark"]:
         return [], {}
-    assets = write_light_assets(out_dir, spd_dir, opts)
+    assets = write_light_assets(out_dir, spd_dir, opts, lambda_max=opts.get("lambda_max", 830.0))
     cars = [dict(c, z=c["distance_m"]) for c in cars_meta]
     vopts = dict(opts, brake=args.brake_lights, ego_lane=args.cam_lane)
     if opts["retroreflective"]:

@@ -87,8 +87,39 @@ ideal passband, here 900-1600 nm) while the spectra keep the visible part that t
 
 ![Highway, visible vs SWIR 900-1600 nm](images/highway_vis_vs_swir_900_1600.jpg)
 
+## SWIR surfaces, lamps and path absorption (highway)
+
+With SWIR enabled (`--spectral-lambda-max` > 830 nm), `tools/highway_swir.py` also extends:
+
+* **Analytic surfaces** (car paint, road paint, sign sheeting, rubber, bark, asphalt, concrete,
+  galvanised steel): above 830 nm each takes the shape of a USGS splib07a record
+  (`SURFACE_PROXIES`), scaled to meet its analytic value at 830 nm and smoothed over 11 nm.
+  splib07a has no automotive paint or sign sheeting, so pigmented polymers and painted aluminium of
+  the same colour stand in for them: white vinyl (TiO2), yellow HDPE, red vinyl, blue PVC pipe,
+  light-green painted aluminium, black HDPE / LDPE, brushed aluminium (silver), grey HDPE. These are
+  **proxies**: they give the polymer C-H overtone bands (1.2, 1.4, 1.7, 2.3 um) and the pigment
+  edges, not measurements of real car paint or sheeting. Soil is still held at its 830 nm value.
+  The records come from the same sha256-checked splib07a download as `--spectral-library usgs`.
+* **Lamp spectra** are written to `--spectral-lambda-max`: halogen as a 3200 K blackbody, the
+  phosphor-converted LEDs with their (negligible) Gaussian tails, and high-pressure sodium with its
+  Na 1138.2 / 1140.4 nm doublet. The doublet height (0.8 and 0.6 of the visible peak) is nominal,
+  not taken from a measured HPS spectrum.
+* **Gas absorption along scene paths** (with `--haze`): the band optical depth of the G173 direct
+  beam above 830 nm, after removing a power-law Rayleigh + aerosol continuum fitted in the band-free
+  windows, divided by its 1.42 cm water column at air mass 1.5 and scaled by
+  `--swir-h2o-gm3` (default 7.5 g/m^3, about 10 C at 80 % RH; 0 turns it off). It is added to the
+  haze `sigma_a` and follows the haze height profile. The O2 1.27 um and CO2 1.6 / 2.0 um bands are
+  in the G173 depth too and scale with the water vapour. Beer scaling of a 10 nm band average from
+  the long solar path is a lower bound for short paths in saturated band centres. Without `--haze`
+  there is no medium, so no path absorption.
+* **VRU skin** (`--vru`): above 830 nm the ColorChecker skin takes the shape of the
+  `tools/nir_skin.py` two-layer tissue model, whose water absorption now continues past Hale &
+  Querry's 1100 nm end with Segelstein (1981). It gives the 1.2 and 1.45 um water dips (about
+  0.21 and 0.05 reflectance); the model's scattering and water fraction are nominal. The bicycle
+  frame takes the red car-paint proxy.
+
 ## Not yet SWIR-aware
 
-The Prague SWIR sky (280-2480 nm, user-downloaded; see `tools/prague_sky.py`) is not wired in, and
-neither are atmospheric water-vapour absorption along scene paths, vehicle / road /
-skin / snow materials, lamp spectra in the highway scenes, and lens glass / coating transmission.
+The Prague SWIR sky (280-2480 nm, user-downloaded; see `tools/prague_sky.py`) is not wired in
+above 830 nm, and lens glass / coating transmission is not modelled. The night sky (OH airglow)
+and moonlight are not extended past 830 nm.

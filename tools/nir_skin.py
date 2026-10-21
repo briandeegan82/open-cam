@@ -1,4 +1,4 @@
-"""Skin reflectance 350-1100 nm from a two-layer tissue optics model (for NIR / 940 nm DMS).
+"""Skin reflectance 350-1100 nm (extended to the SWIR for highway VRU skin) from a two-layer tissue optics model (for NIR / 940 nm DMS).
 
 Measured skin spectra in the repo (ColorChecker skin patches) stop at 730 nm. This model follows
 S. L. Jacques, "Skin optics", Oregon Medical Laser Center News (1998),
@@ -36,8 +36,18 @@ def _csv(rel: str) -> np.ndarray:
 
 
 def water_mua(wl_nm: np.ndarray) -> np.ndarray:
+    """Hale & Querry (1973) to 1100 nm; Segelstein (1981) 4 pi k / lambda beyond (SWIR builds)."""
     d = _csv("spectra/water/hale_querry_1973.csv")
-    return np.interp(wl_nm, d["wavelength_nm"], d["absorption_per_cm"])
+    wl = np.asarray(wl_nm, float)
+    out = np.interp(wl, d["wavelength_nm"], d["absorption_per_cm"])
+    hi = wl > d["wavelength_nm"][-1]
+    if hi.any():
+        lines = [
+            ln for ln in (REPO / "spectra/water/segelstein_1981_nk.csv").read_text().splitlines() if ln[:1].isdigit()
+        ]
+        sg = np.array([[float(x) for x in ln.split(",")] for ln in lines])
+        out[hi] = 4.0 * np.pi * np.interp(wl[hi], sg[:, 0], sg[:, 2]) / (wl[hi] * 1e-7)
+    return out
 
 
 def blood_mua(wl_nm: np.ndarray, so2: float = 0.75, hb_g_l: float = 150.0) -> np.ndarray:
