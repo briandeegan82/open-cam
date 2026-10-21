@@ -26,6 +26,10 @@ flare rendering", ACM Trans. Graph. 30(4), 108 (SIGGRAPH 2011), doi:10.1145/2010
   interfaces are uncoated Fresnel), times the bulk internal transmittance of every glass traversed,
   tau_10(lambda) ** (path length / 10 mm) from the SCHOTT catalogue (``glass_absorption``, on by
   default for lenses with a glass sidecar).
+* ``sensor_stack`` (opt-in): plane-parallel IR-cut filter and cover-glass plates in front of the
+  film add their faces to the ghost paths. The IR-cut face is a lossless interference edge filter,
+  R = 1 - T(lambda / s(theta)) with the sensor's IRCF curve and its blue shift with angle; the last
+  pass through it is left to the sensor model's ``ircf_csv`` so it is not counted twice.
 * Energy normalisation: the rendered source flux (sum of its pixels per bucket) is what pbrt passed
   through the primary path with unit transmission, i.e. ``N_primary`` grid rays.  A ghost ray adds
   ``flux * weight / N_primary`` - so a ghost's total energy relative to the primary image is exactly
@@ -46,8 +50,7 @@ Comput. Graph. Forum 32(4), 1-6 (EGSR 2013) and an independent scalar ray trace;
 against a Monte-Carlo non-sequential trace; energy conservation of the splat.
 
 Not modelled: diffraction and interference between ghosts (geometric optics only), coating-layer
-dispersion (layer indices are constant), ghosts with four or more reflections, barrel/mount scatter, sensor
-cover glass / IR filter (unless approximated by ``sensor_reflectance``), polarisation state (the
+dispersion (layer indices are constant), ghosts with four or more reflections, barrel/mount scatter, polarisation state (the
 average of s and p is used at each interface), sources at finite distance (beams are collimated),
 and the ghosts of pixels below the source threshold (use the parametric veiling glare in
 ``apply_spectral_psf.py`` for that diffuse component; ISO 18844:2017 "Photography - Image flare
@@ -88,11 +91,13 @@ PBRT_DEFAULT_FILM_DIAGONAL_MM = 35.0
 @dataclass
 class Surface:
     z: float  # vertex position [mm], z increases toward the film
-    radius: float  # [mm], > 0: centre of curvature on the film side; 0: aperture stop
+    radius: float  # [mm], > 0: centre of curvature on the film side; 0: aperture stop; inf: plane
     ap_r: float  # clear semi-aperture [mm]
     n_before: float  # index on the object side
     n_after: float  # index on the film side
     coating: object = None
+    edge_filter: dict | None = None  # interference edge filter (IR-cut) on this face: R = 1 - T(lambda, angle)
+    name: str = ""
 
     @property
     def is_stop(self) -> bool:
@@ -123,6 +128,92 @@ class Lens:
         return len(self.surfaces)
 
 
+REPO = Path(__file__).resolve().parents[1]
+
+# Plane-parallel plates between the last lens surface and the film, listed from the lens side.
+# Nominal geometry (not a specific sensor): a 0.3 mm IR-cut filter whose front face carries the
+# reflective interference stack (its transmittance is the sensor's IRCF curve), 0.8 mm air, a
+# 0.4 mm cover glass, 0.5 mm air to the die. n = 1.523 (D 263 T / B 270 class glass, n_d).
+SENSOR_STACKS = {
+    "none": [],
+    "cover_glass": [{"name": "cover_glass", "thickness_mm": 0.4, "n": 1.523, "gap_after_mm": 0.5, "coating": "mgf2"}],
+    "ircf_cover_glass": [
+        {
+            "name": "ircf",
+            "thickness_mm": 0.3,
+            "n": 1.523,
+            "gap_after_mm": 0.8,
+            "coating": "mgf2",
+            "filter_face": "front",
+            "filter_csv": "spectra/QE/interpolated/QE_IRCF.csv",
+            "filter_n_eff": 1.8,
+        },
+        {"name": "cover_glass", "thickness_mm": 0.4, "n": 1.523, "gap_after_mm": 0.5, "coating": "mgf2"},
+    ],
+}
+
+
+def resolve_sensor_stack(spec) -> list[dict]:
+    """A preset name (``none``, ``cover_glass``, ``ircf_cover_glass``) or an explicit list of plates."""
+    if spec is None:
+        return []
+    if isinstance(spec, str):
+        if spec not in SENSOR_STACKS:
+            raise ValueError(f"unknown sensor_stack {spec!r} (expected one of {sorted(SENSOR_STACKS)} or a list)")
+        return [dict(x) for x in SENSOR_STACKS[spec]]
+    return [dict(x) for x in spec]
+
+
+def _load_edge_filter(item: dict) -> dict:
+    from qe_curves import read_csv_curve
+
+    path = Path(item["filter_csv"])
+    wl, t = read_csv_curve(path if path.is_absolute() else REPO / path)
+    return {
+        "wl": np.asarray(wl, float),
+        "t": np.clip(np.asarray(t, float), 0.0, 1.0),
+        "n_eff": float(item.get("filter_n_eff", 1.8)),
+    }
+
+
+def edge_filter_reflectance(f: dict, lams, beta) -> np.ndarray:
+    """(N, n_lambda) reflectance 1 - T of a lossless interference edge filter.
+
+    The edge moves to shorter wavelengths with angle, T(lambda, theta) = T0(lambda / s),
+    s = sqrt(1 - (sin theta / n_eff)^2) (sin theta in air = beta, invariant through the plate).
+    """
+    s = np.sqrt(np.clip(1.0 - (np.asarray(beta, float) / f["n_eff"]) ** 2, 0.05, 1.0))
+    lam = np.asarray(lams, float)[None, :] / s[:, None]
+    return np.clip(1.0 - np.interp(lam, f["wl"], f["t"], left=f["t"][0], right=f["t"][-1]), 0.0, 1.0)
+
+
+def _add_sensor_stack(lens: Lens, stack: list[dict], design_nm: float) -> None:
+    """Append the plates' faces; the film moves by the plates' focus shift sum t (1 - 1/n)."""
+    if not stack:
+        return
+    lens.z_film += sum(float(x["thickness_mm"]) * (1.0 - 1.0 / float(x["n"])) for x in stack)
+    z = lens.z_film
+    faces = []
+    for x in reversed(stack):
+        n, t = float(x["n"]), float(x["thickness_mm"])
+        rear = z - float(x.get("gap_after_mm", 0.5))
+        front = rear - t
+        z = front
+        ap = float(x.get("semi_aperture_mm", 50.0))
+        coat = coating_for_interface(x.get("coating", "mgf2"), 1.0, n, design_nm)
+        filt = _load_edge_filter(x) if x.get("filter_csv") else None
+        ff = x.get("filter_face", "front")
+        faces[:0] = [
+            Surface(
+                front, math.inf, ap, 1.0, n, coat, filt if ff == "front" else None, f"{x.get('name', 'plate')} front"
+            ),
+            Surface(rear, math.inf, ap, n, 1.0, coat, filt if ff == "rear" else None, f"{x.get('name', 'plate')} rear"),
+        ]
+    if faces[0].z <= lens.surfaces[-1].z:
+        raise ValueError(f"sensor stack does not fit between the last lens surface and the film ({faces[0].z:.3f} mm)")
+    lens.surfaces.extend(faces)
+
+
 def _eta(e: float) -> float:
     return 1.0 if e == 0.0 else float(e)
 
@@ -140,6 +231,7 @@ def load_lens(
     sensor_reflectance: float = 0.0,
     glass_absorption: bool = True,
     rows=None,
+    sensor_stack=None,
 ) -> Lens:
     """Build a :class:`Lens` from a pbrt lens file (or explicit ``rows``), focused like pbrt.
 
@@ -148,6 +240,8 @@ def load_lens(
     stop's listed diameter as pbrt does; ``focus_distance_m`` (from the film, pbrt's ``focusdistance``)
     ``None``/inf focuses at infinity.  A ``<lens>.glass.yaml`` sidecar supplies the glass of each row:
     its bulk absorption (``glass_absorption``) and the dispersion used by :func:`lens_at_wavelength`.
+    ``sensor_stack`` (:func:`resolve_sensor_stack`) adds IR-cut filter / cover-glass plates in front of
+    the film; the film then sits at the focus with the plates (pbrt's render has none).
     """
     rows = rows if rows is not None else load_lens_file(Path(lens_file))
     surface_coatings = {int(k): v for k, v in (surface_coatings or {}).items()}
@@ -184,6 +278,7 @@ def load_lens(
     )
     lens.listed_film_z = z
     lens.z_film, lens.efl_mm = _focus_film_z(lens, focus_distance_m)
+    _add_sensor_stack(lens, resolve_sensor_stack(sensor_stack), design_nm)
     if lens_file is not None:
         lens.dispersion = load_dispersion(lens_file) or []
     lens.glass_absorption = bool(glass_absorption) and any(g is not None for g in lens.dispersion)
@@ -203,6 +298,7 @@ def lens_at_wavelength(lens: Lens, lam_nm: float) -> Lens:
         n_after = float(g.n(lam_nm)) if g is not None else s.n_after
         surfs.append(replace(s, n_before=n_prev, n_after=n_after))
         n_prev = n_after
+    surfs += lens.surfaces[len(surfs) :]  # sensor-stack plates keep their n_d
     return replace(lens, surfaces=surfs, wavelength_nm=float(lam_nm))
 
 
@@ -359,6 +455,12 @@ class _State:
             ok &= _iris_ok(lens, p[:, 0], p[:, 1], s.ap_r)
             return _State(p, self.v, self.alive & ok, events, self.forward, self._path(lens, k, p))
         p0, v = self.p, self.v
+        if not math.isfinite(s.radius):  # plane (sensor-stack plate face)
+            with np.errstate(over="ignore", invalid="ignore"):
+                p, ok = self._to_plane(s.z)
+                alive = self.alive & ok & (p[:, 0] ** 2 + p[:, 1] ** 2 <= s.ap_r * s.ap_r)
+            nrm = np.where((v[:, 2] > 0)[:, None], np.array([0.0, 0.0, -1.0]), np.array([0.0, 0.0, 1.0]))
+            return self._interact(lens, k, kind, s, p, v, nrm, alive, events)
         cz = s.z + s.radius
         oc = p0 - np.array([0.0, 0.0, cz])
         b = _dot(oc, v)
@@ -378,6 +480,9 @@ class _State:
         alive &= p[:, 0] ** 2 + p[:, 1] ** 2 <= s.ap_r * s.ap_r
         nrm = (p - np.array([0.0, 0.0, cz])) / s.radius
         nrm = np.where((_dot(v, nrm) > 0)[:, None], -nrm, nrm)  # face the incoming ray
+        return self._interact(lens, k, kind, s, p, v, nrm, alive, events)
+
+    def _interact(self, lens: Lens, k: int, kind: str, s: Surface, p, v, nrm, alive, events) -> _State:
         cos_i = np.clip(-_dot(v, nrm), 0.0, 1.0)
         n1, n2 = (s.n_before, s.n_after) if self.forward else (s.n_after, s.n_before)
         beta = n1 * np.sqrt(np.clip(1.0 - cos_i**2, 0.0, None))
@@ -458,13 +563,33 @@ def absorption_weights(lens: Lens, res: TraceResult, lams_nm) -> np.ndarray:
     return a
 
 
+def _filter_events(lens: Lens, res: TraceResult) -> tuple[dict, set]:
+    """(edge filter per surface, event indices of each filter's last forward pass).
+
+    The sensor model applies its IRCF transmittance (``ircf_csv``) to all light on the film, so the
+    final pass through the filter face is not weighted here; earlier passes and reflections are.
+    """
+    filt = {k: s.edge_filter for k, s in enumerate(lens.surfaces) if s.edge_filter is not None}
+    last = {}
+    for idx, (k, kind, *_rest) in enumerate(res.events):
+        if k in filt and kind == "T":
+            last[k] = idx
+    return filt, set(last.values())
+
+
 def path_weights(lens: Lens, res: TraceResult, lams_nm) -> np.ndarray:
     """Per-ray spectral throughput (N, n_lambda): product of R or T over all interface events."""
     lams = tuple(float(x) for x in np.atleast_1d(lams_nm))
     w = np.ones((res.alive.size, len(lams)))
-    for k, kind, n1, n2, beta in res.events:
+    filt, skip = _filter_events(lens, res)
+    for idx, (k, kind, n1, n2, beta) in enumerate(res.events):
         if k == lens.sensor_index:
             w *= lens.sensor_reflectance
+            continue
+        if k in filt:
+            if idx not in skip:
+                r = edge_filter_reflectance(filt[k], lams, beta)
+                w *= r if kind == "R" else (1.0 - r)
             continue
         r = lookup_reflectance(reflectance_table(n1, n2, lens.surfaces[k].coating, lams), beta)
         w *= r if kind == "R" else (1.0 - r)
@@ -477,9 +602,15 @@ def path_weights_exact(lens: Lens, res: TraceResult, lams_nm) -> np.ndarray:
     """As :func:`path_weights` but evaluating the thin-film formula per ray (slow; for tests)."""
     lams = np.atleast_1d(np.asarray(lams_nm, float))
     w = np.ones((res.alive.size, lams.size))
-    for k, kind, n1, n2, beta in res.events:
+    filt, skip = _filter_events(lens, res)
+    for idx, (k, kind, n1, n2, beta) in enumerate(res.events):
         if k == lens.sensor_index:
             w *= lens.sensor_reflectance
+            continue
+        if k in filt:
+            if idx not in skip:
+                r = edge_filter_reflectance(filt[k], lams, beta)
+                w *= r if kind == "R" else (1.0 - r)
             continue
         r, t = interface_rt(lams[None, :], beta[:, None], n1, n2, lens.surfaces[k].coating)
         w *= r if kind == "R" else t
@@ -890,6 +1021,7 @@ DEFAULTS = {
     "coating_design_wavelength_nm": DEFAULT_DESIGN_NM,
     "surface_coatings": {},
     "sensor_reflectance": 0.0,
+    "sensor_stack": None,
     "iris_blades": 0,
     "iris_rotation_deg": 0.0,
     "pupil_samples": 64,
@@ -945,6 +1077,7 @@ def lens_from_config(cfg: dict, repo: Path) -> Lens:
         iris_rotation_deg=float(cfg.get("iris_rotation_deg", 0.0)),
         sensor_reflectance=float(cfg.get("sensor_reflectance", 0.0)),
         glass_absorption=bool(cfg.get("glass_absorption", True)),
+        sensor_stack=cfg.get("sensor_stack"),
     )
 
 
