@@ -431,7 +431,28 @@ rut-depth proxy — the wheel-path map of `tools/highway_road_wear.py`, normalis
 by a 6 m longitudinal unevenness — exceeds a level (wet 0.8, flooded 0.6): ≈1 % (wet) and a few
 % (flooded) of the road area, concentrated in the wheel paths. Puddles are a smooth water
 surface (roughness 0) over the wet body (pbrt `mix` with the puddle mask); the road geometry
-stays flat (no depressed water surface, no waves/rain ripples).
+stays flat (no depressed water surface).
+
+**Raindrop ripples** (`--rain-ripples auto|off`, default `auto`: on when `--rain-mmh` > 0). The
+standing water — the puddles, and the whole film at `flooded` — gets a normal map of impact
+rings, one 6 m tile (2 mm texels) on the road-wear UVs. Impacts are a Poisson process at the
+Marshall-Palmer rate of drops ≥ 0.5 mm reaching the road (∫N(D) v(D) dD: ≈750 m⁻² s⁻¹ at
+1 mm/h, ≈3100 at 10 mm/h, ≈6400 at 40 mm/h); each leaves a ring wave packet moving out at
+0.23 m/s (the minimum phase speed of capillary-gravity waves, λ = 17 mm), with an amplitude
+∝ D that decays with a 0.25 s time constant and spreads as 1/√r. The ring speed and wavelength
+are textbook water-wave values; the decay time and the 0.15 peak slope of a ring from a 2 mm
+drop are nominal, not fitted to measurements. The map is a frozen snapshot: it doesn't move
+during `--exposure-s` or between frames. Not modelled: splash crowns, secondary droplets,
+bubbles, and ripples on the thin `wet` film outside the puddles. The manifest's
+`road.wet.ripples` records the impact rate, the ring count and the rms and 99th-percentile
+slopes of the map.
+
+**Tyre tracks** (`--tyre-tracks F`, 0–1, default 0 = off; `damp`/`wet`, no `--puddles`, needs
+`--road-wear` ≠ none). Tyres squeeze the film out of the wheel paths, so they dry first on a
+drying road. The wheel-path map (normalised) sets a dryness mask, smoothstep 0.3–0.8 scaled by
+`F`, that mixes the wet film with the dry road (pbrt `mix`; the dry road's textures are kept
+under `dry:` names). It can't be combined with `--puddles`, which put the water *in* the
+wheel-path ruts. `road.wet.tyre_tracks` records the dry area fraction.
 
 **Wet markings** (night / `--retroreflective on`). The retroreflective paint's R_L is replaced
 by EN 1436:2018 wet classes: wet → RW2 35 mcd·m⁻²·lx⁻¹ (white) / RW1 25 (yellow), the wet-recovery
@@ -773,9 +794,10 @@ choose the rendered band. See [SWIR.md](SWIR.md#highway-scene-in-the-swir-toolsh
   to the patched pbrt `retroreflective` material (see "Night and dusk" below).
 - By default the sky radiance is RGB, upsampled by pbrt; only the sun is spectral (see
   [Spectral sky](#spectral-sky) for the opt-in spectral sky).
-- Texture colour maps only modulate luminance. Wet road: flat puddles (no depression, no
-  ripples/raindrop impacts on the water; falling rain is opt-in, see
-  [Falling rain](#falling-rain---rain-mmh-toolshighway_rainpy)), no tyre-track drying, spray density
+- Texture colour maps only modulate luminance. Wet road: flat puddles (no depression; raindrop
+  ripples are a static normal map, no splashes; falling rain is opt-in, see
+  [Falling rain](#falling-rain---rain-mmh-toolshighway_rainpy)), tyre tracks only from the
+  wheel-path map (no per-vehicle wet tracks or spray-wetted lanes), spray density
   scaling (car factor, flooded ×2, linear speed) assumed; wet markings use EN 1436 class
   minima, not a measured wet retroreflection function.
 - Haze: one HG phase function per medium (Rayleigh folded into g), horizontally uniform
@@ -939,7 +961,8 @@ also sets `--road-wetness wet` when the road is dry or damp.
   streaks change a pixel by about 1 %, below the render noise at a few hundred spp; at 256 spp they show
   up mostly as fine speckle rather than lines. Only drops within 1–2 m, or a long exposure,
   give clear streaks. Raise `--pixelsamples` to resolve them.
-* **Not modelled:** oblate or oscillating drops, splashes and ripples on the road, rain on the
+* **Not modelled:** oblate or oscillating drops, splashes on the road (ripples on puddles: see
+  `--rain-ripples` under [Wet road](#wet-road-puddles-and-vehicle-spray-tools-highway_wetpy)), rain on the
   windscreen (see `--windscreen-rain`).
 
 ## Winter / snow (`--snow`, `--snowfall-mmh`; `tools/highway_snow.py`)
