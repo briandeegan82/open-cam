@@ -30,11 +30,30 @@ assumptions, not measurements of these lenses:
 | `abg_shoulder` | 0.01 | roll-off direction cosine (B = shoulder^g) |
 | `reference_nm` | 550 | wavelength at which the kernel is built; other bands scale by (λ₀/λ)² |
 
+## Field dependence and barrel scatter (opt-in)
+
+- `field_zones: N` (default 1, which is shift-invariant as before) builds a kernel at N image
+  radii, from the centre to the corner, and blends them with linear weights in the source's
+  radius: `out = sum_z K_z * (w_z img)`.
+  - *Cone truncation:* off axis, each surface's scatter cone starts from the paraxial chief ray
+    at height y_i. A later aperture a_j then cuts it at `(a_j - |y_j|) / (n_i |C_ij|)`, so more of
+    the cone goes into the barrel.
+  - *Obliquity:* the chief ray's incidence angle scales TIS by the Rayleigh–Rice transmission
+    factor `((n2 cos t - n1 cos i) / (n2 - n1))^2`.
+  - *Effect:* for `wide_22mm` at f/2.75, the share of the scatter that reaches the film falls
+    from 0.89 on axis to 0.79 in the corner of a 14.4 x 9.6 mm frame. Scatter around a corner
+    source is up to ~20 % lower than with the shift-invariant kernel.
+  - *Cost:* N FFT convolutions per channel instead of one.
+- `barrel_reflectance: rho` (default 0, where the truncated scatter is absorbed) sends rho times
+  the truncated scatter back to the film as a uniform veiling floor over the frame. This is
+  nominal: black anodised barrels are about 0.02–0.05, the geometry isn't traced, and all of the
+  re-emitted light is assumed to reach the frame (an upper bound).
+
 ## Not modelled
 
-Particulate contamination, lens-barrel / mount / edge scatter, out-of-field sources, the
-sensor cover glass, field-dependent (shift-variant) scatter, and any wavelength dependence of
-the ABg shape. Real lenses' ISO 9358 veiling-glare index is usually dominated by barrel and
+Particulate contamination, edge scatter, out-of-field sources, the sensor cover glass's own
+scatter, the angular distribution of the barrel light, and any wavelength dependence of the
+ABg shape. Real lenses' ISO 9358 veiling-glare index is usually dominated by barrel and
 mount scatter, so these numbers are a lower bound for the optics, not a prediction of a real
 lens' VGI.
 

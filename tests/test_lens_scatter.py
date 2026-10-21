@@ -86,3 +86,35 @@ def test_scatter_bluer(lens):
     out, _ = ls.apply_scatter(img, [450.0, 650.0], lens, 0.01)
     halo = out.sum((0, 1)) - out[50, 50]
     assert halo[0] / halo[1] == pytest.approx((650 / 450) ** 2, rel=0.05)
+
+
+def test_field_dependence_on_axis_identical_and_edge_vignettes_scatter(lens):
+    a, b = ls.surface_scatter(lens), ls.surface_scatter(lens, 0.0)
+    assert [(s.k_mm, s.beta_max, s.obliquity) for s in a] == [(s.k_mm, s.beta_max, s.obliquity) for s in b]
+    off = ls.surface_scatter(lens, 0.3)
+    assert all(o.beta_max <= s.beta_max + 1e-12 for o, s in zip(off, a, strict=True))
+    assert any(o.beta_max < 0.9 * s.beta_max for o, s in zip(off, a, strict=True))
+    assert all(o.k_mm == s.k_mm for o, s in zip(off, a, strict=True))
+    # Rayleigh-Rice transmission factor grows with incidence angle at an air-glass face.
+    assert max(o.obliquity for o in off) > 1.0
+    # Chief-ray film height is linear in the field slope (paraxial).
+    assert ls.film_height_slope(lens) == pytest.approx(
+        lg.paraxial_chief_height(lens, lg.primary_path(lens), 0.02) / 0.02, rel=1e-9
+    )
+
+
+def test_field_zones_and_barrel_term(lens):
+    img = np.zeros((61, 81, 1))
+    img[30, 40, 0] = 1.0  # on-axis impulse
+    one, _ = ls.apply_scatter(img, [550.0], lens, 0.02)
+    five, info = ls.apply_scatter(img, [550.0], lens, 0.02, {"field_zones": 5})
+    np.testing.assert_allclose(five, one, atol=1e-9)  # the centre zone is the shift-invariant kernel
+    assert len(info["field"]) == 5 and info["field"][-1]["reaches_film"] < info["field"][0]["reaches_film"]
+    rho = 0.05
+    bar, binfo = ls.apply_scatter(img, [550.0], lens, 0.02, {"barrel_reflectance": rho})
+    lost = sum(s["tis"] * (1.0 - s["reaches_film"]) for s in binfo["surfaces"])
+    floor = (bar - one)[:, :, 0].astype(np.float64)
+    floor[30, 40] = np.nan  # float32 cannot hold the floor on top of the impulse
+    expect = rho * lost / floor.size
+    np.testing.assert_allclose(floor[np.isfinite(floor)], expect, rtol=1e-4)
+    assert ls.DEFAULTS["field_zones"] == 1 and ls.DEFAULTS["barrel_reflectance"] == 0.0
