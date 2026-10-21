@@ -1,0 +1,231 @@
+diff --git a/src/pbrt/base/bxdf.h b/src/pbrt/base/bxdf.h
+index 575ddc4..76cb13f 100644
+--- a/src/pbrt/base/bxdf.h
++++ b/src/pbrt/base/bxdf.h
+@@ -162,6 +162,7 @@ class NormalizedFresnelBxDF;
+ class CoatedDiffuseBxDF;
+ class CoatedConductorBxDF;
+ class RetroreflectiveBxDF;
++class SnowBxDF;
+ class RoadRTableBxDF;
+ 
+ // BxDF Definition
+@@ -169,7 +170,7 @@ class BxDF
+     : public TaggedPointer<DiffuseTransmissionBxDF, DiffuseBxDF, CoatedDiffuseBxDF,
+                            CoatedConductorBxDF, DielectricBxDF, ThinDielectricBxDF,
+                            HairBxDF, MeasuredBxDF, ConductorBxDF, NormalizedFresnelBxDF,
+-                           RetroreflectiveBxDF, RoadRTableBxDF> {
++                           RetroreflectiveBxDF, RoadRTableBxDF, SnowBxDF> {
+   public:
+     // BxDF Interface
+     PBRT_CPU_GPU inline BxDFFlags Flags() const;
+diff --git a/src/pbrt/base/material.h b/src/pbrt/base/material.h
+index 4bec85d..640969e 100644
+--- a/src/pbrt/base/material.h
++++ b/src/pbrt/base/material.h
+@@ -31,6 +31,7 @@ class SubsurfaceMaterial;
+ class ThinDielectricMaterial;
+ class MixMaterial;
+ class RetroreflectiveMaterial;
++class SnowMaterial;
+ class FluorescentMaterial;
+ class RoadRTableMaterial;
+ 
+@@ -40,7 +41,7 @@ class Material
+           CoatedDiffuseMaterial, CoatedConductorMaterial, ConductorMaterial,
+           DielectricMaterial, DiffuseMaterial, DiffuseTransmissionMaterial, HairMaterial,
+           MeasuredMaterial, SubsurfaceMaterial, ThinDielectricMaterial, MixMaterial,
+-          RetroreflectiveMaterial, FluorescentMaterial, RoadRTableMaterial
++          RetroreflectiveMaterial, FluorescentMaterial, RoadRTableMaterial, SnowMaterial
+ 
+           > {
+   public:
+diff --git a/src/pbrt/bxdfs.cpp b/src/pbrt/bxdfs.cpp
+index 4594557..ba12e4b 100644
+--- a/src/pbrt/bxdfs.cpp
++++ b/src/pbrt/bxdfs.cpp
+@@ -64,6 +64,10 @@ std::string RoadRTableBxDF::ToString() const {
+                         alpha0, alpha1, table ? table->q0 : Float(0));
+ }
+ 
++std::string SnowBxDF::ToString() const {
++    return StringPrintf("[ SnowBxDF rs: %s ]", rs);
++}
++
+ std::string RetroreflectiveBxDF::ToString() const {
+     return StringPrintf("[ RetroreflectiveBxDF R: %s ra: %s alpha0: %f width: %f q: %f ]", R,
+                         ra, alpha0, width, q);
+diff --git a/src/pbrt/bxdfs.h b/src/pbrt/bxdfs.h
+index 3cb0cb9..e6affbc 100644
+--- a/src/pbrt/bxdfs.h
++++ b/src/pbrt/bxdfs.h
+@@ -244,6 +244,76 @@ class RoadRTableBxDF {
+ // alpha is the observation angle (between wi and wo), alpha0 the reference observation
+ // angle at which ra is specified (normal entrance) and q the entrance-angle exponent.
+ // R_L of road markings (EN 1436) maps to q = 0, ra = R_L cos(theta_o).
++// Snow reflection function of asymptotic radiative transfer (Kokhanovsky & Zege 2004;
++// R0 of Kokhanovsky et al. 2005): R = R0 rs^x, x = u(mu0) u(mu) / R0, u(mu) = 3/7 (1 + 2 mu),
++// R0 = [A + B (mu + mu0) + C mu mu0 + p(theta)] / [4 (mu + mu0)], p(theta) = 11.1 exp(-0.087 theta)
++// + 1.1 exp(-0.014 theta) (theta in degrees, the scattering angle). rs: spherical albedo.
++class SnowBxDF {
++  public:
++    SnowBxDF() = default;
++    PBRT_CPU_GPU
++    SnowBxDF(SampledSpectrum rs) : rs(rs) {}
++
++    PBRT_CPU_GPU
++    static Float R0(Float mu0, Float mu, Float cosScatter) {
++        Float theta = Degrees(SafeACos(cosScatter));
++        Float p = 11.1f * std::exp(-0.087f * theta) + 1.1f * std::exp(-0.014f * theta);
++        return (1.247f + 1.186f * (mu + mu0) + 5.157f * mu * mu0 + p) / (4 * (mu + mu0));
++    }
++
++    PBRT_CPU_GPU
++    SampledSpectrum f(Vector3f wo, Vector3f wi, TransportMode mode) const {
++        if (!SameHemisphere(wo, wi))
++            return SampledSpectrum(0.f);
++        Float mu0 = AbsCosTheta(wi), mu = AbsCosTheta(wo);
++        if (mu0 <= 0 || mu <= 0)
++            return SampledSpectrum(0.f);
++        Float r0 = R0(mu0, mu, -Dot(wi, wo));
++        Float x = Sqr(3.f / 7.f) * (1 + 2 * mu0) * (1 + 2 * mu) / r0;
++        SampledSpectrum R;
++        for (int i = 0; i < NSpectrumSamples; ++i)
++            R[i] = rs[i] > 0 ? r0 * std::pow(rs[i], x) : 0;
++        return R * InvPi;
++    }
++
++    PBRT_CPU_GPU
++    pstd::optional<BSDFSample> Sample_f(
++        Vector3f wo, Float uc, Point2f u, TransportMode mode,
++        BxDFReflTransFlags sampleFlags = BxDFReflTransFlags::All) const {
++        if (!(sampleFlags & BxDFReflTransFlags::Reflection))
++            return {};
++        Vector3f wi = SampleCosineHemisphere(u);
++        if (wo.z < 0)
++            wi.z *= -1;
++        Float pdf = CosineHemispherePDF(AbsCosTheta(wi));
++        if (pdf <= 0)
++            return {};
++        return BSDFSample(f(wo, wi, mode), wi, pdf, BxDFFlags::DiffuseReflection);
++    }
++
++    PBRT_CPU_GPU
++    Float PDF(Vector3f wo, Vector3f wi, TransportMode mode,
++              BxDFReflTransFlags sampleFlags = BxDFReflTransFlags::All) const {
++        if (!(sampleFlags & BxDFReflTransFlags::Reflection) || !SameHemisphere(wo, wi))
++            return 0;
++        return CosineHemispherePDF(AbsCosTheta(wi));
++    }
++
++    PBRT_CPU_GPU
++    static constexpr const char *Name() { return "SnowBxDF"; }
++
++    std::string ToString() const;
++
++    PBRT_CPU_GPU
++    void Regularize() {}
++
++    PBRT_CPU_GPU
++    BxDFFlags Flags() const { return rs ? BxDFFlags::DiffuseReflection : BxDFFlags::Unset; }
++
++  private:
++    SampledSpectrum rs;
++};
++
+ class RetroreflectiveBxDF {
+   public:
+     // RetroreflectiveBxDF Public Methods
+diff --git a/src/pbrt/materials.cpp b/src/pbrt/materials.cpp
+index 30094f8..e9197f3 100644
+--- a/src/pbrt/materials.cpp
++++ b/src/pbrt/materials.cpp
+@@ -264,6 +264,24 @@ RoadRTableMaterial *RoadRTableMaterial::Create(const TextureParameterDictionary
+ }
+ 
+ // RetroreflectiveMaterial Method Definitions
++std::string SnowMaterial::ToString() const {
++    return StringPrintf("[ SnowMaterial displacement: %s normalMap: %s reflectance: %s ]",
++                        displacement,
++                        normalMap ? normalMap->ToString() : std::string("(nullptr)"),
++                        reflectance);
++}
++
++SnowMaterial *SnowMaterial::Create(const TextureParameterDictionary &parameters,
++                                   Image *normalMap, const FileLoc *loc, Allocator alloc) {
++    SpectrumTexture reflectance = parameters.GetSpectrumTexture(
++        "reflectance", nullptr, SpectrumType::Albedo, alloc);
++    if (!reflectance)
++        reflectance = alloc.new_object<SpectrumConstantTexture>(
++            alloc.new_object<ConstantSpectrum>(0.99f));
++    FloatTexture displacement = parameters.GetFloatTextureOrNull("displacement", alloc);
++    return alloc.new_object<SnowMaterial>(reflectance, displacement, normalMap);
++}
++
+ std::string RetroreflectiveMaterial::ToString() const {
+     return StringPrintf("[ RetroreflectiveMaterial displacement: %s normalMap: %s "
+                         "reflectance: %s ra: %s alpha0: %f width: %f q: %f ]",
+@@ -820,6 +838,8 @@ Material Material::Create(const std::string &name,
+         material = RoadRTableMaterial::Create(parameters, normalMap, loc, alloc);
+     else if (name == "retroreflective")
+         material = RetroreflectiveMaterial::Create(parameters, normalMap, loc, alloc);
++    else if (name == "snow")
++        material = SnowMaterial::Create(parameters, normalMap, loc, alloc);
+     else if (name == "subsurface")
+         material = SubsurfaceMaterial::Create(parameters, normalMap, loc, alloc);
+     else if (name == "mix") {
+diff --git a/src/pbrt/materials.h b/src/pbrt/materials.h
+index 46a71b6..d324e93 100644
+--- a/src/pbrt/materials.h
++++ b/src/pbrt/materials.h
+@@ -531,6 +531,50 @@ class RoadRTableMaterial {
+ };
+ 
+ // RetroreflectiveMaterial Definition
++// Snow (SnowBxDF): "spectrum reflectance" is the spherical albedo of the deep snow layer.
++class SnowMaterial {
++  public:
++    using BxDF = SnowBxDF;
++    using BSSRDF = void;
++
++    static const char *Name() { return "SnowMaterial"; }
++
++    PBRT_CPU_GPU
++    FloatTexture GetDisplacement() const { return displacement; }
++    PBRT_CPU_GPU
++    const Image *GetNormalMap() const { return normalMap; }
++
++    static SnowMaterial *Create(const TextureParameterDictionary &parameters,
++                                Image *normalMap, const FileLoc *loc, Allocator alloc);
++
++    template <typename TextureEvaluator>
++    PBRT_CPU_GPU void GetBSSRDF(TextureEvaluator texEval, MaterialEvalContext ctx,
++                                SampledWavelengths &lambda, void *) const {}
++
++    PBRT_CPU_GPU static constexpr bool HasSubsurfaceScattering() { return false; }
++
++    std::string ToString() const;
++
++    SnowMaterial(SpectrumTexture reflectance, FloatTexture displacement, Image *normalMap)
++        : normalMap(normalMap), displacement(displacement), reflectance(reflectance) {}
++
++    template <typename TextureEvaluator>
++    PBRT_CPU_GPU bool CanEvaluateTextures(TextureEvaluator texEval) const {
++        return texEval.CanEvaluate({}, {reflectance});
++    }
++
++    template <typename TextureEvaluator>
++    PBRT_CPU_GPU SnowBxDF GetBxDF(TextureEvaluator texEval, MaterialEvalContext ctx,
++                                  SampledWavelengths &lambda) const {
++        return SnowBxDF(Clamp(texEval(reflectance, ctx, lambda), 0, 1));
++    }
++
++  private:
++    Image *normalMap;
++    FloatTexture displacement;
++    SpectrumTexture reflectance;
++};
++
+ class RetroreflectiveMaterial {
+   public:
+     // RetroreflectiveMaterial Type Definitions

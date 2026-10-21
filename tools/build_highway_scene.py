@@ -1116,6 +1116,9 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
             "paved": [(Layout.median_l, Layout.right_paved), (Layout.opp_paved, Layout.median_l)],
             "lane_centres": [Layout.lane_center(i) for i in (*range(N_LANES), *range(-N_LANES, 0))],
             "banks": [(Layout.right_paved, 1.0), (Layout.opp_paved, -1.0)],
+            "lane_lines": [
+                inner + side * k * LANE_W for side, inner in ((1, 0.0), (-1, Layout.opp_inner)) for k in (1, 2)
+            ],
             "z0": ROAD_Z0,
             "z1": ROAD_Z1,
             "fov_deg": args.fov if args.camera != "realistic" else 90.0,
@@ -1123,7 +1126,8 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         }
         smats, sgeom, snow_meta = snow.scene_lines(args, wl, spd, out_dir, geo, eye, mesh, quads_mesh, extrude_profile)
         if args.snow != "none":
-            verge = '"string type" "diffuse" "spectrum reflectance" "spd/snow_verge.spd"'
+            kind = "snow" if args.snow_brdf == "art" else "diffuse"
+            verge = f'"string type" "{kind}" "spectrum reflectance" "spd/snow_verge.spd"'
             L = snow.replace_materials(L, {g: f'MakeNamedMaterial "{g}" {verge}' for g in ("grass", "grass_far")})
         w = L.index("WorldBegin")
         L[w + 1 : w + 1] = smats

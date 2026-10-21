@@ -949,23 +949,41 @@ also sets `--road-wetness wet` when the road is dry or damp.
 Off by default. `--snow verges` covers the verges and distant terrain with snow and adds plough
 banks (0.30–0.45 m, between the paved edge and the guard rail; `--no-snowbanks` removes them),
 leaving the road clear. `slush` adds grey slush everywhere except two wheel tracks per lane
-(lane centre ± 0.85 m, 0.6 m wide, jittered) and sets `--road-wetness wet` so the tracks are wet
-asphalt. `packed` covers the whole road with compacted snow, hiding the markings.
+(lane centre ± 0.85 m, 0.6 m wide, wandering smoothly along the road) and sets `--road-wetness wet`
+so the tracks are wet asphalt. The lane lines lie between the tracks, so they are under the slush;
+the edge of each track is continuous from one road segment to the next. `packed` covers the whole
+road with compacted snow, hiding the markings.
 
 * **Reflectance:** spherical albedo of a deep snow layer from asymptotic radiative transfer
   (Kokhanovsky & Zege 2004), r = exp(−√(α · 13 d)), with α from the ice absorption index of
   Warren & Brandt (2008) (`spectra/ice/warren_brandt_2008.csv`, 350–1200 nm) plus an impurity term
   ∝ λ⁻¹. Fresh 0.25 mm verge snow is 0.99 in the visible and drops in the NIR (0.74 at 1030 nm);
   `--snow-grain-mm` and `--snow-dirt clean|light|heavy` change it. Road slush (1.5 mm, heavy dirt)
-  is about 0.6 and carries a smooth water film. Impurity levels are nominal. Snow is Lambertian:
-  the forward-scattering BRDF of snow and its sub-surface blur are not modelled.
+  is about 0.6 and carries a smooth water film. Impurity levels are nominal.
+* **Angular reflectance (`--snow-brdf art|lambertian`, default `art`):** the verge, bank,
+  packed-road and terrain snow use the reflection function of the same asymptotic theory
+  (Kokhanovsky & Zege 2004), R = R0 · r^x with x = u(μ0) u(μ) / R0, u(μ) = 3/7 (1 + 2μ) and the
+  non-absorbing-snow function R0 = [1.247 + 1.186 (μ + μ0) + 5.157 μ μ0 + p(θ)] / [4 (μ + μ0)],
+  p(θ) = 11.1 e^(−0.087 θ) + 1.1 e^(−0.014 θ) (Kokhanovsky et al. 2005; θ the scattering angle in
+  degrees; constants as quoted by Negi & Kokhanovsky 2011, The Cryosphere 5, 831, Eq. 9). It is
+  pbrt material `"snow"` (patch 0018, `"spectrum reflectance"` = the spherical albedo r). Relative
+  to a Lambertian surface of the same albedo, snow under a 23° sun is 0.92× at nadir and 1.48×
+  looking 75° off nadir into the forward-scattering direction (r = 0.9); its plane albedo stays
+  within 0.03 of r^u(μ0). The light leaves where it enters: the mm-scale sub-surface blur is not
+  modelled. Falling flakes stay Lambertian (a flake is not a deep layer) and road slush keeps its
+  water-film coated diffuse. `lambertian` gives the old diffuse snow.
+* **Lane lines in slush (`--slush-marking-cover F`, default 1):** the fraction of each broken lane
+  line's length under slush. Below 1, random stretches (mean 4 m exposed, the rest covered in
+  proportion) are cleared 0.4 m wide over the line, as lane-changing traffic leaves them. Both
+  values are nominal; the edge lines stay covered. The manifest lists the exposed length per line.
 * **Falling snow:** `--snowfall-mmh R` (melted rate) scatters static spherical flakes in the view
   pyramid out to `--snowfall-range-m` (default 15 m), with the Gunn & Marshall (1958) size
   distribution and flake bulk density `--snowflake-density` (0.1 g/cm³). The manifest gives the
   equivalent extinction (2 × geometric cross-section) and visibility (≈ 900 m at 1 mm/h); add
   `--haze mist --visibility-m <that>` for the snowfall beyond the flake range. Flakes are static
   (no motion streaks) and the count grows with range³ (≈ 0.34 M at 1 mm/h, 15 m, 31° fov).
-* **Not modelled:** snow on trees, cars and signs; snow-covered markings in `slush`.
+* **Not modelled:** snow on trees, cars and signs; partly covered or translucent thin slush over a
+  marking (a marking is either fully under the slush or fully cleared).
 
 ## Parking garage / surround-view fisheye (`tools/build_garage_scene.py`)
 
