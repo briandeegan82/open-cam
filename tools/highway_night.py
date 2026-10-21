@@ -43,6 +43,7 @@ import math
 import os
 from pathlib import Path
 
+import highway_atmosphere as atmosphere
 import highway_taillamps as taillamps
 import numpy as np
 from colour_science import correlated_colour_temperature, tristimulus, xy_chromaticity
@@ -539,7 +540,14 @@ def add_night_args(ap: argparse.ArgumentParser) -> None:
         "--rear-fog-lamps",
         choices=("auto", "on", "none"),
         default="auto",
-        help="Traffic rear fog lamps (200 cd, one on the left; detailed tail lamps only). auto = on with --haze fog.",
+        help="Traffic rear fog lamps (200 cd, one on the left; detailed tail lamps only). auto = on when the "
+        "haze visibility (MOR) is below --rear-fog-visibility-m.",
+    )
+    g.add_argument(
+        "--rear-fog-visibility-m",
+        type=float,
+        default=50.0,
+        help="--rear-fog-lamps auto switches them on below this visibility [m] (MOR; default 50 m, StVO 17(3)).",
     )
     g.add_argument("--streetlights", choices=("auto", "none", "led_4000k", "hps"), default="auto")
     g.add_argument("--retroreflective", choices=("auto", "on", "off"), default="auto")
@@ -548,16 +556,30 @@ def add_night_args(ap: argparse.ArgumentParser) -> None:
 def resolve(args: argparse.Namespace) -> dict:
     """Effective night options (``auto`` -> on for dusk/night, off for day)."""
     dark = args.time_of_day != "day"
+    rear_fog = getattr(args, "rear_fog_lamps", "auto")
     return {
         "dark": dark,
         "headlamps": ("mixed" if dark else "off") if args.headlamps == "auto" else args.headlamps,
         "streetlights": ("led_4000k" if dark else "none") if args.streetlights == "auto" else args.streetlights,
         "retroreflective": dark if args.retroreflective == "auto" else args.retroreflective == "on",
         "tail_lamps": getattr(args, "tail_lamps", "detailed"),
-        "rear_fog": {"on": True, "none": False}.get(
-            getattr(args, "rear_fog_lamps", "auto"), getattr(args, "haze", "none") == "fog"
-        ),
+        "rear_fog": rear_fog_auto(args) if rear_fog == "auto" else rear_fog == "on",
     }
+
+
+def mor_visibility_m(args: argparse.Namespace) -> float | None:
+    """Meteorological optical range [m] of the haze medium (inside a fog bank), None without haze."""
+    p = atmosphere.params_from_args(args)
+    if p is None:
+        return None
+    c = atmosphere.VISIBILITY_CONTRAST
+    return p.visibility_m * math.log(c["mor"]) / math.log(c[p.visibility_definition])
+
+
+def rear_fog_auto(args: argparse.Namespace) -> bool:
+    """``--rear-fog-lamps auto``: on when the visibility is below ``--rear-fog-visibility-m``."""
+    v = mor_visibility_m(args)
+    return v is not None and v < getattr(args, "rear_fog_visibility_m", 50.0)
 
 
 def natural_sources(args: argparse.Namespace) -> list[dict]:
