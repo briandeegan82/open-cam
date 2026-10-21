@@ -917,8 +917,8 @@ quads with nominal on-axis intensities: bicycle 1000 cd front (about the 10 lx a
 StVZO bicycle headlamps must reach) and 4 cd rear, motorbike 1000 cd front and 6 cd rear (as a
 car tail lamp). I haven't checked these against StVZO, UN R50 or R113. Positions are estimated
 from the contact points (front about 10 cm ahead of and below the grips; rear below and behind the
-saddle), not traced from the models. The lamps are seen, but they don't light the road (no beam),
-and a crossing target shows them edge-on, so they are mostly visible with `--vru-motion along`.
+saddle), not traced from the models. They light the road only as diffuse emitters (no beam shape or
+cut-off), and a crossing target shows them edge-on, so they are mostly visible with `--vru-motion along`.
 The manifest gives `vru.lamps` (or `null`). Parked two-wheelers stay unlit.
 
 ## Falling rain (`--rain-mmh`; `tools/highway_rain.py`)
