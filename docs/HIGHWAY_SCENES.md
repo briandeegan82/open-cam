@@ -1002,8 +1002,20 @@ truth) and the pillar positions.
   (default) puts LED battens (CIE LED-B4, 4400 lm) over the aisle and twin-T8 fluorescent fittings
   (`--fluorescent-type f2|f11`, 8300 lm) over the bays; `fluorescent` or `led` uses one type
   throughout. `--lights-off-fraction` (default 0.15) leaves fittings dead. Fittings are flat
-  Lambertian diffusers (luminance = flux / (π × area)); fluxes are nominal catalogue values and
-  mains flicker is not modelled.
+  Lambertian diffusers (luminance = flux / (π × area)); fluxes are nominal catalogue values.
+* **Mains flicker:** `--mains-flicker on` (default) gives each fitting a sinusoidal light-output
+  ripple at twice `--mains-hz` (50 or 60). Its depth follows a nominal percent flicker, (max − min)
+  / (max + min): 35 % for `--fluorescent-ballast magnetic` (default), 5 % for `electronic`, and
+  `--led-percent-flicker` (default 10 %) for the LED battens. The three ceiling rows sit on the
+  three supply phases, 120° apart, so they ripple out of step and largely cancel in the ambient
+  light; `--mains-phases 1` puts every fitting on one phase, which gives strong rolling-shutter
+  bands. The peak luminance is set so the
+  time average is the nominal value, so a plain render is unchanged. With `--exposure-s` (and
+  `--rolling-line-time-s`, default 15 µs) the manifest records the exposure, and
+  `tools/render_time_slices.py --linear` renders the per-row banding a short exposure gets (each
+  row is one flicker emitter; the slice mode steps the ripple in 16 levels per period). Real
+  ballast and driver waveforms are not sinusoidal, and the percent-flicker values are nominal, not
+  measured. `--mains-flicker off` writes the fittings inline, as before.
 
 ## Unlit rural road at night (`tools/build_rural_scene.py`)
 

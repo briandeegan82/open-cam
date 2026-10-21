@@ -344,8 +344,92 @@ class PWM:
     def edges(self, t0: float, t1: float) -> list[float]:
         return sorted({x for iv in self.on_intervals(t0, t1) for x in iv if t0 < x < t1})
 
+    def state(self, t: float) -> str:
+        return "on" if self.is_on(t) else "off"
+
+    def state_levels(self) -> dict[str, float]:
+        return {"on": 1.0, "off": 0.0}
+
     def as_dict(self) -> dict:
         return {"frequency_hz": self.frequency_hz, "duty": self.duty, "phase_s": self.phase_s}
+
+
+@dataclass
+class MainsRipple:
+    """Light output of a mains-driven lamp: a sinusoidal ripple at twice the line frequency.
+
+    level(t) = 1 - d (1 + cos(2 pi f (t - phase_s))) / 2 (peak 1, trough 1 - d at ``phase_s``), with
+    the depth d set by the percent flicker PF = (max - min) / (max + min): d = 2 PF / (1 + PF).
+    Time slicing (tools/render_time_slices.py) uses ``steps`` constant levels per period, each the
+    exact mean over its step; ``on_fraction`` (the mean level over a window) is exact.
+    """
+
+    frequency_hz: float
+    percent_flicker: float
+    phase_s: float = 0.0
+    steps: int = 16
+
+    @property
+    def depth(self) -> float:
+        pf = min(max(self.percent_flicker, 0.0), 1.0)
+        return 2.0 * pf / (1.0 + pf)
+
+    def _integral(self, t: float) -> float:
+        w = 2.0 * math.pi * self.frequency_hz
+        d = self.depth
+        return (1.0 - d / 2.0) * t - d / 2.0 * math.sin(w * (t - self.phase_s)) / w
+
+    def on_fraction(self, t0: float, t1: float) -> float:
+        if t1 <= t0:
+            return self.level(t0)
+        return (self._integral(t1) - self._integral(t0)) / (t1 - t0)
+
+    def level(self, t: float) -> float:
+        return 1.0 - self.depth * (1.0 + math.cos(2.0 * math.pi * self.frequency_hz * (t - self.phase_s))) / 2.0
+
+    @property
+    def duty(self) -> float:  # mean level (the frame average without an exposure window)
+        return 1.0 - self.depth / 2.0
+
+    def _step(self, t: float) -> int:
+        return int(math.floor(((t - self.phase_s) * self.frequency_hz % 1.0) * self.steps)) % self.steps
+
+    def edges(self, t0: float, t1: float) -> list[float]:
+        dt = 1.0 / (self.frequency_hz * self.steps)
+        k = math.floor((t0 - self.phase_s) / dt) + 1
+        out = []
+        while self.phase_s + k * dt < t1:
+            out.append(self.phase_s + k * dt)
+            k += 1
+        return out
+
+    def state(self, t: float) -> str:
+        return f"s{self._step(t)}"
+
+    def state_levels(self) -> dict[str, float]:
+        dt = 1.0 / (self.frequency_hz * self.steps)
+        levels = {"on": 1.0, "off": 0.0}
+        for k in range(self.steps):
+            a = self.phase_s + k * dt
+            levels[f"s{k}"] = self.on_fraction(a, a + dt)
+        return levels
+
+    def as_dict(self) -> dict:
+        return {
+            "type": "mains",
+            "frequency_hz": self.frequency_hz,
+            "percent_flicker": self.percent_flicker,
+            "phase_s": self.phase_s,
+            "steps": self.steps,
+        }
+
+
+def waveform_from_dict(d: dict) -> PWM | MainsRipple:
+    """Inverse of ``as_dict`` for a manifest emitter's ``pwm`` entry."""
+    d = dict(d)
+    if d.pop("type", "pwm") == "mains":
+        return MainsRipple(**d)
+    return PWM(**d)
 
 
 def write_emitter(
@@ -353,7 +437,7 @@ def write_emitter(
     eid: str,
     lines_for_level,
     *,
-    pwm: PWM | None,
+    pwm: PWM | MainsRipple | None,
     exposure_window_s: tuple[float, float] | None,
     meta: dict | None = None,
 ) -> tuple[str, dict]:
@@ -374,13 +458,14 @@ def write_emitter(
         level = min(max(pwm.duty, 0.0), 1.0) if pwm.frequency_hz > 0 else 1.0
     else:
         level = pwm.on_fraction(*exposure_window_s)
-    files = {"default": f"emitters/{eid}.pbrt", "on": f"emitters/{eid}.on.pbrt", "off": f"emitters/{eid}.off.pbrt"}
-    for key, lv in (("default", level), ("on", 1.0), ("off", 0.0)):
+    levels = {"default": level, **(pwm.state_levels() if pwm else {"on": 1.0, "off": 0.0})}
+    files = {k: f"emitters/{eid}.pbrt" if k == "default" else f"emitters/{eid}.{k}.pbrt" for k in levels}
+    for key, lv in levels.items():
         (out_dir / files[key]).write_text("\n".join(lines_for_level(lv)) + "\n")
     entry = {
         "id": eid,
         "include": files["default"],
-        "states": {"on": files["on"], "off": files["off"]},
+        "states": {k: f for k, f in files.items() if k != "default"},
         "default_level": level,
         "pwm": pwm.as_dict() if pwm else None,
         **(meta or {}),
