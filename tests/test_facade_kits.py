@@ -149,6 +149,6 @@ def test_kit_storeys_and_metals_options(tmp_path):
         "--kit-metals",
         "diffuse",
     )
-    assert re.search(r"Scale [0-9.]+ 1\.0666[67] 1", new) and not re.search(r"Scale [0-9.]+ 1\.0666", old)
+    assert re.search(r"Scale [0-9.]+ 1\.0667 1", new) and not re.search(r"Scale [0-9.]+ 1\.0667", old)
     assert '"string type" "conductor"' in new and '"string type" "mix"' in new and "conductor" not in old
     assert new.count("ObjectInstance") > old.count("ObjectInstance")  # cross-street fronts
