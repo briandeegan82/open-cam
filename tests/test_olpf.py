@@ -98,3 +98,40 @@ def test_electron_conversion_applies_olpf_once_and_cuts_colour_aliasing():
     # Spots that land outside the frame are lost (<= split / 2 / width at the edge columns).
     np.testing.assert_allclose(e_on.mean((0, 1)), e_off.mean((0, 1)), rtol=5e-3)
     assert _cfa_false_colour(e_on) < 0.3 * _cfa_false_colour(e_off)
+
+
+def test_angle_dependent_split_exact_trace():
+    import math
+
+    import olpf
+
+    t = 680.0
+    dx, dy = olpf.plate_split_um(t, 550.0, 45.0, "x", 0.0, 0.0)
+    assert dx == pytest.approx(t * olpf.walkoff_tan(550.0, 45.0), rel=1e-12) and dy == pytest.approx(0.0, abs=1e-12)
+    s = math.sin(math.radians(20.0))
+    plus, minus = olpf.plate_split_um(t, 550.0, 45.0, "x", s, 0.0), olpf.plate_split_um(t, 550.0, 45.0, "x", -s, 0.0)
+    assert plus[0] < dx < minus[0]  # tilting toward / away from the optic axis shrinks / grows the split
+    side = olpf.plate_split_um(t, 550.0, 45.0, "y", 0.0, s)
+    assert side[1] == pytest.approx(plus[0], rel=1e-9)  # the y plate is the x plate rotated by 90 deg
+
+
+def test_angle_dependence_off_by_default_and_centre_matches():
+    import olpf
+
+    rng = np.random.default_rng(0)
+    img = rng.random((41, 61)).astype(np.float32)
+    base = {"pixel_pitch_um": 4.0, "olpf": {"enabled": True, "thickness_x_um": 680, "thickness_y_um": 680}}
+    off, info0 = olpf.apply_channels({"S0.550nm": img}, base)
+    assert "angle_dependence" not in info0
+    flat = {**base, "olpf": {**base["olpf"], "angle_dependence": {"enabled": True, "max_cra_deg": 0.0}}}
+    same, _ = olpf.apply_channels({"S0.550nm": img}, flat)
+    np.testing.assert_allclose(same["S0.550nm"], off["S0.550nm"], atol=1e-3)  # zones blend to the old filter
+    tilt = {**base, "olpf": {**base["olpf"], "angle_dependence": {"enabled": True, "max_cra_deg": 30.0}}}
+    _o, info = olpf.apply_channels({"S0.550nm": img}, tilt)
+    ad = info["angle_dependence"]
+    assert ad["dx_px_range"][0] < 0.9 < 1.1 < ad["dx_px_range"][1] and ad["max_cross_px"] > 0.05
+    with pytest.raises(ValueError):
+        olpf.apply_channels(
+            {"S0.550nm": img},
+            {**base, "olpf": {"enabled": True, "split_pixels": 1.0, "angle_dependence": {"enabled": True}}},
+        )
