@@ -195,6 +195,34 @@ TRANSITION_STEPS = (0.15, 0.05, 0.02)
 EXIT_STEPS = (3.0, 5.0)
 
 
+# Zone lengths from the design speed: [S23]'s example lengths (2 x 42 m threshold, 72 / 89 / 133 m transition,
+# 30 + 30 m exit) at its 80 km/h, scaled with speed. The threshold scales with the stopping distance
+# v t_r + v^2 / (2 a) (it is at least the stopping distance [H24]); the other zones scale with v (same time to drive).
+SPEED_REF_KMH = 80.0
+SPEED_REF_LENGTHS = {"threshold": 84.0, "transition": (72.0, 89.0, 133.0), "exit": (30.0, 30.0)}
+SSD_REACTION_S = 2.5
+SSD_DECEL_M_S2 = 3.4
+
+
+def stopping_distance(speed_kmh: float) -> float:
+    v = speed_kmh / 3.6
+    return v * SSD_REACTION_S + v * v / (2.0 * SSD_DECEL_M_S2)
+
+
+def zone_lengths_for_speed(speed_kmh: float) -> tuple[float, tuple[float, ...], tuple[float, ...]]:
+    """(threshold length, transition step lengths, exit step lengths) [m] for a design speed [km/h]."""
+    if speed_kmh <= 0:
+        raise SystemExit("--design-speed-kmh must be positive")
+    f_ssd = stopping_distance(speed_kmh) / stopping_distance(SPEED_REF_KMH)
+    f_v = speed_kmh / SPEED_REF_KMH
+    ref = SPEED_REF_LENGTHS
+    return (
+        ref["threshold"] * f_ssd,
+        tuple(ln * f_v for ln in ref["transition"]),
+        tuple(ln * f_v for ln in ref["exit"]),
+    )
+
+
 def zone_profile(
     z_in: float,
     z_out: float,
@@ -442,6 +470,13 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         default="stepped",
         help="stepped: threshold, transition, interior and exit zones; two-step: threshold then interior only.",
     )
+    ap.add_argument(
+        "--design-speed-kmh",
+        type=float,
+        default=None,
+        help="Derive the threshold, transition and exit lengths from this design speed (overrides "
+        "--threshold-length, --transition-lengths and --exit-lengths; see docs/TUNNEL_SCENES.md).",
+    )
     ap.add_argument("--threshold-length", type=float, default=80.0, help="Threshold-zone length (both halves) [m].")
     ap.add_argument(
         "--transition-lengths",
@@ -562,14 +597,16 @@ def build(args: argparse.Namespace) -> dict:  # noqa: C901 (linear scene assembl
         "interior": args.spacing_interior,
         "exit": args.spacing_exit,
     }
+    if args.design_speed_kmh is None:
+        lengths = (float(args.threshold_length), tuple(args.transition_lengths), tuple(args.exit_lengths))
+    else:
+        lengths = zone_lengths_for_speed(float(args.design_speed_kmh))
     zones = zone_profile(
         z_in,
         z_out,
         l_th,
         l_in,
-        float(args.threshold_length),
-        tuple(args.transition_lengths),
-        tuple(args.exit_lengths),
+        *lengths,
         spacing,
         args.zone_profile,
     )
@@ -695,6 +732,8 @@ def build(args: argparse.Namespace) -> dict:  # noqa: C901 (linear scene assembl
             "l20_cd_m2": float(args.l20),
             "k": float(args.k),
             "threshold_road_luminance_cd_m2": l_th,
+            "design_speed_kmh": args.design_speed_kmh,
+            "stopping_distance_m": None if args.design_speed_kmh is None else stopping_distance(args.design_speed_kmh),
             "interior_road_luminance_cd_m2": l_in,
             "threshold_length_m": float(args.threshold_length),
             "zone_profile": args.zone_profile,
@@ -735,7 +774,10 @@ def build(args: argparse.Namespace) -> dict:  # noqa: C901 (linear scene assembl
                 if args.zone_profile == "two-step"
                 else "stepped zone luminances (constant per step), not a continuous adaptation curve"
             ),
-            "zone lengths are fixed in metres, not derived from design speed / stopping distance",
+            "zone lengths are fixed in metres, not derived from design speed / stopping distance"
+            if args.design_speed_kmh is None
+            else f"zone lengths scaled from [S23]'s 80 km/h example to {args.design_speed_kmh:g} km/h "
+            "(threshold with the stopping distance, the rest with speed); not a CIE 88 design",
             "luminaire solve ('interreflection'): radiosity of the lit tube only (Lambertian road and lining, "
             "no cars, no daylight entering through the portals)",
             "lamp output solved for direct road luminance only; walls and daylight spill add to it",

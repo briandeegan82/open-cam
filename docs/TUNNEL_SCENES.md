@@ -60,6 +60,7 @@ are modelling choices, not values from a standard.
 | threshold-zone road luminance L_th | k * L20 = 75 cd/m^2 | inside the 20-80 cd/m^2 threshold range discussed in [H23] |
 | interior-zone road luminance (`--interior-luminance`) | 6 cd/m^2 | "benchmark of 6 cd/m^2 in the CIE specification" quoted in [H24]; LED designs in [H24] reach 7.06 and 8.16 cd/m^2 |
 | threshold-zone length (`--threshold-length`) | 80 m, in two 40 m halves | modelling choice; [S23] uses 2 x 42 m |
+| design speed (`--design-speed-kmh`, optional) | unset: the fixed lengths in this table | scales [S23]'s lengths; see **Zone lengths from the design speed** below |
 | threshold second half | 0.5 L_th | [S23] |
 | transition steps (`--transition-lengths`) | 0.15 / 0.05 / 0.02 L_th over 72 / 89 / 133 m; a step at or below the interior level is lit as interior | [S23] |
 | exit zone (`--exit-lengths`) | 3 x then 5 x the interior level, over 30 m + 30 m up to the exit portal | [S23] |
@@ -84,10 +85,23 @@ transition step remains:
 | `exit_1` | 340-370 | 18 |
 | `exit_2` | 370-400 | 30 |
 
-Each step is constant: there is no continuous adaptation curve, and the step lengths are fixed in
-metres rather than derived from the design speed and stopping distance. `--zone-profile two-step`
+Each step is constant: there is no continuous adaptation curve. By default the step lengths are fixed
+in metres; `--design-speed-kmh` derives them from the design speed instead (next paragraph). `--zone-profile two-step`
 gives the earlier model (threshold, then interior up to the exit portal). The zones are written to
 `photometry.zones`.
+
+**Zone lengths from the design speed** (`--design-speed-kmh V`). This overrides
+`--threshold-length`, `--transition-lengths` and `--exit-lengths`. The lengths are [S23]'s example
+(2 x 42 m threshold, 72 / 89 / 133 m transition, 30 + 30 m exit, in a model run at 80 km/h) scaled
+to V. The threshold zone is at least the stopping distance [H24], so it scales with
+`stopping_distance(V) = v t_r + v^2 / (2 a)`. That uses t_r = 2.5 s and a = 3.4 m/s^2, the usual
+AASHTO values, which I have not checked against the AASHTO text. The transition and exit steps keep
+the same driving time, so they scale with V. For example, 50 / 100 / 120 km/h give thresholds of
+41 / 120 / 162 m and first transition steps of 45 / 90 / 108 m. This is a scaling of one published
+example, **not a CIE 88 design**: CIE 88's transition curve and the portal-height terms of national
+guidelines are not used. The manifest records `photometry.design_speed_kmh` and
+`photometry.stopping_distance_m`. Longer exit zones move the zone boundaries, so the `inside_out` view may need a different
+`--exit-distance` (the builder says so); for example, use 120 m at 100 km/h.
 
 **Exit zone and the inside-out view.** With the default 60 m `--exit-distance` the `inside_out`
 camera stands at the start of the exit zone, so the dark reference is the lit exit-zone road
@@ -98,7 +112,8 @@ from 54.4 dB (two-step) to 44.9 dB: the exit lighting is there to soften the whi
 far exit-road ROI is then only a few pixels tall. The builder stops with an error if the road
 12-30 m ahead straddles a zone boundary.
 
-**Luminaire solve.** For each zone, the builder takes a 7 x 13 grid of road points at the zone
+**Luminaire solve** (`--luminaire-solve interreflection`, the default; `direct` gives the earlier
+direct-only solve). For each zone, the builder takes a 7 x 13 grid of road points at the zone
 centre (+-6 m, or +-0.4 of a shorter zone; `zone_road_points`). It computes the mean direct
 horizontal illuminance there from unit-luminance luminaires of every zone
 (`direct_road_illuminance`), including light that spills over from neighbouring zones. It then
@@ -111,6 +126,28 @@ lobe), so that this prediction is exact for direct light. The exterior road pred
 lamp luminances come out between about 2.3 x 10^4 cd/m^2 (transition, interior) and 1.0 x 10^5
 cd/m^2 (`threshold_1`). They are written to `luminaires.luminance_cd_m2`, with per-zone lamp
 counts in `luminaires.count_by_zone`.
+
+**Interreflection in the solve.** Part of each zone's road luminance is lamp light reflected
+by the road, walls and vault. With `interreflection` the solve subtracts that part, so the lamps
+are dimmer. `tools/tunnel_interreflection.py` computes it with a radiosity model of the tube.
+- *Patches:* the closed cross-section (floor plus `tube_profile`) is cut into 0.5 m segments by 1 m
+  slices along the tube.
+- *Form factors:* the profile is the same at every z, so they are estimated once for each pair of
+  segments and slice offset, by Monte Carlo cosine-weighted rays. Each bounce is then a convolution
+  along the tube.
+- *Losses:* light that leaves through a portal is lost.
+- *Reflectances:* Lambertian luminous reflectances under the lamp spectrum: asphalt 0.12 on the
+  whole floor and the concrete lining 0.24 with LED lamps.
+
+An r-table road reflects the interreflected light with its Q0, because that light arrives from all
+directions. In the default scene the interreflected part is about 11 % of the design road luminance
+in every zone. It is written to `luminaires.interreflected_road_luminance_cd_m2`, and
+`luminaires.solve` records the mode.
+
+Not in the solve:
+- daylight that comes in through the portals, which is the larger effect near them;
+- the cars;
+- any lining specularity.
 
 With `--road-reflection rtable [--road-rtable NAME]` the asphalt is the pbrt `roadrtable` material
 instead (see [ROAD_RTABLE.md](ROAD_RTABLE.md)). The luminaires are then solved so that the r-table

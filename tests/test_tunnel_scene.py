@@ -357,3 +357,19 @@ def test_sky_portal_guide_off_and_validation(tmp_path):
     assert "guideportals" not in b["outside_in"]["scene"].read_text()
     with pytest.raises(ValueError):
         bts.sky_guide_lines(1.0, 40.0, 440.0)
+
+
+def test_zone_lengths_from_design_speed(tmp_path):
+    """80 km/h gives [S23]'s example lengths; the threshold grows with the stopping distance, the rest with v."""
+    th, tr, ex = bts.zone_lengths_for_speed(80.0)
+    assert th == pytest.approx(84.0) and tr == pytest.approx((72.0, 89.0, 133.0)) and ex == pytest.approx((30.0, 30.0))
+    th100, tr100, _ = bts.zone_lengths_for_speed(100.0)
+    assert th100 / th == pytest.approx(bts.stopping_distance(100.0) / bts.stopping_distance(80.0))
+    assert tr100[0] / tr[0] == pytest.approx(100.0 / 80.0)
+    m = _build(tmp_path, "--design-speed-kmh", "100", "--exit-distance", "120")["outside_in"]["meta"]
+    z = {zn["zone"]: zn["z_end_m"] - zn["z_start_m"] for zn in m["photometry"]["zones"]}
+    assert z["threshold_1"] + z["threshold_2"] == pytest.approx(th100)
+    assert z["transition_1"] == pytest.approx(tr100[0])
+    assert m["photometry"]["design_speed_kmh"] == 100.0
+    with pytest.raises(SystemExit):
+        bts.zone_lengths_for_speed(0.0)
