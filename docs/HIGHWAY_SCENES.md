@@ -130,7 +130,8 @@ which sits inside the measured aged-asphalt range: new asphalt is about 0.05 and
 - **Raised pavement markers**: 100 x 100 x 18 mm geometry instances (ASTM D4280 height limit
   ~20 mm). They sit in every other broken-line gap (2N = 24.4 m, MUTCD 3B.11-3B.14), with
   clear/red lenses on lane lines and amber on the yellow edge, and about 10% are missing. Lenses
-  are smooth coated diffuse (daytime look only; their retroreflection is not modelled, even at night).
+  are smooth coated diffuse by day; with retroreflection on (dusk/night) they become cube-corner
+  reflex reflectors (see "Reflex reflectors" under Night and dusk).
 - **Normal maps**: pbrt-v4 decodes 8-bit JPEGs as sRGB even when a linear encoding is requested,
   which tilted the asphalt normals and rendered the road ~7x too dark. The asphalt and grass
   normal maps (with or without wear) are therefore converted to PNG
@@ -350,6 +351,25 @@ The lobe is importance sampled (alpha ~ Gamma(2, w)) and clamped to conserve ene
 - Markings: EN 1436 30 m geometry (viewing 2.29 deg, illumination 1.24 deg elevation),
   R_L = 300 (white, class R5) and 200 mcd m^-2 lx^-1 (yellow, R4), alpha0 = 1.05 deg,
   w = 1.6 deg, q = 1.
+- Reflex (cube-corner) reflectors, with retroreflection on: the `ra` of each reflector is its
+  coefficient of luminous intensity (CIL, mcd/lx) divided by its area, x1.2, and the lobe is
+  narrower than sheeting. Every tabulated (observation, entrance) minimum is met:
+  - car rear reflectors (red, FMVSS 108 Table XVI-a / SAE J594: 420 mcd/lx at 0.2/0 deg, 140 at
+    20 deg, 3 at 1.5/20): w = 0.32 deg, q = 12. One patch per side on the body (`LampLayout.reflex`,
+    on the BMW's own reflector material), every model but the vintage car; per-car areas in
+    `tail_lamps[*].reflex_reflectors`;
+  - procedural cyclist (16 CFR 1512 Tables 1-2): red rear and white front reflectors, amber
+    pedal and spoke reflectors; front/rear/spoke w = 0.33 deg, q = 3.5 (30-50 deg entrance
+    points), pedals w = 0.375 deg; listed under `vru.reflectors`. The imported bicycles,
+    motorbikes and scooters (`--vru-bike`, `--vru motorcyclist`, parked two-wheelers) don't get
+    reflectors: their meshes have no reflector parts to attach the material to;
+  - raised pavement marker lenses: ASTM D4280 minima as commonly cited (white 3.0 cd/fc,
+    yellow 0.6x, red 0.25x; the standard text was not checked), over the sloped 3150 mm^2 lens
+    face, q = 0 because the prisms face along the road rather than along the lens normal;
+  - urban cone and drum bands (`--work-zone`): texels of the asset's white bands (bright,
+    near-neutral; `street_furniture.retro_band_mask`) mix to the Type III `sheet_white` sheeting.
+  The windscreen camera sits ~0.7 m above the headlamps, so the observation angle is ~2-4 deg at
+  10-20 m and the reflectors only light up strongly from ~40 m out.
 - `ra` is spectral (colour of the surface, photometric value under CIE illuminant A as in
   ASTM E810). `TestPbrtRetroreflection` renders the material next to a white Lambertian patch
   and recovers R_A and R_L from the image within 4–5 %.
@@ -1054,7 +1074,7 @@ near zebra crossing by default).
   `manifest["street_furniture"]["items"]` lists each item's asset, position, yaw and world box.
   Fetch the assets with `tools/fetch_highway_assets.py` (ids `prop_*`, `cone_*`, `drum_*`,
   `signal_*`). Limitations: the props use their sRGB base-colour textures, not measured spectra.
-  Cone and drum bands are diffuse, not retroreflective, so they don't light up in headlamps at night.
+  At dusk/night the white cone and drum bands are retroreflective Type III sheeting (see Night and dusk).
 * **Parked two-wheelers (opt-in):** `--two-wheelers parked` adds 21 Objaverse CC-BY models
   (`tools/two_wheelers.py`): groups of 2-4 bicycles across the pavement next to the kerb, the odd
   kick e-scooter parked along the kerb, and 2-3 motorbikes, mopeds or scooters in each empty parking
@@ -1066,7 +1086,7 @@ near zebra crossing by default).
   lists each model's asset, kind, position, heading and world box. Fetch the assets with
   `tools/fetch_highway_assets.py` (ids `bike_*`, `moto_*`, `moped_*`, `scooter_*`,
   `kickscooter_electric`). Limitations: sRGB base-colour textures, not measured spectra; no lamps,
-  and reflectors are diffuse, not retroreflective; no bike stands; nobody rides them.
+  and their reflectors are diffuse, not retroreflective (the meshes have no separate reflector parts); no bike stands; nobody rides them.
   The Poly Haven hydrant and bin files contain two variants side by side, which are split into
   separate objects.
 

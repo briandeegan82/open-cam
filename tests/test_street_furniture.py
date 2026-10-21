@@ -147,3 +147,25 @@ def test_furniture_placement(tmp_path):
         assert lo[1] == pytest.approx(0.0, abs=0.02) and lo[2] > 7.0 and hi[2] < 21.0
     for v in {i["variant"] for i in items}:
         assert f'ObjectBegin "{v}"' in scene
+
+
+def test_retro_band_mask_picks_white_sheeting(tmp_path):
+    from PIL import Image
+
+    px = np.array([[[235, 235, 230], [230, 90, 20], [40, 40, 40], [170, 200, 225]]], dtype=np.uint8)
+    Image.fromarray(px).save(tmp_path / "t.png")
+    assert sf.retro_band_mask(tmp_path / "t.png").tolist() == [[1.0, 0.0, 0.0, 0.0]]
+
+
+def test_retro_bands_mix_sheeting_into_textured_material(tmp_path):
+    from PIL import Image
+
+    raw, out = tmp_path / "raw", tmp_path / "out"
+    raw.mkdir()
+    Image.fromarray(np.full((4, 4, 3), 235, np.uint8)).save(raw / "t.png")
+    info = {"materials": [{"name": "m", "base_color_texture": "t.png"}], "shapes": [{"material": 0, "ply": "a.ply"}]}
+    plain = sf.object_lines("cone_x_v0", info, tmp_path, raw, out, [0])
+    assert not any('"mix"' in ln for ln in plain)
+    band = "\n".join(sf.object_lines("cone_x_v0", info, tmp_path, raw, out, [0], retro_bands=True))
+    assert '"string materials" ["cone_x_v0:0:base" "sheet_white"]' in band
+    assert (out / "textures" / "retro_bands" / "cone_x_v0_0.exr").exists()
