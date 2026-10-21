@@ -84,6 +84,8 @@ DN_k = clip(round(q_k / K_k + black_k), 0, 2^b_k - 1)
   HCG is limited by its floating-diffusion swing.
 * **Split pixel**: independent photodiodes (independent shot noise and fixed patterns);
   the SPD sees `sensitivity_ratio` of the LPD signal (optionally per CFA channel).
+  HDR modes run on the legacy Bayer path and on a generic `cfa.layout` (RCCB, RGBW, ...; see
+  [CFA_NIR.md](CFA_NIR.md)); `sensitivity_ratio_rgb` there needs a layout of R, G and B sites only.
 * **LOFIC**: charge above the photodiode full well overflows into the capacitor; HCG reads
   only the photodiode, LCG reads photodiode + capacitor, with kTC noise of the combined
   capacitance because that signal has no true CDS (Akahane et al. 2006).

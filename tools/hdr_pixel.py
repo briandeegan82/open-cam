@@ -430,7 +430,15 @@ def build_architecture(hdr_cfg: dict, base: dict) -> HdrArchitecture:
 # ---------------------------------------------------------------------------
 
 
-def _channel_map(shape: tuple[int, ...], bayer_pattern: str | None) -> np.ndarray | None:
+def _channel_map(shape: tuple[int, ...], bayer_pattern: str | None, cfa_layout=None) -> np.ndarray | None:
+    if cfa_layout is not None and len(shape) == 2:
+        rgb = {"R": 0, "G": 1, "B": 2}
+        bad = [ch for ch in cfa_layout.channels if ch not in rgb]
+        if bad:
+            raise ValueError(
+                f"noise.hdr sensitivity_ratio_rgb has no value for CFA channel(s) {bad}; use sensitivity_ratio"
+            )
+        return np.asarray([rgb[ch] for ch in cfa_layout.channels])[cfa_layout.site_index(*shape)]
     if len(shape) == 3 and shape[-1] == 3:
         return np.broadcast_to(np.arange(3), shape)
     if bayer_pattern and len(shape) == 2:
@@ -440,10 +448,13 @@ def _channel_map(shape: tuple[int, ...], bayer_pattern: str | None) -> np.ndarra
     return None
 
 
-def response_map(c: Collector, shape: tuple[int, ...], bayer_pattern: str | None = None) -> np.ndarray | float:
+def response_map(
+    c: Collector, shape: tuple[int, ...], bayer_pattern: str | None = None, cfa_layout=None
+) -> np.ndarray | float:
+    """Collector response per pixel; ``cfa_layout`` (a ``cfa_mosaic.CfaLayout``) is a generic mosaic."""
     if c.response_rgb is None:
         return c.response
-    ch = _channel_map(shape, bayer_pattern)
+    ch = _channel_map(shape, bayer_pattern, cfa_layout)
     if ch is None:
         return c.response
     return np.asarray(c.response_rgb, dtype=np.float64)[ch]
@@ -457,6 +468,7 @@ def simulate_captures(
     spatial_rng: np.random.Generator | None = None,
     capture_signal_e: dict[str, np.ndarray] | None = None,
     bayer_pattern: str | None = None,
+    cfa_layout=None,
     use_poisson: bool = True,
 ) -> dict[str, np.ndarray]:
     """Simulate every readout; returns ``{readout_name: DN}`` (integer-valued float64)."""
@@ -483,11 +495,11 @@ def simulate_captures(
             if sig.shape != shape:
                 raise ValueError(f"capture {c.name!r} electrons shape {sig.shape} != {shape}")
         else:
-            sig = signal_e * response_map(c, shape, bayer_pattern)
+            sig = signal_e * response_map(c, shape, bayer_pattern, cfa_layout)
         if so.get("spd_crosstalk_fraction") and c.pd == "spd":
             # Large-photodiode photo-charge leaking into the small photodiode (split-pixel crosstalk).
             sig = sig + so["spd_crosstalk_fraction"] * signal_e * response_map(
-                arch.collector("lpd"), shape, bayer_pattern
+                arch.collector("lpd"), shape, bayer_pattern, cfa_layout
             )
         zp, zd = fpn[c.pd]
         mean = sig * (1.0 + c.prnu_std * zp) + c.dark_e + c.dsnu_std_e * zd
@@ -585,6 +597,7 @@ def merge_captures(
     dn: dict[str, np.ndarray],
     *,
     bayer_pattern: str | None = None,
+    cfa_layout=None,
     rng: np.random.Generator | None = None,
     spatial_rng: np.random.Generator | None = None,
 ) -> tuple[np.ndarray, dict]:
@@ -599,7 +612,8 @@ def merge_captures(
     flat = {r.name: np.asarray(dn[r.name], dtype=np.float64).ravel() for r in ro}
     P = flat[ro[0].name].size
     resp_full = [
-        np.broadcast_to(response_map(arch.collector(r.collector), shape, bayer_pattern), shape).ravel() for r in ro
+        np.broadcast_to(response_map(arch.collector(r.collector), shape, bayer_pattern, cfa_layout), shape).ravel()
+        for r in ro
     ]
     thr = [arch.threshold_fraction * arch.saturation_e(r) for r in ro]
     pilot_order = np.argsort([t for t in (dict(arch.transitions_e())[r.name] for r in ro)])
@@ -749,6 +763,7 @@ def run_hdr(
     raw_out: Path,
     bayer_pattern: str | None,
     use_poisson: bool,
+    cfa_layout=None,
     capture_paths: dict[str, Path] | None = None,
     capture_loader: Callable[[Path], np.ndarray] | None = None,
     repo: Path | None = None,
@@ -780,12 +795,14 @@ def run_hdr(
         spatial_rng=spatial_rng,
         capture_signal_e=captures,
         bayer_pattern=bayer_pattern,
+        cfa_layout=cfa_layout,
         use_poisson=use_poisson,
     )
     hdr_e, merge_info = merge_captures(
         arch,
         dn,
         bayer_pattern=bayer_pattern,
+        cfa_layout=cfa_layout,
         rng=np.random.default_rng([int(seed), 0x4D455247]),
         spatial_rng=np.random.default_rng([int(spatial_seed), 0x4D455247]),
     )
