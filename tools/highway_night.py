@@ -541,6 +541,13 @@ def add_night_args(ap: argparse.ArgumentParser) -> None:
         default="auto",
         help="Traffic rear fog lamps (200 cd, one on the left; detailed tail lamps only). auto = on with --haze fog.",
     )
+    g.add_argument(
+        "--rear-lamp-beam",
+        choices=("shaped", "lambertian"),
+        default="shaped",
+        help="shaped = tail/stop/fog intensity falls off with angle from straight behind (FMVSS 108 / ECE R7 "
+        "test-point ratios; detailed tail lamps; pbrt patch 0016); lambertian = the old cosine emitters.",
+    )
     g.add_argument("--streetlights", choices=("auto", "none", "led_4000k", "hps"), default="auto")
     g.add_argument("--retroreflective", choices=("auto", "on", "off"), default="auto")
 
@@ -554,6 +561,7 @@ def resolve(args: argparse.Namespace) -> dict:
         "streetlights": ("led_4000k" if dark else "none") if args.streetlights == "auto" else args.streetlights,
         "retroreflective": dark if args.retroreflective == "auto" else args.retroreflective == "on",
         "tail_lamps": getattr(args, "tail_lamps", "detailed"),
+        "rear_lamp_beam": getattr(args, "rear_lamp_beam", "shaped"),
         "rear_fog": {"on": True, "none": False}.get(
             getattr(args, "rear_fog_lamps", "auto"), getattr(args, "haze", "none") == "fog"
         ),
@@ -707,6 +715,8 @@ def write_light_assets(out_dir: Path, spd_dir: Path, opts: dict, n: int = 1024, 
                 "flux_lm": flux_lm(m),
                 "peak_cd": float(m.max()),
             }
+    if opts.get("rear_lamp_beam", "shaped") == "shaped" and opts.get("tail_lamps", "detailed") == "detailed":
+        info["rear_beam"] = taillamps.write_beam_maps(out_dir)
     if opts["streetlights"] != "none":
         sl = STREETLIGHT[opts["streetlights"]]
         m = streetlight_map(n, sl["flux_lm"] * (1.0 - LENS_FLUX_FRACTION))
@@ -784,7 +794,7 @@ def vehicle_light_lines(
         braking = opts["brake"] == "all" or c["id"] == lead
         if opts.get("tail_lamps", "detailed") == "detailed":
             tl_lines, tl_meta = taillamps.rear_lamp_lines(
-                c, braking, opts.get("asset_root"), rear_fog=opts.get("rear_fog", False)
+                c, braking, opts.get("asset_root"), rear_fog=opts.get("rear_fog", False), beam=assets.get("rear_beam")
             )
             lines += [*tl_lines, "AttributeEnd"]
             meta["tail_lamps"].append(tl_meta)

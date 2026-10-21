@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import re
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -11,8 +13,13 @@ import highway_night as night
 import highway_taillamps as tl
 import numpy as np
 from colour_science import tristimulus
+from exr_multispectral import read_separate_exr_channels
 from fetch_highway_assets import write_ply
 from test_highway_scene import build_without_assets
+
+REPO = Path(__file__).resolve().parents[1]
+PBRT = Path(os.environ.get("OPENCAM_PBRT", REPO / "third_party" / "pbrt-v4" / "build" / "pbrt"))
+PBRT_TIMEOUT_S = float(os.environ.get("OPENCAM_PBRT_TIMEOUT", "600"))
 
 
 def _patch_area(shape_line: str) -> float:
@@ -148,6 +155,137 @@ class TestBuilderHook(unittest.TestCase):
             m = build_without_assets(Path(td), "--time-of-day", "night", "--haze", "fog")
             lamps = m["lighting"]["artificial"]["tail_lamps"]
             self.assertTrue(all(t["rear_fog"]["intensity_cd"] == tl.FOG_CD for t in lamps))
+
+
+# FMVSS 108 one-section minima [cd] (49 CFR 571.108 Table VIII taillamp, Table IX stop lamp):
+# (h, v) test points with + = right / up; the tables are symmetric left-right.
+_FMVSS_TAIL = {(20, 5): 0.3, (20, -5): 0.3, (5, 10): 0.4, (5, -10): 0.4, (10, 5): 0.8, (10, 0): 0.8,
+               (10, -5): 0.8, (0, 5): 1.8, (5, 0): 2.0, (0, 0): 2.0, (0, -5): 1.8}  # fmt: skip
+_FMVSS_STOP = {(20, 5): 10, (20, -5): 10, (5, 10): 16, (5, -10): 16, (10, 5): 30, (10, 0): 40,
+               (10, -5): 30, (0, 5): 70, (5, 0): 80, (0, 0): 80, (0, -5): 70}  # fmt: skip
+
+
+def _rear_dir(h_deg: float, v_deg: float) -> np.ndarray:
+    """Car-frame direction h right of / v above straight behind (-z), as ``beam_shape`` reads it."""
+    h, v = np.radians(h_deg), np.radians(v_deg)
+    return np.array([np.cos(v) * np.sin(h), np.sin(v), -np.cos(v) * np.cos(h)])
+
+
+class TestRearLampBeam(unittest.TestCase):
+    def test_shapes_reproduce_fmvss108_ratios(self) -> None:
+        for kind, table, i0 in (("tail", _FMVSS_TAIL, tl.TAIL_CD), ("stop", _FMVSS_STOP, tl.STOP_CD)):
+            for (h, v), cd in table.items():
+                for sh in (h, -h):
+                    r = float(tl.beam_shape(kind, _rear_dir(sh, v)))
+                    self.assertAlmostEqual(r, cd / table[(0, 0)], delta=0.07, msg=f"{kind} {sh},{v}")
+                    self.assertGreaterEqual(i0 * r, cd, msg=f"{kind} {sh},{v}")
+        self.assertLessEqual(tl.TAIL_CD, 18.0)  # Table VIII maximum at H or above
+        self.assertLessEqual(tl.STOP_CD, 300.0)  # Table IX maximum
+
+    def test_shape_falls_off_and_is_dark_forwards(self) -> None:
+        for kind in ("tail", "stop", "fog", "tail_stop"):
+            hs = [float(tl.beam_shape(kind, _rear_dir(h, 0))) for h in (0, 10, 20, 45, 80, 89.9)]
+            vs = [float(tl.beam_shape(kind, _rear_dir(0, v))) for v in (0, 5, 10, 30, 89.9)]
+            self.assertAlmostEqual(hs[0], 1.0)
+            self.assertTrue(all(a >= b for a, b in zip(hs, hs[1:])) and hs[-1] < 0.01, hs)
+            self.assertTrue(all(a >= b for a, b in zip(vs, vs[1:])) and vs[-1] < 0.01, vs)
+            self.assertEqual(float(tl.beam_shape(kind, np.array([0.0, 0.0, 1.0]))), 0.0)
+        # R38-style field: >= 150 of 200 cd within +-10 deg H, +-5 deg V
+        self.assertGreaterEqual(tl.FOG_CD * float(tl.beam_shape("fog", _rear_dir(10, 5))), 150 * 0.75)
+
+    def test_map_is_shape_over_cosine(self) -> None:
+        m = tl.beam_map("tail", 256)
+        self.assertLessEqual(m.max(), 1.0)
+        for h, v in ((0, 0), (10, 0), (20, 5), (5, 10)):
+            d = _rear_dir(h, v)
+            got = float(night.map_intensity(m, d[None])[0])
+            want = float(tl.beam_shape("tail", d)) / float(-d[2])
+            self.assertAlmostEqual(got, want, delta=0.06)
+
+    def test_emitters_reference_maps(self) -> None:
+        beam = {k: f"textures/rear_beam_{k}.exr" for k in tl.BEAM_MAPS}
+        lines, meta = tl.rear_lamp_lines(CAR, True, rear_fog=True, beam=beam)
+        lights = [ln for ln in lines if "AreaLightSource" in ln]
+        self.assertTrue(lights and all('"string angularfilename"' in ln for ln in lights))
+        used = {k for k in beam if any(f"rear_beam_{k}.exr" in ln for ln in lights)}
+        self.assertTrue({"stop", "fog"} <= used, used)
+        self.assertEqual(meta["beam"], "fmvss108_ratios")
+        flat, flat_meta = tl.rear_lamp_lines(CAR, True, rear_fog=True)
+        self.assertFalse(any("angularfilename" in ln for ln in flat))
+        self.assertEqual(flat_meta["beam"], "lambertian")
+        self.assertAlmostEqual(_emitted_cd(lines), _emitted_cd(flat))  # same H-V intensity
+
+    def test_builder_writes_maps_and_lambertian_opt_out(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            m = build_without_assets(Path(td), "--time-of-day", "night")
+            scene = (Path(td) / "scene" / "highway.pbrt").read_text()
+            self.assertIn("rear_beam_tail.exr", scene)
+            self.assertTrue((Path(td) / "scene" / "textures" / "rear_beam_stop.exr").is_file())
+            self.assertTrue(all(t["beam"] == "fmvss108_ratios" for t in m["lighting"]["artificial"]["tail_lamps"]))
+        with tempfile.TemporaryDirectory() as td:
+            m = build_without_assets(Path(td), "--time-of-day", "night", "--rear-lamp-beam", "lambertian")
+            scene = (Path(td) / "scene" / "highway.pbrt").read_text()
+            self.assertNotIn("angularfilename", scene)
+            self.assertTrue(all(t["beam"] == "lambertian" for t in m["lighting"]["artificial"]["tail_lamps"]))
+
+
+def _pbrt_has_angular() -> bool:
+    if not PBRT.is_file():
+        return False
+    with tempfile.TemporaryDirectory() as td:
+        night.write_y_exr(Path(td) / "a.exr", np.ones((8, 8), np.float32))
+        (Path(td) / "t.pbrt").write_text(
+            'Film "rgb" "integer xresolution" [1] "integer yresolution" [1] "string filename" "t.exr"\n'
+            'Camera "perspective"\nWorldBegin\nAttributeBegin\n'
+            'AreaLightSource "diffuse" "string angularfilename" "a.exr"\n'
+            'Shape "bilinearmesh" "point3 P" [0 0 1 1 0 1 0 1 1 1 1 1]\nAttributeEnd\n'
+        )
+        r = subprocess.run([str(PBRT), "--quiet", "t.pbrt"], capture_output=True, cwd=td, timeout=PBRT_TIMEOUT_S)
+        return r.returncode == 0
+
+
+PBRT_ANGULAR = _pbrt_has_angular()
+if os.environ.get("OPENCAM_REQUIRE_PBRT") == "1" and not PBRT_ANGULAR:
+    raise RuntimeError(f"OPENCAM_REQUIRE_PBRT=1 but {PBRT} lacks patch 0016 (tools/build_pbrt.sh)")
+
+
+@unittest.skipUnless(PBRT_ANGULAR, f"patched pbrt not built ({PBRT}); see docs/BUILD_PBRT.txt")
+class TestPbrtAngularAreaLight(unittest.TestCase):
+    """Render a rear-facing lamp quad from FMVSS test directions: radiance ratio = map value."""
+
+    def _radiance(self, td: Path, d: np.ndarray, beam: bool) -> float:
+        cam = 20.0 * d
+        ang = ' "string angularfilename" "textures/rear_beam_stop.exr"' if beam else ""
+        s = [
+            f"LookAt {cam[0]:.9g} {cam[1]:.9g} {cam[2]:.9g} 0 0 0 0 1 0",
+            'Camera "perspective" "float fov" [0.5]',
+            'Sampler "independent" "integer pixelsamples" [4]',
+            'Integrator "path" "integer maxdepth" [1]',
+            'Film "rgb" "integer xresolution" [32] "integer yresolution" [32] "string filename" "o.exr"',
+            "WorldBegin",
+            "AttributeBegin",
+            f'AreaLightSource "diffuse" "spectrum L" [360 1 830 1]{ang}',
+            # vertex order as tools/highway_taillamps.py: emits towards -z
+            'Shape "bilinearmesh" "point3 P" [0.5 -0.5 0 -0.5 -0.5 0 0.5 0.5 0 -0.5 0.5 0]',
+            "AttributeEnd",
+        ]
+        (td / "s.pbrt").write_text("\n".join(s) + "\n")
+        subprocess.run(
+            [str(PBRT), "--quiet", "s.pbrt"], check=True, cwd=td, capture_output=True, timeout=PBRT_TIMEOUT_S
+        )
+        img = read_separate_exr_channels(td / "o.exr")
+        g = np.asarray(img["G"] if "G" in img else next(iter(img.values())))
+        return float(g[12:20, 12:20].mean())
+
+    def test_radiance_follows_beam_map(self) -> None:
+        with tempfile.TemporaryDirectory() as tds:
+            td = Path(tds)
+            tl.write_beam_maps(td)
+            for h, v in ((0, 0), (10, 0), (-20, 5), (5, -10), (45, 0)):
+                d = _rear_dir(h, v)
+                ratio = self._radiance(td, d, True) / self._radiance(td, d, False)
+                want = float(tl.beam_shape("stop", d)) / float(-d[2])
+                self.assertAlmostEqual(ratio, want, delta=0.03 + 0.03 * want, msg=f"{h},{v}")
 
 
 if __name__ == "__main__":

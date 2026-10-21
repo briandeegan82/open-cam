@@ -33,6 +33,12 @@ Patches:
   so pbrt spun forever (about 1 run in 100 of the dusk-fog probe in
   tests/test_pbrt_e2e.py, and the 3 h 45 min CI stall). Light jobs now take the camera
   transform straight from the camera entity. Rendered output is unchanged.
+- 0016-diffuse-area-light-angular.patch: "string angularfilename" on a "diffuse" area light
+  names a square equal-area map ("Y" channel, directions in the light's object space, as
+  the goniometric light without its y/z swap) that multiplies the emitted radiance along
+  each direction, so an emitter can have a beam shape. Each file is loaded once and shared
+  by all the lights of a mesh. Values must be <= 1 (light bounds assume a cosine emitter).
+  Used by the rear lamps (--rear-lamp-beam shaped; docs/HIGHWAY_SCENES.md).
 - pbrt-v4-spectral-basis-infinite-light.patch: an "infinite" light may give both
   "filename" and n "L" spectra; the equal-area image then has channels B0..B{n-1}, each
   a per-pixel luminance weight of the corresponding (unit-luminance-normalised) spectrum,
