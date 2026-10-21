@@ -1136,10 +1136,31 @@ wall plane. A room-back quad 0.35 m behind each opening uses the scene's
 at night. Kit choices draw from their own seeded RNG; cars and emitters match
 the default scene. The manifest's `facades.kits` lists each lot's kit and parts.
 
-Limitations: the kits' colours come from their sRGB texture maps (diffuse), not
-measured spectra, and the window frames' metallic flag is ignored. Glass is a
-thin dielectric. Kit buildings are lower than the procedural ones (3 m storeys
-against 3.2 m plus 0.8 m), and the cross-street lots stay procedural.
+**Storey height** (`--kit-storeys match`, default): the kit fronts now match the procedural
+facades' 0.8 m plinth and 3.2 m storeys. Upper-floor panels are stretched vertically by
+3.2/3 (windows 6.7 % taller). The 4.0 m ground floor has the kit's base course, stretched to
+0.8 m, under each ground-floor window. The door starts at the pavement and has a plain wall
+strip above it. `kit` keeps the kit's own 3 m storeys.
+
+**Cross street** (`--kit-cross-street on`, default): each corner block also gets 8–16 m kit lots
+of 3–6 storeys along the cross street, from behind the corner lot (14 m) to the block end. They
+are built in the main-street frame and rotated into place (`cross_street_lots`, own RNG). The
+plain corner block is set back behind them. `off` keeps the plain blocks.
+
+**Metals** (`--kit-metals conductor`, default): the kits' glTF metallic maps (blue channel of
+the ARM texture) are written as masks. A pbrt `mix` material then picks a conductor on the
+metallic texels: window frames and fittings on the apartments, garage and brick-door metal on
+the factory. The conductor's normal-incidence reflectance is the base-colour map, with GGX
+α = roughness² (mean over the metallic texels). `diffuse` keeps everything diffuse.
+
+With `--kit-storeys kit --kit-cross-street off --kit-metals diffuse` the scene file is identical
+to the previous kit scene.
+
+Limitations: the kits' colours come from their sRGB texture maps, not measured spectra, and the
+conductor's colour is the base-colour map, not a measured metal (no complex index). Glass is a
+thin dielectric. Stretching the panels also stretches their windows and mouldings. The
+cross-street fronts only cover the straight run of each block, with no corner pieces, and
+the corner lots' side walls stay plain.
 `fetch_highway_assets.py` now records each glTF shape's `node` name and
 layout `origin` in `prepared.json` (re-prepare older kits with `--force`).
 
