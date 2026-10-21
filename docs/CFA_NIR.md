@@ -177,6 +177,32 @@ cd scenes/cabin_dms && ../../third_party/pbrt-v4/build-nir/pbrt cabin.pbrt
   inside the eye. The rough cornea also lets next-event estimation light the iris through it, so
   the iris shows bright render-noise specks at 512 spp that converge with more samples (with a
   smooth cornea the iris is lit only by rare paths that hit the LED and stays under-converged).
-- **Nominal / not modelled:** head and eye geometry, sclera/iris/pupil reflectances and LED output
-  are nominal. No sunlight, no bright-pupil retinal retroreflection, no eyelids/brows/hair, no
-  subsurface blur in skin.
+- **Retina / bright pupil** (`--retina on`, default; `off` writes the old scene byte for byte):
+  the pupil disc is a `retroreflective` material (patch 0001) with a 2 % diffuse base. The LED is
+  imaged, defocused, on the fundus; the fundus reflects it diffusely and the part leaving through
+  the pupil, (r_p / 20 mm)² of it, returns towards the LED after two passes through 22 mm of
+  water-equivalent ocular media (Hale & Querry; at 940 nm the round trip transmits 0.31, at 850 nm
+  0.83). The returning beam spreads over observation angles up to
+  α_e = (r_p + r_LED)/d + r_p |1/d − 1/f_eye| (pupil footprint, LED size, defocus;
+  `--eye-focus-m`, default infinity, i.e. looking at the road). pbrt's lobe is exponential,
+  R_A = ra exp(−α/w) √(cos θi cos θo), with w = α_e/3 (same mean angle as a uniform disc of radius
+  α_e) and ra = P/(2π w²), so it integrates to the returned fraction P. For the default 6 mm pupil
+  at 0.65 m, α_e ≈ 0.81° and w ≈ 0.27°. With the LED 40 mm from the lens (3.8° observation angle,
+  the default) the pupil stays dark (retroreflection 1e-5 of a white diffuser); with
+  `--led-offset-m 0.008` (0.77°) it is ~0.9× a white diffuser, the bright pupil. In a 256 spp render
+  the bright pupil is 1.24× the cheek (R ≈ 0.66), i.e. ~0.8× white. The manifest gives
+  `driver.retina` and each eye's `bright_pupil` (observation angle, R_A, pupil radiance).
+  So that light reaches the pupil, the cornea gets `"bool passthrough" true` (patch 0020):
+  shadow rays pass it with the single-interface transmittance 1 − Fr(θ), and paths either reflect
+  (glint) or continue unrefracted. This also lights the iris properly through the cornea. The cost
+  is that the cornea no longer refracts: the pupil disc stands for the entrance pupil (the
+  apparent pupil, ~13 % larger than the anatomical one). Fundus reflectance (~10 % in the NIR,
+  `--fundus-scale`) and the eye distances are nominal, not measured; the fundus is spectrally flat
+  above 700 nm, with no pigmentation differences between drivers.
+- **Sun** (`--sun-elevation-deg`, `--sun-azimuth-deg`; default none, night): an ASTM G173 direct
+  normal spectrum (AM1.5) distant light, radiometric, plus a roof panel above the head; the
+  windscreen and side windows are open (no glass, no NIR-absorbing windscreen) and there is no sky
+  light. At 940 nm the sun is in a water band but still lights the face ~275× more than the LED in
+  the sample (cheek radiance), so a DMS needs a short pulsed exposure or a narrow band-pass.
+- **Nominal / not modelled:** head and eye geometry, sclera/iris/pupil reflectances, eye optics and
+  LED output are nominal. No eyelids/brows/hair, no subsurface blur in skin.

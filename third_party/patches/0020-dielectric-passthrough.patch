@@ -1,0 +1,133 @@
+--- a/src/pbrt/materials.h
++++ b/src/pbrt/materials.h
+@@ -146,13 +146,27 @@
+ 
+     // DielectricMaterial Public Methods
+     DielectricMaterial(FloatTexture uRoughness, FloatTexture vRoughness, Spectrum eta,
+-                       FloatTexture displacement, Image *normalMap, bool remapRoughness)
++                       FloatTexture displacement, Image *normalMap, bool remapRoughness,
++                       bool passthrough = false)
+         : normalMap(normalMap),
+           displacement(displacement),
+           uRoughness(uRoughness),
+           vRoughness(vRoughness),
+           eta(eta),
+-          remapRoughness(remapRoughness) {}
++          remapRoughness(remapRoughness),
++          passthrough(passthrough) {}
++
++    // open-cam: "bool passthrough" (e.g. a cornea in front of a retroreflective pupil).
++    // The volpath integrator treats transmission as a null interface (no refraction) and
++    // shadow rays pass it with the single-interface transmittance 1 - Fr(cos theta).
++    PBRT_CPU_GPU bool Passthrough() const { return passthrough; }
++    PBRT_CPU_GPU Float InterfaceReflectance(Float cosTheta,
++                                            const SampledWavelengths &lambda) const {
++        Float e = eta(lambda[0]);
++        if (e == 0)
++            e = 1;
++        return FrDielectric(cosTheta, e);
++    }
+ 
+     static const char *Name() { return "DielectricMaterial"; }
+ 
+@@ -208,6 +222,7 @@
+     FloatTexture displacement;
+     FloatTexture uRoughness, vRoughness;
+     bool remapRoughness;
++    bool passthrough = false;
+     Spectrum eta;
+ };
+ 
+--- a/src/pbrt/materials.cpp
++++ b/src/pbrt/materials.cpp
+@@ -68,9 +68,10 @@
+ 
+     FloatTexture displacement = parameters.GetFloatTextureOrNull("displacement", alloc);
+     bool remapRoughness = parameters.GetOneBool("remaproughness", true);
++    bool passthrough = parameters.GetOneBool("passthrough", false);
+ 
+     return alloc.new_object<DielectricMaterial>(uRoughness, vRoughness, eta, displacement,
+-                                                normalMap, remapRoughness);
++                                                normalMap, remapRoughness, passthrough);
+ }
+ 
+ // ThinDielectricMaterial Method Definitions
+--- a/src/pbrt/cpu/integrators.cpp
++++ b/src/pbrt/cpu/integrators.cpp
+@@ -44,12 +44,28 @@
+ 
+ namespace pbrt {
+ 
+-// open-cam: thin-dielectric surface with "bool passthrough" (see ThinDielectricMaterial)
+-static const ThinDielectricMaterial *PassthroughLens(Material m) {
+-    if (!m || !m.Is<ThinDielectricMaterial>())
+-        return nullptr;
+-    const ThinDielectricMaterial *t = m.Cast<ThinDielectricMaterial>();
+-    return t->Passthrough() ? t : nullptr;
++// open-cam: thin-dielectric or dielectric surface with "bool passthrough" (see
++// ThinDielectricMaterial, DielectricMaterial). Returns false for any other surface;
++// otherwise *R is its reflectance at cosTheta (slab or single interface).
++static bool PassthroughSurface(Material m, Float cosTheta, const SampledWavelengths &lambda,
++                               Float *R) {
++    if (!m)
++        return false;
++    if (m.Is<ThinDielectricMaterial>()) {
++        const ThinDielectricMaterial *t = m.Cast<ThinDielectricMaterial>();
++        if (!t->Passthrough())
++            return false;
++        *R = t->SlabReflectance(cosTheta, lambda);
++        return true;
++    }
++    if (m.Is<DielectricMaterial>()) {
++        const DielectricMaterial *d = m.Cast<DielectricMaterial>();
++        if (!d->Passthrough())
++            return false;
++        *R = d->InterfaceReflectance(cosTheta, lambda);
++        return true;
++    }
++    return false;
+ }
+ 
+ 
+@@ -344,10 +360,11 @@
+         pstd::optional<ShapeIntersection> si = Intersect(ray, 1 - ShadowEpsilon);
+         // Handle opaque surface along ray's path
+         if (si && si->intr.material) {
+-            const ThinDielectricMaterial *lens = PassthroughLens(si->intr.material);
+-            if (!lens)
++            Float R;
++            if (!PassthroughSurface(si->intr.material, AbsDot(Normalize(ray.d), si->intr.n),
++                                    lambda, &R))
+                 return SampledSpectrum(0.0f);
+-            Tr *= 1 - lens->SlabReflectance(AbsDot(Normalize(ray.d), si->intr.n), lambda);
++            Tr *= 1 - R;
+         }
+ 
+         // Update transmittance for current ray segment
+@@ -1188,8 +1205,8 @@
+         }
+         // Passthrough lens: transmit as a null interface with probability T, else reflect
+         Float lensR = 0;
+-        if (const ThinDielectricMaterial *lens = PassthroughLens(isect.material)) {
+-            lensR = lens->SlabReflectance(AbsDot(Normalize(ray.d), isect.n), lambda);
++        if (PassthroughSurface(isect.material, AbsDot(Normalize(ray.d), isect.n), lambda,
++                               &lensR)) {
+             if (sampler.Get1D() >= lensR) {
+                 isect.SkipIntersection(&ray, si->tHit);
+                 continue;
+@@ -1419,11 +1436,11 @@
+         pstd::optional<ShapeIntersection> si = Intersect(lightRay, 1 - ShadowEpsilon);
+         // Handle opaque surface along ray's path
+         if (si && si->intr.material) {
+-            const ThinDielectricMaterial *lens = PassthroughLens(si->intr.material);
+-            if (!lens)
++            Float R;
++            if (!PassthroughSurface(si->intr.material,
++                                    AbsDot(Normalize(lightRay.d), si->intr.n), lambda, &R))
+                 return SampledSpectrum(0.f);
+-            T_ray *= 1 - lens->SlabReflectance(AbsDot(Normalize(lightRay.d), si->intr.n),
+-                                               lambda);
++            T_ray *= 1 - R;
+         }
+ 
+         // Update transmittance for current ray segment

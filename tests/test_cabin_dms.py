@@ -189,3 +189,64 @@ def test_passthrough_lens_transmits_direct_light(tmp_path):
     assert thin.mean() / bare.mean() == pytest.approx(expect, rel=0.03)
     # the stock thin dielectric blocks shadow rays: same mean (unbiased) but far noisier per pixel
     assert stock.std() > 5 * thin.std()
+
+
+def _cabin(tmp_path, name, *extra):
+    out = tmp_path / name
+    m = cabin.build(cabin.parse_args(["--out-dir", str(out), *extra]))
+    return (out / "cabin.pbrt").read_text(), m
+
+
+def test_retina_default_on_and_off_restores_dark_pupil(tmp_path):
+    txt, m = _cabin(tmp_path, "on")
+    assert (
+        '"string type" "retroreflective"' in txt
+        and '"bool passthrough" true' in txt.split('"cornea"')[1].split("\n")[0]
+    )
+    assert m["driver"]["retina"]["cornea_passthrough"]
+    txt, m = _cabin(tmp_path, "off", "--retina", "off")
+    assert "retroreflective" not in txt and m["driver"]["retina"] is None
+    assert all(e["bright_pupil"] is None for e in m["driver"]["eyes"])
+
+
+def test_bright_pupil_only_with_on_axis_led(tmp_path):
+    _, off_axis = _cabin(tmp_path, "a")  # LED 40 mm from the lens: ~3.8 deg observation angle
+    _, coax = _cabin(tmp_path, "b", "--led-offset-m", "0.008")
+    for e in off_axis["driver"]["eyes"]:
+        assert e["bright_pupil"]["pupil_vs_white_lambertian"] < 1e-3
+    for e in coax["driver"]["eyes"]:
+        assert e["bright_pupil"]["observation_angle_deg"] < 1.0
+        assert e["bright_pupil"]["pupil_vs_white_lambertian"] > 0.3
+
+
+def test_retina_lobe_energy_defocus_and_water():
+    r = cabin.retina_retroreflection(6.0, 0.65, 2.5, None)
+    # the exponential lobe integrates to the returned fraction
+    np.testing.assert_allclose(r["ra"] * 2 * math.pi * r["lobe_width_rad"] ** 2, r["returned_fraction"], rtol=1e-12)
+    focused = cabin.retina_retroreflection(6.0, 0.65, 2.5, 0.65)
+    assert focused["defocus_d"] == pytest.approx(0.0) and focused["lobe_width_rad"] < r["lobe_width_rad"]
+    k850, k940 = (int(np.argmin(np.abs(cabin.WL - w))) for w in (850, 940))
+    t = math.exp(-2 * float(nir_skin.water_mua(np.array([940.0]))[0] - nir_skin.water_mua(np.array([850.0]))[0]) * 2.2)
+    assert r["returned_fraction"][k940] / r["returned_fraction"][k850] == pytest.approx(t, rel=1e-6)
+
+
+def test_sun_adds_distant_light_and_roof(tmp_path):
+    txt, m = _cabin(tmp_path, "s", "--sun-elevation-deg", "25", "--sun-azimuth-deg", "30")
+    assert 'LightSource "distant"' in txt and m["sun"]["irradiance_at_led_band_w_m2_nm"] > 0
+    txt, m = _cabin(tmp_path, "n")
+    assert "distant" not in txt and m["sun"] is None
+
+
+@pytest.mark.skipif(not PBRT.is_file(), reason="pbrt not built")
+def test_passthrough_dielectric_transmits_direct_light(tmp_path):
+    quad = '"point3 P" [-2 -2 0.6  2 -2 0.6  2 2 0.6  -2 2 0.6]'
+    bare = _render_behind_lens(tmp_path, "bare", "")
+    lens = (
+        'AttributeBegin Material "dielectric" "float eta" [1.5] "bool passthrough" true\n'
+        f'Shape "trianglemesh" "integer indices" [0 1 2 0 2 3] {quad}\nAttributeEnd'
+    )
+    one = _render_behind_lens(tmp_path, "one", lens)
+    # single interface each way: (1 - Fr(theta_in)) (1 - Fr(0)), plus the plane <-> surface interreflection
+    r0 = cabin.fresnel_dielectric(1.0, 1.5)
+    expect = (1 - cabin.fresnel_dielectric(math.cos(math.atan(0.3 / 0.7)), 1.5)) * (1 - r0) / (1 - 0.2 * r0)
+    assert one.mean() / bare.mean() == pytest.approx(expect, rel=0.03)
