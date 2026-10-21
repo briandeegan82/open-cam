@@ -303,9 +303,25 @@ rear) get generic layouts; trucks, the van and the bus have amber / red / clear 
   of it (bus). The Pontiac and the vintage car have none, as cars of their era weren't fitted with
   them. StVO §17 only permits them below 50 m visibility; `auto` turns them on for any `--haze fog`
   scene. The manifest gives `tail_lamps[*].rear_fog` (intensity, area, peak luminance) or `null`.
-* *Not modelled:* the lamps' angular intensity distribution (they are Lambertian, while R7 lets
-  the intensity fall off away from H-V), the inner optics (pillow lenses, reflector facets) and
-  sparkle, rear reflex reflectors, indicators flashing and reversing lamps lit. Heavy
+* *Beam shape* (`--rear-lamp-beam shaped`, default; `lambertian` = cosine emitters): the
+  H-V intensities above are kept and the intensity falls off away from straight behind as
+  I(h, v) = I(H-V) f(h) g(v). For tail and stop lamps f and g go through the ratios of the
+  FMVSS 108 one-section test-point minima (49 CFR 571.108 Table VIII taillamp and Table IX
+  stop lamp, e.g. tail H-V 2.0, H-10 0.8, 5U-20 0.3 cd), within 0.07 at every test point;
+  so 10° to the side a tail lamp gives 40 % and 20° to the side 15 % of its H-V intensity.
+  The scaled intensities meet every FMVSS minimum and stay below its maxima. ECE R7 tests the
+  same kind of grid (H, 5° and 10° up/down, out to 20° left/right); its text wasn't available to
+  check, so the shape follows the FMVSS ratios. The rear fog lamp has a nominal R38-style
+  field (≥ 75 % of H-V within ±10° H, ±5° V, so ≥ 150 cd; R38 text not checked). Beyond the
+  test grid the beam keeps falling to zero at 90°. Lamps whose one emitter carries tail and
+  stop (bulbs, LED fallback) use the intensity-weighted mix; the CHMSL uses the stop shape.
+  Emitters stay diffuse area lights (so the lens is seen lit), and pbrt patch 0016 scales their
+  radiance by shape / cos θ from equal-area maps written to `textures/rear_beam_*.exr`; this is
+  exact for patches facing straight back, while body-conforming lenses tilt a few degrees. The
+  manifest gives `tail_lamps[*].beam` (`fmvss108_ratios` or `lambertian`). `TestPbrtAngularAreaLight`
+  renders a lamp from the test directions and checks the radiance follows the map.
+* *Not modelled:* left/right asymmetry of real beams (inboard vs outboard), the inner optics
+  (pillow lenses, reflector facets) and sparkle, rear reflex reflectors, indicators flashing and reversing lamps lit. Heavy
   vehicles use the flat rear of their bounding box.
 
 `--tail-lamps simple` restores the old flat 0.30 × 0.10 m red quads at the bounding-box rear

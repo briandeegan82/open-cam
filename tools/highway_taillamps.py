@@ -27,6 +27,21 @@ DEFAULT_ASSET_ROOT = REPO / "scenes" / "assets" / "highway"
 
 TAIL_CD, STOP_CD, CHMSL_CD = 6.0, 80.0, 40.0
 FOG_CD = 200.0  # rear fog lamp, UN ECE R38: 150-300 cd at H-V
+
+# Beam shapes I(h, v) / I(H-V) of the lit functions, separable f(h) g(v) through (angle [deg],
+# ratio) knots. Tail and stop: the ratios of the FMVSS 108 one-section test-point minima
+# (49 CFR 571.108 Table VIII taillamp, Table IX stop lamp; e.g. tail H-V 2.0, H-10 0.8,
+# 5U-20 0.3, 10U-5 0.4 cd), which f g matches to within 0.07 at every test point; ECE R7 sets the same
+# kind of grid (H, 5 and 10 deg up/down, 5 to 20 deg left/right; text not checked here).
+# Fog: nominal, an R38-style field (>= 150 cd of the 200 cd H-V within +-10 deg H, +-5 deg V;
+# R38 text not checked). Beyond the test grid the beam keeps falling to zero at 90 deg.
+BEAM_SHAPES = {
+    "tail": {"h": ((0, 1.0), (5, 1.0), (10, 0.4), (20, 0.167)), "v": ((0, 1.0), (5, 0.9), (10, 0.2))},
+    "stop": {"h": ((0, 1.0), (5, 1.0), (10, 0.5), (20, 0.143)), "v": ((0, 1.0), (5, 0.875), (10, 0.2))},
+    "fog": {"h": ((0, 1.0), (10, 0.75), (20, 0.25)), "v": ((0, 1.0), (5, 0.75), (10, 0.25))},
+}
+BEAM_TAILS = {"h": ((45, 0.3), (80, 0.1)), "v": ((15, 0.5), (30, 0.15), (60, 0.05))}  # x last knot
+BEAM_MAPS = ("tail", "stop", "tail_stop", "fog")
 HOTSPOT_FRACTION = 0.5  # incandescent: share of the intensity from the bulb image
 LENS_OFFSET_M, EMITTER_OFFSET_M = 0.002, 0.004
 CELL_M = 0.01
@@ -320,6 +335,55 @@ LENS_SPD = {
 EMITTER_SPD = {"led": "spd/lamp_red_led.spd", "incandescent": "spd/lamp_red_incandescent.spd"}
 
 
+def _profile(knots: tuple, tail: tuple, angle_deg: np.ndarray) -> np.ndarray:
+    last_a, last_r = knots[-1]
+    xs = [a for a, _ in knots] + [a for a, _ in tail] + [90.0]
+    ys = [r for _, r in knots] + [last_r * r for _, r in tail] + [0.0]
+    return np.interp(np.abs(angle_deg), xs, ys)
+
+
+def beam_shape(kind: str, d: np.ndarray) -> np.ndarray:
+    """I / I(H-V) along car-frame directions d (..., 3); the lamp axis is -z (rearwards), y up."""
+    if kind == "tail_stop":  # one emitter carrying both functions (bulb lamps, LED fallback)
+        return (TAIL_CD * beam_shape("tail", d) + STOP_CD * beam_shape("stop", d)) / (TAIL_CD + STOP_CD)
+    sh = BEAM_SHAPES[kind]
+    h = np.degrees(np.arctan2(d[..., 0], -d[..., 2]))
+    v = np.degrees(np.arcsin(np.clip(d[..., 1], -1.0, 1.0)))
+    out = _profile(sh["h"], BEAM_TAILS["h"], h) * _profile(sh["v"], BEAM_TAILS["v"], v)
+    return np.where(d[..., 2] < 0, out, 0.0)
+
+
+def beam_map(kind: str, n: int = 256) -> np.ndarray:
+    """Equal-area ``angularfilename`` map for pbrt (patch 0016): radiance factor = shape / cos.
+
+    A rear-facing Lambertian emitter of H-V intensity I0 then has I = I0 * shape (exactly for
+    patches facing -z; the body-conforming lenses tilt by a few degrees).
+    """
+    from highway_sky import equal_area_directions
+
+    d = equal_area_directions(n)
+    cos = np.clip(-d[..., 2], 0.0, 1.0)
+    m = np.where(cos > 1e-3, beam_shape(kind, d) / np.maximum(cos, 1e-3), 0.0)
+    return np.clip(m, 0.0, 1.0)
+
+
+def write_beam_maps(out_dir: Path, n: int = 256) -> dict[str, str]:
+    """Write the rear-lamp beam maps under out_dir/textures; returns kind -> scene-relative path."""
+    from highway_night import write_y_exr
+
+    paths = {}
+    for kind in BEAM_MAPS:
+        f = Path(out_dir) / "textures" / f"rear_beam_{kind}.exr"
+        write_y_exr(f, beam_map(kind, n))
+        paths[kind] = f"textures/rear_beam_{kind}.exr"
+    return paths
+
+
+def _emitter(spd: str, lum: float, beam: dict | None, kind: str) -> str:
+    ang = f' "string angularfilename" "{beam[kind]}"' if beam else ""
+    return f'    AreaLightSource "diffuse" "spectrum L" "{spd}" "float scale" [{_f(lum)}]{ang}'
+
+
 def _cutoff(wl: np.ndarray, edge_nm: float, width_nm: float = 7.0) -> np.ndarray:
     return 1.0 / (1.0 + np.exp(-(np.asarray(wl, dtype=np.float64) - edge_nm) / width_nm))
 
@@ -442,53 +506,59 @@ def _incandescent_bins(g: _Grid, cells: np.ndarray) -> list[tuple[np.ndarray, fl
     return out
 
 
-def _lamp_lines(g: _Grid, layout: LampLayout, braking: bool, outer_is_high: bool) -> tuple[list[str], dict]:
-    """Lens + emitters of one side; luminances from the per-function intensities (Lambertian, I = L A)."""
+def _lamp_lines(
+    g: _Grid, layout: LampLayout, braking: bool, outer_is_high: bool, beam: dict | None = None
+) -> tuple[list[str], dict]:
+    """Lens + emitters of one side; luminances from the per-function H-V intensities (I = L A).
+
+    ``beam``: kind -> angular map (``write_beam_maps``); None = Lambertian emitters.
+    """
     out: list[str] = []
     sections = _chambers(g, layout, outer_is_high)
     red = sections.get("red", np.zeros_like(g.mask))
-    groups: list[tuple[np.ndarray, float]] = []  # (cells, luminance cd/m^2)
+    groups: list[tuple[np.ndarray, float, str]] = []  # (cells, luminance cd/m^2, beam kind)
+    both = "tail_stop" if braking else "tail"
     if layout.tech == "led":
         inner = _erode(red, 2)
         band = red & ~inner
         if not inner.any() or not band.any():
-            groups.append((red, (TAIL_CD + (STOP_CD if braking else 0.0)) / max(g.area(red), 1e-9)))
+            groups.append((red, (TAIL_CD + (STOP_CD if braking else 0.0)) / max(g.area(red), 1e-9), both))
         else:
-            groups.append((band, TAIL_CD / g.area(band)))
+            groups.append((band, TAIL_CD / g.area(band), "tail"))
             if braking:
-                groups.append((inner, STOP_CD / g.area(inner)))
+                groups.append((inner, STOP_CD / g.area(inner), "stop"))
     elif red.any():
         bins = _incandescent_bins(g, red)
         intensity = TAIL_CD + (STOP_CD if braking else 0.0)
         norm = sum(w * g.area(m) for m, w in bins)
-        groups += [(m, intensity * w / norm) for m, w in bins]
+        groups += [(m, intensity * w / norm, both) for m, w in bins]
     for kind, cells in sections.items():
         sh = _patches(g, cells, LENS_OFFSET_M)
         if sh:
             out += ["AttributeBegin", f'    Material "coateddiffuse" "spectrum reflectance" "{LENS_SPD[kind]}"'
                     ' "float roughness" [0]', sh, "AttributeEnd"]  # fmt: skip
     spd = EMITTER_SPD[layout.tech]
-    for cells, lum in groups:
+    for cells, lum, kind in groups:
         sh = _patches(g, cells, EMITTER_OFFSET_M)
         if sh:
             out += [
                 "AttributeBegin",
                 f'    Material "coateddiffuse" "spectrum reflectance" "{LENS_SPD["red"]}" "float roughness" [0]',
-                f'    AreaLightSource "diffuse" "spectrum L" "{spd}" "float scale" [{_f(lum)}]',
+                _emitter(spd, lum, beam, kind),
                 sh,
                 "AttributeEnd",
             ]
-    emitted = sum(lum * g.area(c) for c, lum in groups)
+    emitted = sum(lum * g.area(c) for c, lum, _ in groups)
     return out, {
         "lens_area_m2": round(g.area(g.mask), 5),
-        "emitting_area_m2": round(sum(g.area(c) for c, _ in groups), 5),
+        "emitting_area_m2": round(sum(g.area(c) for c, _, _ in groups), 5),
         "intensity_cd": round(emitted, 3),
-        "peak_luminance_cd_m2": round(max((lum for _, lum in groups), default=0.0), 1),
+        "peak_luminance_cd_m2": round(max((lum for _, lum, _ in groups), default=0.0), 1),
     }
 
 
 def _fog_lamp(
-    surf: RearSurface | None, layout: LampLayout, half_w: float, rear_z: float
+    surf: RearSurface | None, layout: LampLayout, half_w: float, rear_z: float, beam: dict | None = None
 ) -> tuple[list[str], dict | None]:
     """Single rear fog lamp on the left (-x) side, or nothing if the layout has none."""
     if layout.fog is None:
@@ -511,7 +581,7 @@ def _fog_lamp(
         out += [
             "AttributeBegin",
             f'    Material "coateddiffuse" "spectrum reflectance" "{LENS_SPD["red"]}" "float roughness" [0]',
-            f'    AreaLightSource "diffuse" "spectrum L" "{EMITTER_SPD[layout.tech]}" "float scale" [{_f(lum)}]',
+            _emitter(EMITTER_SPD[layout.tech], lum, beam, "fog"),
             _patches(g, cells, EMITTER_OFFSET_M),
             "AttributeEnd",
         ]
@@ -551,10 +621,12 @@ def rear_lamp_lines(
     braking: bool,
     asset_root: Path | str | None = None,
     rear_fog: bool = False,
+    beam: dict | None = None,
     reflex_material=None,
 ) -> tuple[list[str], dict]:
-    """pbrt lines (car frame) and manifest entry for one vehicle's rear lamps (``rear_fog``: fog lamp lit).
+    """pbrt lines (car frame) and manifest entry for one vehicle's rear lamps.
 
+    ``rear_fog``: fog lamp lit; ``beam``: kind -> angular map from ``write_beam_maps`` (None = Lambertian).
     ``reflex_material(name, area_m2) -> lines``: add retroreflective red reflex reflectors (night).
     """
     model = car.get("model", "proxy")
@@ -576,7 +648,7 @@ def rear_lamp_lines(
         if not g.mask.any():  # asset geometry does not match the layout: flat lamp at the bounding-box rear
             g = _grid(None, sx * ax0, sx * ax1, y0, y1, rear_z, ())
         outer_is_high = abs(g.corners[0, -1, 0]) > abs(g.corners[0, 0, 0])
-        ln, meta = _lamp_lines(g, layout, braking, outer_is_high)
+        ln, meta = _lamp_lines(g, layout, braking, outer_is_high, beam)
         lines += ln
         sides.append(dict(meta, surface=g.surface))
     chmsl = None
@@ -593,14 +665,14 @@ def rear_lamp_lines(
             lines += [
                 "AttributeBegin",
                 f'    Material "coateddiffuse" "spectrum reflectance" "{LENS_SPD["red"]}" "float roughness" [0]',
-                f'    AreaLightSource "diffuse" "spectrum L" "{EMITTER_SPD["led"]}" "float scale" [{_f(lum)}]',
+                _emitter(EMITTER_SPD["led"], lum, beam, "stop"),
                 sh_emit,
                 "AttributeEnd",
             ]
         chmsl = {"intensity_cd": CHMSL_CD if braking else 0.0, "area_m2": round(g.area(g.mask), 5)}
     fog_meta = None
     if rear_fog:
-        fog_lines, fog_meta = _fog_lamp(surf, layout, half_w, rear_z)
+        fog_lines, fog_meta = _fog_lamp(surf, layout, half_w, rear_z, beam)
         lines += fog_lines
     reflex_meta = None
     if reflex_material is not None and layout.reflex is not None:
@@ -615,5 +687,6 @@ def rear_lamp_lines(
         "sides": sides,
         "chmsl": chmsl,
         "rear_fog": fog_meta,
+        "beam": "fmvss108_ratios" if beam else "lambertian",
         **({"reflex_reflectors": reflex_meta} if reflex_material is not None else {}),
     }
