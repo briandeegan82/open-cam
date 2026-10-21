@@ -159,10 +159,13 @@ daylight entering through the exit portal brightens the inside-out exit-zone roa
 design value (about 3.8x in the 480 x 320 test render, compared with up to 1.8x for the Lambertian
 road).
 
-**Predicted vs rendered.** The predictions cover direct light only. In the render, light reflected
-by the lining and daylight coming in through the portal add to them. In the small RGB renders used
-by the pbrt test, the measured road luminances are about 1.2-1.4x the prediction in the interior
-zone, about 1.3x in the exit zone and about 1.5-1.6x in the threshold zone near the entrance. The exterior road is about 1.15x the
+**Predicted vs rendered.** The predictions are the design values: lamp light including its
+interreflection in the lit tube (`interreflection`, default), or direct lamp light only (`direct`).
+Daylight coming in through the portals adds to both. In 960 x 640, 256 spp RGB renders of the default
+scene, the measured road luminance is 1.39x the design value in the threshold ROI and 1.13x in the
+exit-zone ROI; with `direct` it is 1.51x and 1.26x. So the solve removes the interreflected part, and
+what is left near the portals is mostly daylight. With `direct`, the small renders used by the pbrt
+test measured about 1.2-1.4x in the interior zone. The exterior road is about 1.15x the
 prediction, because of light reflected from the headwall and hill. The test accepts 0.9x to 1.8x
 of the prediction and +-4.5 dB on the bright/dark ratio. For radiance cameras (pinhole/thinlens)
 the EXR luminance is in cd/m^2.
