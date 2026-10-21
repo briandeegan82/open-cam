@@ -114,6 +114,10 @@ def test_mains_flicker_time_slices(tmp_path):
     ids, frac = rts.linear_plan(m["exposure"], m["emitters"], 48)
     assert frac.shape == (3, 48) and 0.0 < frac.min() < frac.max() <= 1.0
     assert not np.allclose(frac[0], frac[1])  # different phases ripple out of step
+    _, m1 = _build(tmp_path / "one", "--exposure-s", "0.002", "--mains-hz", "60", "--mains-phases", "1")
+    assert {e["mains_phase"] for e in m1["emitters"]} == {"L1"} and len(
+        {e["pwm"]["phase_s"] for e in m1["emitters"]}
+    ) == 1
     sl = rts.plan_slices(m["exposure"], m["emitters"], 48, bands=4, spp=16)
     assert {st for s in sl for st in s.states.values()} <= {f"s{k}" for k in range(16)}
     for y0 in {s.y0 for s in sl}:

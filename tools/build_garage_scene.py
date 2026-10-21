@@ -97,6 +97,13 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     ap.add_argument("--mains-hz", type=float, choices=(50.0, 60.0), default=50.0)
     ap.add_argument(
+        "--mains-phases",
+        type=int,
+        choices=(1, 3),
+        default=3,
+        help="3 = rows on L1/L2/L3 (their ripples largely cancel in the ambient light); 1 = all on one phase.",
+    )
+    ap.add_argument(
         "--fluorescent-ballast",
         choices=tuple(BALLAST_PERCENT_FLICKER),
         default="magnetic",
@@ -171,7 +178,11 @@ def mains_ripple(args, kind: str, row: int) -> MainsRipple | None:
         return None
     pf = BALLAST_PERCENT_FLICKER[args.fluorescent_ballast] if kind == "fluorescent" else args.led_percent_flicker
     # a 120 deg mains phase shift is 1 / (3 f) in time; the ripple has period 1 / (2 f)
-    return MainsRipple(2.0 * args.mains_hz, pf / 100.0, phase_s=(row % 3) / (3.0 * args.mains_hz))
+    return MainsRipple(2.0 * args.mains_hz, pf / 100.0, phase_s=_phase(args, row) / (3.0 * args.mains_hz))
+
+
+def _phase(args, row: int) -> int:
+    return row % 3 if getattr(args, "mains_phases", 3) == 3 else 0
 
 
 def luminaire_lines(args, rng: np.random.Generator, out_dir: Path | None = None) -> tuple[list, list, list]:
@@ -222,7 +233,7 @@ def luminaire_lines(args, rng: np.random.Generator, out_dir: Path | None = None)
                 meta={
                     "kind": f"luminaire_{kind}",
                     "row_x_m": x,
-                    "mains_phase": f"L{row % 3 + 1}",
+                    "mains_phase": f"L{_phase(args, row) + 1}",
                     "peak_luminance_cd_m2": peak,
                     "luminaires": len(lit),
                 },
@@ -466,7 +477,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
                 "fluorescent": BALLAST_PERCENT_FLICKER[args.fluorescent_ballast],
                 "led": args.led_percent_flicker,
             },
-            "phases": "row r on phase L(r mod 3 + 1), 120 deg apart",
+            "phases": "row r on phase L(r mod 3 + 1), 120 deg apart" if args.mains_phases == 3 else "all on L1",
         }
     )
     if args.exposure_s:
