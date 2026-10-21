@@ -329,7 +329,7 @@ def demosaic_gradient(raw: np.ndarray, layout: CfaLayout, guide: int | None = No
        to the range of the measured ``c`` samples under the interpolation tent.
     Measured samples are preserved exactly.
     """
-    from scipy.ndimage import convolve1d, maximum_filter, minimum_filter  # noqa: PLC0415
+    from scipy.ndimage import convolve1d  # noqa: PLC0415
 
     x = np.asarray(raw, dtype=np.float64)
     idx = layout.site_index(*x.shape)
@@ -365,17 +365,126 @@ def demosaic_gradient(raw: np.ndarray, layout: CfaLayout, guide: int | None = No
         ry_c, rx_c = _coverage_radius(layout, i)
         num, den = _normconv(x - g, mask, _tent(ry_c, rx_c))
         plane = g + num / np.maximum(den, 1e-12)
-        lo = np.full(x.shape, np.inf)
-        hi = np.full(x.shape, -np.inf)
-        for grow in range(8):  # widen where a pixel has no own sample, as _normconv does
-            size = (2 * ry_c - 1 + 2 * grow, 2 * rx_c - 1 + 2 * grow)
-            todo = ~np.isfinite(lo)
-            lo[todo] = minimum_filter(np.where(mask, x, np.inf), size=size, mode="constant", cval=np.inf)[todo]
-            hi[todo] = maximum_filter(np.where(mask, x, -np.inf), size=size, mode="constant", cval=-np.inf)[todo]
-            if np.isfinite(lo).all():
-                break
-        has = np.isfinite(lo)
-        plane[has] = np.clip(plane[has], lo[has], hi[has])
+        _clamp_to_local_range(plane, x, mask, ry_c, rx_c)
+        plane[mask] = x[mask]
+        out[:, :, i] = plane
+    return out.astype(np.float32)
+
+
+def _clamp_to_local_range(plane: np.ndarray, x: np.ndarray, mask: np.ndarray, ry: int, rx: int) -> None:
+    """Clamp ``plane`` in place to the range of the measured samples (``mask``) under the tent."""
+    from scipy.ndimage import maximum_filter, minimum_filter  # noqa: PLC0415
+
+    lo = np.full(x.shape, np.inf)
+    hi = np.full(x.shape, -np.inf)
+    for grow in range(8):  # widen where a pixel has no own sample, as _normconv does
+        size = (2 * ry - 1 + 2 * grow, 2 * rx - 1 + 2 * grow)
+        todo = ~np.isfinite(lo)
+        lo[todo] = minimum_filter(np.where(mask, x, np.inf), size=size, mode="constant", cval=np.inf)[todo]
+        hi[todo] = maximum_filter(np.where(mask, x, -np.inf), size=size, mode="constant", cval=-np.inf)[todo]
+        if np.isfinite(lo).all():
+            break
+    has = np.isfinite(lo)
+    plane[has] = np.clip(plane[has], lo[has], hi[has])
+
+
+def _shift(a: np.ndarray, k: int, axis: int) -> np.ndarray:
+    """``out[i] = a[i + k]`` along ``axis``, edge-replicated."""
+    n = a.shape[axis]
+    i = np.clip(np.arange(n) + k, 0, n - 1)
+    return np.take(a, i, axis=axis)
+
+
+def edge_applies(layout: CfaLayout) -> bool:
+    """The edge-directed method needs a guide on at least half the sites (Bayer G, RCCB C, the
+    4x4 RGBW W, Quad Bayer G). Layouts without one (2x2 RGBW, CYGM) use :func:`demosaic_gradient`,
+    which measured better on them."""
+    return float(layout.density().max()) >= 0.5
+
+
+def demosaic_edge(raw: np.ndarray, layout: CfaLayout, guide: int | None = None) -> np.ndarray:
+    """Edge-directed guide + residual interpolation of the other channels (any periodic layout).
+
+    1. Guide channel ``g`` (densest): horizontal and vertical 1-D estimates, with the
+       Hamilton-Adams second-order term ``(2 c0 - c(-2a) - c(+2a)) / 4`` of the site's own channel
+       wherever the guide sits at +-a and the own channel at +-2a along that direction (a = 1 for
+       Bayer-like tiles, 2 for Quad Bayer's 2x2 clusters; Hamilton &
+       Adams, US 5,629,734, 1997). The two are blended with weights ``1 / (eps + E_d)^2``, where
+       ``E_d`` is the same-channel gradient energy of the mosaic summed over a 5x5 window (the
+       windowed directional decision of RCD / Menon et al., IEEE TIP 16(1), 2007), and clamped to
+       the range of the guide samples under the interpolation tent.
+    2. Other channels: residual interpolation (Kiku et al., "Residual interpolation for color
+       image demosaicking", ICIP 2013). A guided filter fitted on the channel's own sites gives a
+       tentative ``a g + b``; the residual ``c - (a g + b)`` on those sites is interpolated by
+       normalised convolution and added back, then clamped to the local range of measured ``c``
+       as in :func:`demosaic_gradient`.
+    Measured samples are preserved exactly; flat fields are reproduced exactly. Layouts without a
+    50 % guide channel fall back to :func:`demosaic_gradient` (:func:`edge_applies`).
+    """
+    from scipy.ndimage import convolve1d, uniform_filter  # noqa: PLC0415
+
+    if guide is None and not edge_applies(layout):
+        return demosaic_gradient(raw, layout)
+
+    x = np.asarray(raw, dtype=np.float64)
+    idx = layout.site_index(*x.shape)
+    gi = guide_channel(layout) if guide is None else int(guide)
+    gmask = idx == gi
+    ry, rx = _coverage_radius(layout, gi)
+    num, den = _normconv(x, gmask, _tent(ry, rx))
+    g_iso = num / np.maximum(den, 1e-12)
+    pr, pc = layout.period
+    scale = float(np.mean(np.abs(x))) + 1e-30
+    eps = 1e-3 * scale
+
+    est, wts = [], []
+    for axis, r, per in ((1, max(rx, 2), pc), (0, max(ry, 2), pr)):
+        k = 1.0 - np.abs(np.arange(-r + 1, r)) / r
+        n = convolve1d(np.where(gmask, x, 0.0), k, axis=axis, mode="constant", cval=0.0)
+        d = convolve1d(gmask.astype(np.float64), k, axis=axis, mode="constant", cval=0.0)
+        e = n / np.maximum(d, 1e-12)
+        ok = d > 1e-9
+        done = gmask.copy()
+        for a in (1, 2, 3):  # guide at +-a and own channel at +-2a (a = 2: Quad Bayer clusters)
+            own = (_shift(idx, -2 * a, axis) == idx) & (_shift(idx, 2 * a, axis) == idx)
+            gd = (_shift(idx, -a, axis) == gi) & (_shift(idx, a, axis) == gi)
+            ha = ~done & own & gd
+            lap = (2 * x - _shift(x, -2 * a, axis) - _shift(x, 2 * a, axis)) / 4.0
+            e = np.where(ha, e + lap, e)
+            done |= ha
+        # same-channel gradient energy: sites one period apart always carry the same channel
+        grad = np.abs(_shift(x, per, axis) - _shift(x, -per, axis)) / (2 * per)
+        grad = grad + np.abs(np.gradient(g_iso, axis=axis))
+        energy = uniform_filter(grad, size=5, mode="nearest") * 25.0
+        est.append(e)
+        wts.append(np.where(ok, 1.0 / (eps + energy) ** 2, 0.0))
+    wsum = wts[0] + wts[1]
+    g = np.where(wsum > 0, (wts[0] * est[0] + wts[1] * est[1]) / np.maximum(wsum, 1e-300), g_iso)
+    _clamp_to_local_range(g, x, gmask, ry, rx)  # the second-order term can overshoot at hard edges
+    g[gmask] = x[gmask]
+
+    out = np.empty((*x.shape, len(layout.channels)), dtype=np.float64)
+    size = 2 * max(pr, pc) + 1
+    reg = (1e-2 * scale) ** 2
+    for i in range(len(layout.channels)):
+        if i == gi:
+            out[:, :, i] = g
+            continue
+        mask = idx == i
+        m = mask.astype(np.float64)
+        cnt = uniform_filter(m, size=size, mode="constant")
+        safe = np.maximum(cnt, 1e-12)
+        mg = uniform_filter(m * g, size=size, mode="constant") / safe
+        mc = uniform_filter(m * x, size=size, mode="constant") / safe
+        cov = uniform_filter(m * g * x, size=size, mode="constant") / safe - mg * mc
+        var = uniform_filter(m * g * g, size=size, mode="constant") / safe - mg * mg
+        a = np.where(cnt > 1e-9, cov / (np.maximum(var, 0.0) + reg), 0.0)
+        b = mc - a * mg
+        tent = uniform_filter(a, size=size, mode="nearest") * g + uniform_filter(b, size=size, mode="nearest")
+        ry_c, rx_c = _coverage_radius(layout, i)
+        num, den = _normconv(np.where(mask, x - tent, 0.0), mask, _tent(ry_c, rx_c))
+        plane = tent + num / np.maximum(den, 1e-12)
+        _clamp_to_local_range(plane, x, mask, ry_c, rx_c)
         plane[mask] = x[mask]
         out[:, :, i] = plane
     return out.astype(np.float32)
@@ -387,7 +496,9 @@ def demosaic(raw: np.ndarray, layout: CfaLayout, method: str = "gradient") -> np
         return demosaic_bilinear(raw, layout)
     if m in ("gradient", "malvar"):  # Malvar is Bayer-specific; generic layouts use the gradient method.
         return demosaic_gradient(raw, layout)
-    raise ValueError(f"unknown generic demosaic method {method!r} (bilinear | gradient)")
+    if m == "edge":
+        return demosaic_edge(raw, layout)
+    raise ValueError(f"unknown generic demosaic method {method!r} (bilinear | gradient | edge)")
 
 
 # ---------------------------------------------------------------------------------------------
@@ -424,9 +535,13 @@ def bin_mosaic(
     return (s / (block * block) if mode == "mean" else s), out_layout
 
 
-def remosaic_to_bayer(raw: np.ndarray, layout: CfaLayout, pattern: str = "RGGB") -> tuple[np.ndarray, CfaLayout]:
-    """Reference remosaic: full-res gradient demosaic, then resample on a standard Bayer tile."""
-    full = demosaic_gradient(raw, layout)
+def remosaic_to_bayer(
+    raw: np.ndarray, layout: CfaLayout, pattern: str = "RGGB", method: str = "gradient"
+) -> tuple[np.ndarray, CfaLayout]:
+    """Reference remosaic: full-res demosaic (``method``, see :func:`demosaic`; ``edge`` is the
+    edge-directed one), then resample on a standard Bayer tile. Sites whose colour is unchanged
+    keep their measured value; the others take the interpolated estimate."""
+    full = demosaic(raw, layout, method)
     target = CfaLayout(tile=PRESET_LAYOUTS[pattern.upper()], qe_csv=layout.qe_csv, name=pattern.upper())
     order = [layout.channels.index(c) for c in target.channels]
     return mosaic(full[:, :, order], target), target
@@ -578,7 +693,10 @@ def render_cfa_rgb(
     method = str(cfa_cfg.get("demosaic", "gradient"))
     chans = [demosaic(np.asarray(d, dtype=np.float64) - black_dn, layout, method) for d in dn_images]
     spec = cfa_cfg.get("ccm", "colorchecker_spectral")
-    info: dict = {"demosaic": "bilinear" if method == "bilinear" else "gradient"}
+    m = method.lower()
+    info: dict = {
+        "demosaic": "edge" if m == "edge" and edge_applies(layout) else ("bilinear" if m == "bilinear" else "gradient")
+    }
     gains = np.ones(len(layout.channels))
     if wb_method:
         gains = channel_wb_gains(np.clip(chans[0], 0.0, None), wb_method)
