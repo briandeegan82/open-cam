@@ -152,3 +152,59 @@ class TestBuilderHook(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestIndicatorsReversing(unittest.TestCase):
+    def test_off_by_default(self) -> None:
+        lines, meta = tl.rear_lamp_lines(CAR, False)
+        self.assertFalse(any("lamp_amber" in x or "lamp_white" in x for x in lines))
+        self.assertIsNone(meta["indicator"])
+        self.assertIsNone(meta["reversing"])
+
+    def test_steady_and_flashing_indicators(self) -> None:
+        for side, n in (("left", 1), ("right", 1), ("hazard", 2)):
+            lines, meta = tl.rear_lamp_lines(CAR, False, indicator=side)
+            self.assertEqual(sum("lamp_amber" in x for x in lines), n)
+            self.assertFalse(meta["indicator"]["flashing"])
+            self.assertEqual(meta["indicator"]["intensity_cd"], tl.INDICATOR_CD)
+        got = {}
+
+        def emit(name, lines_for_level, lamp_meta):
+            got.update(name=name, on=lines_for_level(1.0), off=lines_for_level(0.0))
+            return 'Include "emitters/x.pbrt"'
+
+        lines, meta = tl.rear_lamp_lines(CAR, False, indicator="hazard", emit=emit)
+        self.assertIn('Include "emitters/x.pbrt"', lines)
+        self.assertFalse(any("lamp_amber" in x for x in lines))
+        self.assertEqual(got["name"], "indicator")
+        self.assertEqual(sum("lamp_amber" in x for x in got["on"]), 2)
+        self.assertEqual(got["off"], [])
+        self.assertTrue(meta["indicator"]["flashing"])
+
+    def test_intensity_and_tail_unchanged(self) -> None:
+        _, plain = tl.rear_lamp_lines(CAR, True)
+        lines, meta = tl.rear_lamp_lines(CAR, True, indicator="left", reversing=True)
+        for a, b in zip(plain["sides"], meta["sides"]):
+            self.assertAlmostEqual(a["intensity_cd"], b["intensity_cd"], places=2)
+        self.assertEqual(sum("lamp_white" in x for x in lines), 2)
+        # luminance x lens-section area = the nominal on-axis intensity (Lambertian)
+        sel = [x for x in lines if "lamp_amber" in x]
+        lum = float(sel[0].split("[")[1].split("]")[0])
+        self.assertAlmostEqual(lum * meta["indicator"]["area_m2"][0], tl.INDICATOR_CD, places=1)
+
+    def test_heavy_vehicle_uses_its_amber_chamber(self) -> None:
+        truck = dict(CAR, model="truck_box", width_m=2.5, length_m=10.0, height_m=3.8)
+        _, plain = tl.rear_lamp_lines(truck, False)
+        _, meta = tl.rear_lamp_lines(truck, False, indicator="right")
+        self.assertEqual(plain["sides"][0]["lens_area_m2"], meta["sides"][0]["lens_area_m2"])
+        self.assertEqual(len(meta["indicator"]["area_m2"]), 1)
+
+    def test_indicator_spectra_inside_ece_amber_box(self) -> None:
+        wl = night.LIGHT_WL
+        for spd in (tl.amber_led_spectrum(wl), tl.amber_incandescent_spectrum(wl)):
+            x, y, z = tristimulus(wl, spd)
+            s = x + y + z
+            # ECE R48 amber: y <= 0.429 (red), y >= 0.398 (green; not tested for the 2856 K filament);
+            # z <= 0.007 (white).
+            self.assertLessEqual(y / s, 0.429)
+            self.assertLessEqual(z / s, 0.01)

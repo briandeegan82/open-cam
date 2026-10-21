@@ -73,6 +73,13 @@ def add_args(ap: argparse.ArgumentParser) -> None:
         help="Imported Objaverse CC-BY model under the rider: a bicycle for --vru cyclist (default: procedural "
         f"bicycle), a motorbike, moped or scooter for --vru motorcyclist (default: {DEFAULT_MOTO}).",
     )
+    g.add_argument(
+        "--vru-lamps",
+        choices=("auto", "on", "off"),
+        default="auto",
+        help="Front (white) and rear (red) lamps of a ridden two-wheeler; auto = on at dusk/night (nominal "
+        "intensities, Lambertian, no road beam).",
+    )
     g.add_argument("--vru-obstruction", choices=("none", "parked-cars"), default="none")
     g.add_argument("--vru-clothing", choices=sorted(CLOTHING), default="ncap")
     g.add_argument("--vru-skin-tau", type=float, default=0.35, help="Melanin optical depth (iqlab.skin).")
@@ -93,6 +100,8 @@ def check_args(args: argparse.Namespace) -> None:
             raise SystemExit("--vru cyclist takes a bicycle model; --vru motorcyclist a motorbike, moped or scooter")
     if not enabled(args):
         return
+    if getattr(args, "vru_lamps", "auto") == "on" and getattr(args, "time_of_day", "day") == "day":
+        raise SystemExit("--vru-lamps on needs --time-of-day dusk or night")
     if args.vru_distance_m <= 2.0:
         raise SystemExit("--vru-distance-m must be > 2 m")
     if not 0.0 <= args.vru_gait_phase < 1.0:
@@ -423,6 +432,43 @@ def clear_traffic(args, traffic: list[tuple]) -> tuple[list[tuple], list[dict]]:
     return keep, removed
 
 
+# Nominal on-axis intensities [cd] and lens sizes (w, h) [m]; not checked against StVZO / UN R50 / R113.
+VRU_LAMPS = {
+    "bicycle": {"front": (1000.0, (0.05, 0.03)), "rear": (4.0, (0.04, 0.03))},
+    "motor": {"front": (1000.0, (0.16, 0.12)), "rear": (6.0, (0.10, 0.05))},
+}
+
+
+def lamps_on(args) -> bool:
+    mode = getattr(args, "vru_lamps", "auto")
+    return args.vru in RIDERS and (mode == "on" or (mode == "auto" and getattr(args, "time_of_day", "day") != "day"))
+
+
+def lamp_positions(aid: str | None) -> tuple[str, np.ndarray, np.ndarray]:
+    """Kind and (front, rear) lamp centres in the target frame (+z forward); estimates from the contact points."""
+    if aid is None:  # procedural bicycle: head tube top and below the saddle
+        return "bicycle", np.array([0.0, 0.96, 0.48]), np.array([0.0, 0.78, -0.43])
+    (sz, sy), (gz, gy, _), _ = tw.RIDER[aid]
+    if tw.MODELS[aid][0] == "bicycle":
+        return "bicycle", np.array([0.0, gy - 0.10, gz + 0.10]), np.array([0.0, sy - 0.12, sz - 0.20])
+    return "motor", np.array([0.0, gy - 0.10, gz + 0.15]), np.array([0.0, sy - 0.05, sz - 0.55])
+
+
+def lamp_lines(aid: str | None) -> tuple[list[str], dict]:
+    from highway_night import _quad_light
+
+    kind, front, rear = lamp_positions(aid)
+    out, meta = [], {"kind": kind}
+    for name, p, sign, spd in (
+        ("front", front, 1.0, "spd/lamp_white_led.spd"),
+        ("rear", rear, -1.0, "spd/lamp_red_led.spd"),
+    ):
+        cd, (w, h) = VRU_LAMPS[kind][name]
+        out += _quad_light(tuple(p), (sign * w / 2, 0, 0), (0, h / 2, 0), spd, cd / (w * h))  # I(0) = L A
+        meta[name] = {"intensity_cd": cd, "position_m": p.round(3).tolist(), "lens_m": [w, h]}
+    return out, meta
+
+
 def scene_lines(args, road_edge_x: float, place, car_body, asset=None, out_dir=None) -> tuple[list[str], dict]:
     """pbrt lines for the target (+ obstruction cars) and manifest metadata.
 
@@ -467,6 +513,10 @@ def scene_lines(args, road_edge_x: float, place, car_body, asset=None, out_dir=N
         *place(x, 0.0, z),
     ]
     L += [f"Rotate {yaw:.6g} 0 1 0", *parts.lines()]
+    lamp_meta = None
+    if lamps_on(args):
+        ll, lamp_meta = lamp_lines(args.vru_bike if bike is not None else None)
+        L += ll
     if bike is not None:
         L += sf.instance_lines(bike["name"], (0.0, 0.0, 0.0), bike["yaw0"], bike["scale"], bike["origin"])
     L += ["AttributeEnd"]
@@ -497,6 +547,7 @@ def scene_lines(args, road_edge_x: float, place, car_body, asset=None, out_dir=N
         "bbox_world_m": [world.min(0).round(4).tolist(), world.max(0).round(4).tolist()],
         "triangles": int(sum(len(t) for v in parts.parts.values() for _, t, _ in v)),
         "obstruction": obstruction,
+        "lamps": lamp_meta,
         "static": True,
         "geometry": "procedural, nominal Euro NCAP/ISO 19206 target sizes (not checked against the standard)",
     }

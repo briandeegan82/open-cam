@@ -720,6 +720,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         "",
     ]
     nopts = night.resolve(args)
+    nopts["exposure_window_s"] = (0.0, fx.t_int) if fx.animated else None  # flashing indicators (PWM)
     night_lighting = None
     if args.time_of_day == "day":
         L += day_lights
