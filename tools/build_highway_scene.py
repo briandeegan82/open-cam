@@ -49,7 +49,15 @@ import highway_vru as vru  # noqa: E402
 import highway_wet as wet  # noqa: E402
 import road_rtable as rt  # noqa: E402
 from fetch_highway_assets import cache_root, load_asset_manifest  # noqa: E402
-from highway_road_wear import WEAR_LEVELS, RoadWear, linear_normal_map  # noqa: E402
+from highway_road_wear import (  # noqa: E402
+    TILE_M,
+    TONE_TILE_M,
+    WEAR_LEVELS,
+    RoadWear,
+    detiled_maps,
+    linear_normal_map,
+    tonal_mask,
+)
 from highway_sky import (  # noqa: E402
     analytic_clear_sky,
     clear_sky_illuminance_lux,
@@ -160,6 +168,7 @@ def write_spd(path: Path, wl: np.ndarray, val: np.ndarray) -> None:
 
 
 # --road / --verge texture -> spectral shape (spd/<name>.spd) that its mean-1 luminance map scales.
+STRUCTURED_ROADS = {"pavingstones070", "pavingstones128"}  # regular joint pattern: no stochastic re-tiling
 ROAD_SURFACES = {
     "asphalt031": "asphalt_aged",
     "asphalt026c": "asphalt_aged",
@@ -512,6 +521,14 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         "concrete046 is concrete pavement, pavingstones070/128 are setts and block paving.",
     )
     ap.add_argument(
+        "--road-detile",
+        choices=("auto", "off"),
+        default="auto",
+        help="Break up the texture repeat of --road when road wear is off: asphalt and concrete046 are "
+        f"re-synthesised into a {TILE_M:g} m tile (concrete without rotation, so its form marks stay aligned); "
+        f"concrete and paving also get a mean-1 {TONE_TILE_M:g} m tonal mask. off: plain texture repeat.",
+    )
+    ap.add_argument(
         "--verge",
         choices=VERGE_SURFACES,
         default="grass004",
@@ -765,9 +782,29 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         info, raw = road_tex
         tile = float(info["tile_size_m"])
         lum = out_dir / "textures" / f"{args.road}_lum.exr"
-        luminance_texture(raw / info["maps"]["color"], lum)
+        nmap = None
+        tone = []
+        if args.road_detile == "auto":
+            dseed = args.road_wear_seed if args.road_wear_seed is not None else 7 if args.seed is None else args.seed
+            tdir = out_dir / "textures" / "road_detile"
+            if args.road not in STRUCTURED_ROADS:  # stochastic: re-synthesise; paving keeps its joint pattern
+                lum, _, nmap = detiled_maps(f"tex_{args.road}", info, raw, tdir, dseed, rotate=asphalt_road)
+                tile = TILE_M
+            if not asphalt_road:
+                s_uv = f"{tile / TONE_TILE_M:.8g}"
+                tone = [
+                    f'Texture "asphalt:tone" "float" "imagemap" "string filename"'
+                    f' "{os.path.relpath(tonal_mask(tdir, dseed), out_dir)}" "float uscale" [{s_uv}] "float vscale" [{s_uv}]',
+                    'Texture "asphalt:lum" "float" "scale" "texture tex" "asphalt:lum0" "texture scale" "asphalt:tone"',
+                ]
+        else:
+            luminance_texture(raw / info["maps"]["color"], lum)
+        if nmap is None:
+            nmap = linear_normal_map(raw / info["maps"]["normal"], out_dir / "textures")
         L += [
-            f'Texture "asphalt:lum" "float" "imagemap" "string filename" "{os.path.relpath(lum, out_dir)}"',
+            f'Texture "asphalt:lum{0 if tone else ""}" "float" "imagemap" "string filename"'
+            f' "{os.path.relpath(lum, out_dir)}"',
+            *tone,
             f'Texture "asphalt" "spectrum" "scale" "spectrum tex" "{road_spd}" "texture scale" "asphalt:lum"',
             *(
                 [
@@ -781,7 +818,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
                     *rt.material_lines("asphalt", rtable, '"texture tint" "asphalt:rtint"'),
                 ]
             ),
-            f'    "string normalmap" "{os.path.relpath(linear_normal_map(raw / info["maps"]["normal"], out_dir / "textures"), out_dir)}"',
+            f'    "string normalmap" "{os.path.relpath(nmap, out_dir)}"',
         ]
     elif rtable is not None:
         L += rt.material_lines("asphalt", rtable, '"spectrum tint" "spd/asphalt_aged_rtint.spd"')
@@ -1206,6 +1243,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
             "surface": args.road,
             "surface_spd": ROAD_SURFACES.get(args.road, "asphalt_aged"),
             "verge": args.verge,
+            "detile": None if road_tex is None or wear is not None else args.road_detile,
             "length_m": ROAD_Z1 - ROAD_Z0,
             "wear": wear.summary if wear is not None else None,
             **({"rtable": rtable.summary()} if rtable is not None else {}),
