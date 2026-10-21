@@ -25,6 +25,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import facade_kits as fk  # noqa: E402
 import highway_night as night  # noqa: E402
 import highway_signs as sign_scene  # noqa: E402
 import highway_vru as vru  # noqa: E402
@@ -120,6 +121,12 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     ap.add_argument("--shop-pwm-hz", type=float, default=100.0, help="Shop LED PWM [Hz] (0 = DC).")
     ap.add_argument("--shop-duty", type=float, default=0.3)
     ap.add_argument("--lit-windows", type=float, default=0.35, help="Fraction of windows lit at dusk/night.")
+    ap.add_argument(
+        "--facade-style",
+        choices=("procedural", "kits"),
+        default="procedural",
+        help="Street fronts: procedural boxes with window quads, or assembled Poly Haven CC0 apartment/factory kits.",
+    )
     ap.add_argument(
         "--facade-textures",
         choices=("none", "mixed"),
@@ -266,7 +273,7 @@ def facade_texture_lines(
 
 
 def facade_lines(
-    lots: list[dict], rng: np.random.Generator, dark: bool, lit: float, tex: list | None = None
+    lots: list[dict], rng: np.random.Generator, dark: bool, lit: float, tex: list | None = None, kit: bool = False
 ) -> tuple[list[str], dict]:
     """Lot boxes plus a window grid on the street face (lit windows emit at dusk/night)."""
     L = ["# ---- facades (procedural)"]
@@ -277,19 +284,25 @@ def facade_lines(
         s = lot["side"]
         x_face = s * BUILD_X
         cx = x_face + s * lot["depth"] / 2
+        depth = lot["depth"]
+        if kit:  # box behind the kit wall plane, kit storey height
+            h, depth = fk.STOREY * lot["storeys"] + 0.3, lot["depth"] - fk.RECESS
+            cx = x_face + s * (fk.RECESS + depth / 2)
         mat = ("facade_render", "facade_brick", "concrete")[k % 3]
         cz, sz = (lot["z0"] + lot["z1"]) / 2, lot["z1"] - lot["z0"]
         if tex:
-            L += [f'NamedMaterial "{tex[k][0]}"', *mesh(*textured_box(cx, cz, lot["depth"], h, sz, tex[k][1]))]
+            L += [f'NamedMaterial "{tex[k][0]}"', *mesh(*textured_box(cx, cz, depth, h, sz, tex[k][1]))]
         else:
-            L += [f'NamedMaterial "{mat}"', *mesh(*box(cx, 0.0, cz, lot["depth"], h, sz))]
+            L += [f'NamedMaterial "{mat}"', *mesh(*box(cx, 0.0, cz, depth, h, sz))]
         for fl in range(1, lot["storeys"]):
             y = 0.8 + 3.2 * fl + 0.9
             for z in np.arange(lot["z0"] + 1.2, lot["z1"] - 1.6, 2.6):
                 p, t = _quad((x_face - s * 0.01, y, z), (0, 0, 1.4), (0, 1.5, 0))
                 if s > 0:
                     t = t[:, ::-1]
-                on = dark and rng.random() < lit
+                on = dark and rng.random() < lit  # drawn in kit mode too, so the rest of the scene is unchanged
+                if kit:
+                    continue
                 (win_lit if on else win_dark).append((p, t))
                 lit_n += on
                 dark_n += not on
@@ -691,17 +704,29 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
     L += ['NamedMaterial "paint_white"', *mesh(p, t), ""]
 
     lots = building_lots(rng)
+    kit_lines, kit_meta, kit_win = [], [], {}
+    if args.facade_style == "kits":
+        kits = {aid: a for aid in fk.KITS if (a := asset(aid)) is not None}
+        if kits:
+            kit_lines, kit_meta, kit_win = fk.street_fronts(
+                lots, kits, BUILD_X, args.seed, dark, args.lit_windows, out_dir, WINDOW_LUMINANCE
+            )
     tl, tex, tex_meta = facade_texture_lines(args, asset, out_dir, len(lots), amanifest["assets"])
     L += tl
-    fl, facade_meta = facade_lines(lots, rng, dark, args.lit_windows, tex)
+    fl, facade_meta = facade_lines(lots, rng, dark, args.lit_windows, tex, kit=bool(kit_meta))
+    L += fl + kit_lines
     if tex:
         facade_meta = {**facade_meta, "textures": tex_meta}
-    L += fl
+    if kit_meta:
+        facade_meta = {**facade_meta, **kit_win, "kits": kit_meta}
     cross_lots = []
     for sx in (-1, 1):
         for sz in (-1, 1):
             zc = Z_INT + sz * (HALF + WALK_W + 25.0)
-            cross_lots.append(box(sx * (BUILD_X + 30.0), 0.0, zc, 60.0, 12.0 + 4.0 * rng.random(), 50.0))
+            inset = fk.RECESS if kit_meta else 0.0  # keep the kit recess behind the wall plane clear
+            cross_lots.append(
+                box(sx * (BUILD_X + 30.0 + inset / 2), 0.0, zc, 60.0 - inset, 12.0 + 4.0 * rng.random(), 50.0)
+            )
     L += ['NamedMaterial "facade_render"', *[m for b in cross_lots for m in mesh(*b)], ""]
 
     emitters: list[dict] = []

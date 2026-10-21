@@ -1027,6 +1027,35 @@ near zebra crossing by default).
   The Poly Haven hydrant and bin files contain two variants side by side, which are split into
   separate objects.
 
+### Facade kits (`--facade-style kits`)
+
+Off by default (`procedural`). `kits` assembles each street lot's front from one
+of two Poly Haven CC0 modular kits by James Ray Cock: *Modular Urban Apartments
+Facade* (plaster) and *Modular Factory Facade* (brick). Fetch them with
+
+```bash
+python tools/fetch_highway_assets.py kit_urban_apartments kit_factory
+```
+
+Both kits use a 3 m grid. `tools/facade_kits.py` pairs each flat 3 m wall panel
+with its insert (`wall_window_<X>` + `window_<X>`, `wall_door_<X>` + `door_<X>`;
+angled bays, corners and garage doors are skipped). It fills each lot with
+`round(width / 3)` bays, stretched by up to ±17 % to fit, and 3 m storeys: a
+door bay and ground-floor windows on the ground floor, one window type on the
+upper floors, a cornice between storeys, a crown on top and piers at the lot
+ends. Every part is a pbrt object instance. The lot box moves 0.4 m behind the
+wall plane. A room-back quad 0.35 m behind each opening uses the scene's
+`window_dark` / `window_lit` materials, so `--lit-windows` still lights rooms
+at night. Kit choices draw from their own seeded RNG; cars and emitters match
+the default scene. The manifest's `facades.kits` lists each lot's kit and parts.
+
+Limitations: the kits' colours come from their sRGB texture maps (diffuse), not
+measured spectra, and the window frames' metallic flag is ignored. Glass is a
+thin dielectric. Kit buildings are lower than the procedural ones (3 m storeys
+against 3.2 m plus 0.8 m), and the cross-street lots stay procedural.
+`fetch_highway_assets.py` now records each glTF shape's `node` name and
+layout `origin` in `prepared.json` (re-prepare older kits with `--force`).
+
 ### Facade textures (`--facade-textures mixed`)
 
 Off by default (`none`, the plain spectral boxes). `mixed` puts one of eight
