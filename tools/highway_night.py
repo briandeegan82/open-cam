@@ -394,6 +394,61 @@ SHEETING = {"alpha0_deg": 0.2, "width_deg": 0.34, "q": 2.7}
 EN1436 = {"view_elev_deg": 2.29, "illum_elev_deg": 1.24}
 MARKING_RL = {"white": 300.0, "yellow": 200.0}
 MARKING = {"alpha0_deg": 1.05, "width_deg": 1.6, "q": 1.0}
+# Reflex (cube-corner) reflectors. Minimum coefficient of luminous intensity CIL [mcd/lx] at
+# 0.2 deg observation, 0 deg entrance. CIL = R_A x area, so the material's ra is CIL / area.
+# FMVSS 108 Table XVI-a (49 CFR 571.108, SAE J594): red 420 (10 U/D 280, 20 L/R 140; 1.5 deg obs:
+# 6 / 5 / 3), amber 1050, white 1680. 16 CFR 1512 Table 1 (bicycles), cd per foot-candle:
+# front/rear clear 27.0 (20 L/R 9.0; 1.5 deg 0.28), pedal clear 7.5 (20 L/R 3.0); amber 5/8 and red
+# 1/4 of clear. ASTM D4280 raised pavement markers (commonly cited minima; standard text not
+# checked): white 3.0 cd/fc, yellow 0.6x, red 0.25x.
+# Lobes (w, q fitted so every tabulated point clears its minimum, even without REFLEX_MARGIN at 1.5 deg):
+# vehicle (FMVSS 108, 0-20 deg entrance); bicycle front/rear/spoke also meet the 30-50 deg entrance points
+# of 16 CFR 1512 Table 2 (low q); pedals the relatively stronger 1.5 deg point (larger w).
+CD_PER_FC_TO_MCD_PER_LX = 1000.0 / 10.7639
+REFLEX = {"alpha0_deg": 0.2, "width_deg": 0.32, "q": 12.0}
+REFLEX_BICYCLE = {"alpha0_deg": 0.2, "width_deg": 0.33, "q": 3.5}
+REFLEX_PEDAL = {"alpha0_deg": 0.2, "width_deg": 0.375, "q": 3.5}
+REFLEX_MARGIN = 1.2
+REFLEX_CIL_MCD = {
+    "fmvss108": {"red": 420.0, "amber": 1050.0, "white": 1680.0},
+    "cpsc1512": {c: f * 27.0 * CD_PER_FC_TO_MCD_PER_LX for c, f in (("white", 1.0), ("amber", 0.625), ("red", 0.25))},
+    "cpsc1512_pedal": {c: f * 7.5 * CD_PER_FC_TO_MCD_PER_LX for c, f in (("white", 1.0), ("amber", 0.625))},
+    "astm_d4280": {c: f * 3.0 * CD_PER_FC_TO_MCD_PER_LX for c, f in (("white", 1.0), ("yellow", 0.6), ("red", 0.25))},
+}
+
+
+def reflex_ra_param(cil_mcd: float, area_m2: float, p: dict = REFLEX) -> float:
+    """Model ``ra`` giving REFLEX_MARGIN x ``cil_mcd`` for a reflector of ``area_m2`` at alpha0, 0 deg entrance."""
+    del p  # (cos_i cos_o)^(q/2) = 1 on axis; kept for symmetry with sheeting_ra_param
+    return REFLEX_MARGIN * 1e-3 * cil_mcd / area_m2
+
+
+def reflex_material_lines(
+    name: str,
+    surface: str,
+    cil_mcd: float,
+    area_m2: float,
+    spd_dir: Path,
+    out_dir: Path,
+    wl: np.ndarray,
+    p: dict = REFLEX,
+    spectrum: np.ndarray | None = None,
+) -> list[str]:
+    """``MakeNamedMaterial`` for a reflex reflector of ``area_m2`` (diffuse base ``spd_dir/surface.spd``).
+
+    ``spectrum``: reflectance giving the retroreflected colour (default: ``surface`` from highway_spectra).
+    """
+    rel_r = os.path.relpath(spd_dir / f"{surface}.spd", out_dir)
+    f = spd_dir / f"ra_{name.replace(':', '_')}.spd"
+    _write_spd(
+        f, wl, retro_ra_spectrum(wl, surface if spectrum is None else spectrum, reflex_ra_param(cil_mcd, area_m2, p))
+    )
+    return [
+        f'MakeNamedMaterial "{name}" "string type" "retroreflective" "spectrum reflectance" "{rel_r}"',
+        f'    "float observationangle" [{p["alpha0_deg"]}] "float lobewidth" [{p["width_deg"]}]'
+        f' "float entranceexponent" [{p["q"]}]',
+        f'    "spectrum ra" "{os.path.relpath(f, out_dir)}"',
+    ]
 
 
 def retro_ra(alpha_rad, ci, co, ra: float, alpha0_deg: float, width_deg: float, q: float) -> np.ndarray:
@@ -436,9 +491,9 @@ def _photopic_mean_under_a(wl: np.ndarray, s: np.ndarray) -> float:
     return tristimulus(wl, s * a)[1] / tristimulus(wl, a)[1]
 
 
-def retro_ra_spectrum(wl: np.ndarray, surface: str, value: float) -> np.ndarray:
-    """Spectral ``ra`` with the colour of ``surface`` and photometric value ``value`` (illuminant A)."""
-    s = reflectance(surface, wl)
+def retro_ra_spectrum(wl: np.ndarray, surface: str | np.ndarray, value: float) -> np.ndarray:
+    """Spectral ``ra`` with the colour of ``surface`` (name or reflectance) and photometric ``value`` (illuminant A)."""
+    s = reflectance(surface, wl) if isinstance(surface, str) else np.asarray(surface, float)
     return value * s / _photopic_mean_under_a(wl, s)
 
 
@@ -760,6 +815,17 @@ def _gonio(pos, heading_deg: float, map_rel: str, spd_rel: str, rot_extra: list[
     ]
 
 
+def car_reflex_material(spd_dir: Path, out_dir: Path):
+    """``(name, area_m2) -> lines``: red FMVSS 108 / SAE J594 rear reflex reflector material."""
+    red = taillamps.lens_reflectances(LIGHT_WL)["red"]
+
+    def make(name: str, area_m2: float) -> list[str]:
+        cil = REFLEX_CIL_MCD["fmvss108"]["red"]
+        return reflex_material_lines(name, "taillamp_lens_red", cil, area_m2, spd_dir, out_dir, LIGHT_WL, spectrum=red)
+
+    return make
+
+
 def vehicle_light_lines(
     cars: list[dict], ego: tuple[float, float], opts: dict, assets: dict, place=_translate
 ) -> tuple[list, dict]:
@@ -835,6 +901,7 @@ def vehicle_light_lines(
                 indicator=opts.get("indicator_side", "left") if selected("indicators", c["id"]) else None,
                 reversing=selected("reversing", c["id"]),
                 emit=flasher(k, c["id"]),
+                reflex_material=opts.get("reflex_material"),
             )
             lines += [*tl_lines, "AttributeEnd"]
             meta["tail_lamps"].append(tl_meta)
@@ -998,6 +1065,8 @@ def scene_lights(
     assets = write_light_assets(out_dir, spd_dir, opts)
     cars = [dict(c, z=c["distance_m"]) for c in cars_meta]
     vopts = dict(opts, brake=args.brake_lights, ego_lane=args.cam_lane, out_dir=out_dir)
+    if opts["retroreflective"]:
+        vopts["reflex_material"] = car_reflex_material(spd_dir, out_dir)
     lines, vmeta = vehicle_light_lines(cars, (float(eye[0]), float(eye[2])), vopts, assets, place)
     slines, smeta = streetlight_lines(
         opts, assets, median_x, pole_z[0], pole_z[1], (carriageway,), lamp_heads, lamp_spacing_m, place

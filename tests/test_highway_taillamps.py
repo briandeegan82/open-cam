@@ -150,6 +150,32 @@ class TestBuilderHook(unittest.TestCase):
             self.assertTrue(all(t["rear_fog"]["intensity_cd"] == tl.FOG_CD for t in lamps))
 
 
+class TestReflexReflectors(unittest.TestCase):
+    def test_every_layout_but_the_vintage_car_has_reflex_reflectors(self) -> None:
+        self.assertEqual({m for m, lay in tl.LAYOUTS.items() if lay.reflex is None}, {"car_vintage"})
+
+    def test_reflex_patches_only_with_a_material(self) -> None:
+        truck = {"id": "t", "model": "truck_box", "length_m": 12.5, "width_m": 2.5, "height_m": 3.6}
+        for car in (CAR, truck):
+            plain, meta0 = tl.rear_lamp_lines(car, False)
+            self.assertNotIn("reflex:", "\n".join(plain))
+            self.assertNotIn("reflex_reflectors", meta0)
+            made: list[tuple[str, float]] = []
+
+            def record(name: str, area: float, made=made) -> list[str]:
+                made.append((name, area))
+                return []
+
+            lines, meta = tl.rear_lamp_lines(car, False, reflex_material=record)
+            text = "\n".join(lines)
+            self.assertEqual([n for n, _ in made], [f"reflex:{car['id']}:L", f"reflex:{car['id']}:R"])
+            self.assertEqual(text.count('NamedMaterial "reflex:'), 2)
+            for (_, a), side in zip(made, meta["reflex_reflectors"], strict=True):
+                self.assertAlmostEqual(a, side["area_m2"], places=4)
+                self.assertGreater(a, 0.003)
+                self.assertLess(a, 0.08)
+
+
 if __name__ == "__main__":
     unittest.main()
 

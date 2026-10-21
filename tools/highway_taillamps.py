@@ -240,6 +240,7 @@ class LampLayout:
     surface when empty). ``chambers`` splits the lens along ``chamber_axis`` (outer->inner or top->bottom)
     into red / amber / clear sections; only red emits. ``chmsl`` = (half width, y0, y1) centre stop lamp.
     ``fog`` = rear fog lamp region (same convention as ``region``, left side only); None = not fitted.
+    ``reflex`` = red rear reflex reflector region (both sides, on ``reflex_materials`` when given).
     """
 
     tech: str
@@ -250,6 +251,8 @@ class LampLayout:
     chambers: tuple[str, ...] = ("red",)
     chamber_axis: str = "x"
     fog: tuple[float, float, float, float] | None = None
+    reflex: tuple[float, float, float, float] | None = None
+    reflex_materials: tuple[str, ...] = ()
 
 
 _TRUCK = LampLayout(
@@ -304,6 +307,21 @@ for _m, _spec in CARS_GLB.items():
         if _spec["lens"]
         else LampLayout("led", (0.45, 0.05, 0.80, 0.97), from_edge=True, fog=(0.45, 0.30, 0.40, 0.46))
     )
+
+# Red rear reflex reflectors (FMVSS 108 / UN R48 require two at the rear); the vintage car has none.
+_REFLEX = {
+    "car_bmw_m6": ((0.55, 0.85, 0.36, 0.56), ("None",)),
+    "car_pontiac_gto": ((0.55, 0.75, 0.40, 0.47), ()),
+    "proxy": ((0.55, 0.80, 0.45, 0.52), ()),
+    "van_sprinter": ((0.20, 0.06, 0.28, 0.36), ()),
+    "bus_town": ((0.20, 0.05, 0.40, 0.50), ()),
+    "truck_box": ((0.50, 0.06, 0.66, 0.76), ()),
+    "trailer_box": ((0.50, 0.06, 0.66, 0.76), ()),
+    "truck_daf_cf_tractor": ((0.55, 0.10, 0.50, 0.58), ()),
+    **{m: ((0.25, 0.08, 0.42, 0.48), ()) for m in CARS_GLB},
+}
+for _m, (_r, _mats) in _REFLEX.items():
+    LAYOUTS[_m] = replace(LAYOUTS[_m], reflex=_r, reflex_materials=_mats)
 
 LENS_SPD = {
     "red": "spd/taillamp_lens_red.spd",
@@ -553,6 +571,28 @@ def _fog_lamp(
     }
 
 
+def _reflex_lines(
+    surf: RearSurface | None, layout: LampLayout, half_w: float, rear_z: float, car_id: str, reflex_material
+) -> tuple[list[str], list[dict]]:
+    """Red reflex reflector patch on each side; ``reflex_material(name, area_m2)`` defines its material."""
+    ax0, ax1, y0, y1 = layout.reflex
+    if layout.from_edge:
+        ax0, ax1 = half_w - ax0, half_w - ax1
+    mats = layout.reflex_materials if surf is not None and surf.materials != ["paint", "glass"] else ()
+    out, meta = [], []
+    for sx in (-1, 1):
+        g = _grid(surf, sx * ax0, sx * ax1, y0, y1, rear_z, mats)
+        if not g.mask.any() and mats:
+            g = _grid(surf, sx * ax0, sx * ax1, y0, y1, rear_z, ())
+        if not g.mask.any():
+            g = _grid(None, sx * ax0, sx * ax1, y0, y1, rear_z, ())
+        name, area = f"reflex:{car_id}:{'L' if sx < 0 else 'R'}", g.area(g.mask)
+        out += [*reflex_material(name, area), "AttributeBegin", f'    NamedMaterial "{name}"',
+                _patches(g, g.mask, LENS_OFFSET_M), "AttributeEnd"]  # fmt: skip
+        meta.append({"area_m2": round(area, 5), "surface": g.surface})
+    return out, meta
+
+
 def rear_lamp_lines(
     car: dict,
     braking: bool,
@@ -561,6 +601,7 @@ def rear_lamp_lines(
     indicator: str | None = None,
     reversing: bool = False,
     emit=None,
+    reflex_material=None,
 ) -> tuple[list[str], dict]:
     """pbrt lines (car frame) and manifest entry for one vehicle's rear lamps.
 
@@ -568,6 +609,7 @@ def rear_lamp_lines(
     lit; ``emit(name, lines_for_level, meta) -> Include line`` makes them flash (a ``highway_incar.PWM``
     emitter), else they are drawn steady on. ``reversing``: white reversing lamps lit. A layout with only
     a red lens gets amber (outer third) and clear (inner third) sections when either is requested.
+    ``reflex_material(name, area_m2) -> lines``: add retroreflective red reflex reflectors (night).
     """
     model = car.get("model", "proxy")
     layout = LAYOUTS.get(model, LAYOUTS["proxy"])
@@ -634,6 +676,10 @@ def rear_lamp_lines(
     if reversing:
         lines += _function_lamp(grids, "clear", layout.tech, REVERSING_CD, (-1, 1))(1.0)
         rev_meta = {"intensity_cd": REVERSING_CD}
+    reflex_meta = None
+    if reflex_material is not None and layout.reflex is not None:
+        rl, reflex_meta = _reflex_lines(surf, layout, half_w, rear_z, car["id"], reflex_material)
+        lines += rl
     return lines, {
         "car": car["id"],
         "braking": braking,
@@ -645,4 +691,5 @@ def rear_lamp_lines(
         "rear_fog": fog_meta,
         "indicator": ind_meta,
         "reversing": rev_meta,
+        **({"reflex_reflectors": reflex_meta} if reflex_material is not None else {}),
     }
