@@ -797,9 +797,8 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
                     f' "{os.path.relpath(tonal_mask(tdir, dseed), out_dir)}" "float uscale" [{s_uv}] "float vscale" [{s_uv}]',
                     'Texture "asphalt:lum" "float" "scale" "texture tex" "asphalt:lum0" "texture scale" "asphalt:tone"',
                 ]
-        else:
+        if nmap is None:  # not re-synthesised: the texture as it is
             luminance_texture(raw / info["maps"]["color"], lum)
-        if nmap is None:
             nmap = linear_normal_map(raw / info["maps"]["normal"], out_dir / "textures")
         L += [
             f'Texture "asphalt:lum{0 if tone else ""}" "float" "imagemap" "string filename"'

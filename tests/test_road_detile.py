@@ -1,6 +1,7 @@
 """--road-detile: offset-only stochastic re-tiling (concrete) and the tonal mask (concrete, paving)."""
 
 import json
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -65,6 +66,9 @@ def test_builder_with_assets(road: str, retiled: bool) -> None:
         out = Path(td)
         hw.main(["--out-dir", str(out), "--road", road, "--traffic", "none", "--xres", "64", "--yres", "36"])
         txt = (out / "highway.pbrt").read_text()
+
+        for f in re.findall(r'"string (?:filename|normalmap)" "([^"]+\.(?:exr|png))"', txt):
+            assert (out / f).is_file(), f
         man = json.loads((out / "highway_manifest.json").read_text())
     assert man["road"]["detile"] == "auto"
     assert 'Texture "asphalt:tone"' in txt
