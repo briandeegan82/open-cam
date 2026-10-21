@@ -883,7 +883,7 @@ cancels in the difference.
 
 ## Vulnerable road users: AEB pedestrian / cyclist targets (`tools/highway_vru.py`, opt-in)
 
-`--vru pedestrian|child|cyclist|motorcyclist` adds one Euro NCAP-style AEB test target; the default (`none`) leaves
+`--vru pedestrian|child|cyclist|motorcyclist|escooter` adds one Euro NCAP-style AEB test target; the default (`none`) leaves
 the scene unchanged.
 
 ```bash
@@ -934,16 +934,30 @@ procedural rider on one of the Objaverse CC-BY models from `--two-wheelers`
 (`tools/two_wheelers.py`, fetch IDs listed there): a bicycle for `--vru cyclist`
 (default: the procedural bicycle), or a motorbike, moped or scooter for the new
 `--vru motorcyclist` (default `moto_80s`; full-face helmet instead of
-the cycle helmet). The Yamaha FZ150 and Solifer meshes lean on their side stands, so
-they are parked-only. The rider is posed from contact points stored per model in
+the cycle helmet), or the kick e-scooter for `--vru escooter` (default
+`kickscooter_electric`; a standing rider with one foot ahead of the other on the deck, cycle
+helmet, nominal 20 km/h). The Yamaha FZ150 and Solifer meshes lean ~28° and ~17° on their side
+stands; under a rider they are stood upright about the travel axis (`two_wheelers.DELEAN`,
+roll from a refitted slope of x against height), with the side stand still out. Parked ones keep
+leaning. The rider is posed from contact points stored per model in
 `two_wheelers.RIDER` (saddle; grips; bottom bracket, footpegs or floorboard),
 read off side and top point-cloud profiles of each prepared mesh to a few
 centimetres. The torso lean is chosen so the arms reach the grips. The manifest's
 `vru.bike` records the model, its nominal length and scale, and `bbox_world_m`
 covers rider and model. Limitations: the models' colours are sRGB texture maps,
 not measured spectra; their lamps are unlit; with `--exposure-s` the model moves
-rigidly but its wheels don't turn; no steering angle or lean into a turn; the kick
-e-scooter is not rideable.
+rigidly but its wheels don't turn; the bars of imported models can't steer (single mesh).
+
+**Steering and lean (riders).** `--vru-turn-radius-m R` (+ = to the rider's left) poses a steady
+turn at the target speed: lean φ = atan(v²/(g R)) for a point-mass rider, and the kinematic
+steer δ = atan(wheelbase/R), with no trail, caster or tyre slip. For example, 15 km/h on
+R = 10 m gives φ = 10.0° and δ = 6.0°. `--vru-lean-deg` and `--vru-steer-deg` set either angle
+directly. The lean rolls bike and rider together about the tyre contact line. The steer turns
+the procedural bicycle's fork, front wheel and handlebar about the head-tube axis, and the
+hands follow the grips; on imported models only the lean applies (`vru.turn.steer_applied`).
+The rider's body doesn't counter-lean or shift its weight. With `--exposure-s` the target still
+moves in a straight line, because the heading changes by only v·t/R during the exposure. The
+manifest's `vru.turn` gives the angles, and `bbox_world_m` includes the lean.
 
 ## Falling rain (`--rain-mmh`; `tools/highway_rain.py`)
 

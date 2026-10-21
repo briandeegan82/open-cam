@@ -95,11 +95,14 @@ class TestImportedRider(unittest.TestCase):
     def test_contact_points_cover_every_rideable_model(self) -> None:
         import two_wheelers as tw
 
-        self.assertEqual(
-            set(tw.RIDER), set(tw.MODELS) - {"kickscooter_electric", "moto_yamaha_fz150", "moped_solifer_export"}
-        )
-        for aid, ((sz, sy), (gz, gy, gw), (_fz, fy, fw)) in tw.RIDER.items():
+        self.assertEqual(set(tw.RIDER), set(tw.MODELS))
+        for aid, (seat, (gz, gy, gw), (fz, fy, fw)) in tw.RIDER.items():
             half = tw.MODELS[aid][2] / 2
+            if seat is None:  # kick e-scooter: standing on the deck behind the bar
+                self.assertEqual(tw.MODELS[aid][0], "kickscooter")
+                self.assertTrue(-half < fz < gz < half and 0.05 < fy < 0.3 < 0.9 < gy, aid)
+                continue
+            sz, sy = seat
             self.assertTrue(-half < sz < gz < half, aid)  # saddle behind the grips, both on the model
             self.assertTrue(0.15 < fy < sy < gy + 0.25 < 1.5, aid)
             self.assertTrue(0.1 < gw < 0.5 and 0.05 < fw < 0.25, aid)
@@ -107,7 +110,7 @@ class TestImportedRider(unittest.TestCase):
     def test_rider_sits_on_the_model(self) -> None:
         import two_wheelers as tw
 
-        for aid in ("bike_road", "moto_80s", "scooter_vespa_yellow"):
+        for aid in ("bike_road", "moto_80s", "scooter_vespa_yellow", "moto_yamaha_fz150", "moped_solifer_export"):
             (sz, sy), _, _ = tw.RIDER[aid]
             lo, hi = vru.imported_rider(aid, 0.25).bounds()
             self.assertGreater(lo[1], 0.0, aid)  # feet above the road
@@ -127,7 +130,14 @@ class TestImportedRider(unittest.TestCase):
         vru.check_args(a)
         self.assertEqual(a.vru_bike, vru.DEFAULT_MOTO)
         vru.check_args(ns(vru="cyclist", vru_bike="bike_bmx"))
+        a = ns(vru="escooter")
+        vru.check_args(a)
+        self.assertEqual(a.vru_bike, vru.DEFAULT_KICK)
         for bad in (
+            ns(vru="escooter", vru_bike="moto_80s"),
+            ns(vru="motorcyclist", vru_bike="kickscooter_electric"),
+            ns(vru="pedestrian", vru_turn_radius_m=10.0),
+            ns(vru="cyclist", vru_turn_radius_m=1.0),
             ns(vru="cyclist", vru_bike="moto_80s"),
             ns(vru="motorcyclist", vru_bike="bike_bmx"),
             ns(vru="pedestrian", vru_bike="bike_bmx"),
@@ -207,9 +217,69 @@ class TestMotion(unittest.TestCase):
         body = vru.cyclist(1.80, 0.25, wheels)
         self.assertEqual(len(wheels), 2)
         lo, hi = body.bounds()
-        for c, w in wheels:
+        for c, w, _ in wheels:
             wlo, whi = w.bounds()
             lo, hi = np.minimum(lo, wlo + c), np.maximum(hi, whi + c)
         jlo, jhi = joint.bounds()
         np.testing.assert_allclose(lo, jlo, atol=1e-9)
         np.testing.assert_allclose(hi, jhi, atol=1e-9)
+
+
+class TestTurn(unittest.TestCase):
+    def _ns(self, **kw):
+        return argparse.Namespace(**{"vru": "cyclist", "vru_speed_kmh": None, **kw})
+
+    def test_steady_turn_lean_and_steer(self) -> None:
+        t = vru.turn(self._ns(vru_turn_radius_m=10.0), vru.WHEELBASE)
+        v = 15.0 / 3.6
+        self.assertAlmostEqual(t["lean_deg"], np.degrees(np.arctan(v * v / (9.81 * 10.0))), places=9)  # ~10 deg
+        self.assertAlmostEqual(t["steer_deg"], np.degrees(np.arctan(vru.WHEELBASE / 10.0)), places=9)
+        right = vru.turn(self._ns(vru_turn_radius_m=-10.0), vru.WHEELBASE)
+        self.assertAlmostEqual(right["lean_deg"], -t["lean_deg"])
+        o = vru.turn(self._ns(vru_turn_radius_m=10.0, vru_lean_deg=3.0, vru_steer_deg=-2.0), vru.WHEELBASE)
+        self.assertEqual((o["lean_deg"], o["steer_deg"]), (3.0, -2.0))
+        self.assertEqual(vru.turn(self._ns(), vru.WHEELBASE)["lean_deg"], 0.0)
+
+    def test_procedural_steer_turns_front_end_and_hands(self) -> None:
+        straight, steered = vru.cyclist(1.80, 0.25), vru.cyclist(1.80, 0.25, steer_deg=25.0)
+
+        def tyre_width(parts):
+            x = np.concatenate([p[:, 0] for p, _, _ in parts.parts["vru:tyre"]])
+            return float(np.ptp(x))
+
+        self.assertGreater(tyre_width(steered), tyre_width(straight) + 0.1)  # front wheel swings out sideways
+        self.assertAlmostEqual(steered.bounds()[0][1], 0.0, delta=0.02)  # still on the road
+        wheels = []
+        vru.cyclist(1.80, 0.25, wheels, steer_deg=25.0)
+        self.assertIsNone(wheels[0][2])  # rear wheel
+        self.assertEqual(wheels[1][2][0], 25.0)
+
+    def test_scene_lean_and_turn_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            v = build_without_assets(Path(td), "--vru", "cyclist", "--vru-turn-radius-m", "10")["vru"]
+            txt = (Path(td) / "scene" / "highway.pbrt").read_text()
+        self.assertAlmostEqual(v["turn"]["lean_deg"], 10.02, delta=0.02)
+        self.assertTrue(v["turn"]["steer_applied"])
+        self.assertIn(f"Rotate {-v['turn']['lean_deg']:.6g} 0 0 1", txt)
+        with tempfile.TemporaryDirectory() as td:
+            s = build_without_assets(Path(td), "--vru", "cyclist")["vru"]
+        self.assertEqual(s["turn"]["lean_deg"], 0.0)
+        # crossing target: local +x is world +z, so a lean widens the box along the road
+        w = lambda m: m["bbox_world_m"][1][2] - m["bbox_world_m"][0][2]  # noqa: E731
+        self.assertGreater(w(v), w(s) + 0.1)
+
+
+class TestEScooter(unittest.TestCase):
+    def test_standing_rider_on_the_deck(self) -> None:
+        parts = vru.imported_rider("kickscooter_electric", 0.25)
+        lo, hi = parts.bounds()
+        self.assertTrue(0.05 < lo[1] < 0.2)  # shoes on the deck
+        self.assertTrue(1.7 < hi[1] < 1.95)  # standing 1.80 m rider
+        self.assertIn("vru:hair", set(parts.parts))  # no full-face helmet
+
+    def test_scene_without_assets_falls_back(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            v = build_without_assets(Path(td), "--vru", "escooter")["vru"]
+        self.assertEqual(v["type"], "escooter")
+        self.assertEqual(v["bike"]["asset"], "kickscooter_electric")
+        self.assertTrue(v["bike"]["missing"])
