@@ -303,6 +303,25 @@ rear) get generic layouts; trucks, the van and the bus have amber / red / clear 
   of it (bus). The Pontiac and the vintage car have none, as cars of their era weren't fitted with
   them. StVO §17 only permits them below 50 m visibility; `auto` turns them on for any `--haze fog`
   scene. The manifest gives `tail_lamps[*].rear_fog` (intensity, area, peak luminance) or `null`.
+* *Beam shape* (`--rear-lamp-beam shaped`, default; `lambertian` = cosine emitters): the
+  H-V intensities above are kept and the intensity falls off away from straight behind as
+  I(h, v) = I(H-V) f(h) g(v). For tail and stop lamps f and g go through the ratios of the
+  FMVSS 108 one-section test-point minima (49 CFR 571.108 Table VIII taillamp and Table IX
+  stop lamp, e.g. tail H-V 2.0, H-10 0.8, 5U-20 0.3 cd), within 0.07 at every test point;
+  so 10° to the side a tail lamp gives 40 % and 20° to the side 15 % of its H-V intensity.
+  The scaled intensities meet every FMVSS minimum and stay below its maxima. ECE R7 tests the
+  same kind of grid (H, 5° and 10° up/down, out to 20° left/right); its text wasn't available to
+  check, so the shape follows the FMVSS ratios. The rear fog lamp has a nominal R38-style
+  field (≥ 75 % of H-V within ±10° H, ±5° V, so ≥ 150 cd; R38 text not checked). Beyond the
+  test grid the beam keeps falling to zero at 90°. Lamps whose one emitter carries tail and
+  stop (bulbs, LED fallback) use the intensity-weighted mix; the CHMSL uses the stop shape.
+  Emitters stay diffuse area lights (so the lens is seen lit), and pbrt patch 0016 scales their
+  radiance by shape / cos θ from equal-area maps written to `textures/rear_beam_*.exr`; this is
+  exact for patches facing straight back, while body-conforming lenses tilt a few degrees. The
+  manifest gives `tail_lamps[*].beam` (`fmvss108_ratios` or `lambertian`). `TestPbrtAngularAreaLight`
+  renders a lamp from the test directions and checks the radiance follows the map.
+* *Not modelled:* left/right asymmetry of real beams (inboard vs outboard), the inner optics
+  (pillow lenses, reflector facets) and sparkle, rear reflex reflectors, indicators flashing and reversing lamps lit. Heavy
 * *Direction indicators* (`--indicators none|lead|all`, `--indicator-side left|right|hazard`) and
   *reversing lamps* (`--reversing-lamps none|lead|all`), both off by default. `lead` is the nearest
   car ahead in the camera lane. Indicators are amber (592 nm LED, or 2856 K behind a 575 nm
@@ -320,6 +339,8 @@ rear) get generic layouts; trucks, the van and the bus have amber / red / clear 
 * *Not modelled:* the lamps' angular intensity distribution (they are Lambertian, while R7 lets
   the intensity fall off away from H-V), the inner optics (pillow lenses, reflector facets) and
   sparkle, rear reflex reflectors, and front and side indicators. Heavy
+  * *Not modelled:* left/right asymmetry of real beams (inboard vs outboard), the inner optics
+    (pillow lenses, reflector facets) and sparkle, rear reflex reflectors, and front and side indicators. Heavy
   vehicles use the flat rear of their bounding box.
 
 `--tail-lamps simple` restores the old flat 0.30 × 0.10 m red quads at the bounding-box rear
@@ -897,6 +918,7 @@ venv/bin/python tools/build_highway_scene.py --vru cyclist --vru-motion along --
 | `--vru-offset-m` | target centre from the right carriageway edge; negative = into the lane (default 0.4 m, i.e. on the shoulder) |
 | `--vru-motion` | `crossing` (facing right-to-left, nearside scenarios) or `along` (longitudinal) |
 | `--vru-gait-phase` | stride / pedal phase in [0, 1) |
+| `--vru-speed-kmh` | target speed during an exposure (`--exposure-s`); default nominal 5 km/h walking, 15 km/h cycling, 30 km/h motorcycling; `0` = static |
 | `--vru-obstruction parked-cars` | two parked cars on the shoulder with a 1 m gap around the target |
 | `--vru-clothing` | `ncap` (black top, blue trousers, as the Euro NCAP targets), `dark`, `light`, `red`, `yellow` |
 | `--vru-skin-tau` | melanin optical depth of the skin reflectance (`iqlab.skin`) |
@@ -913,8 +935,18 @@ venv/bin/python tools/build_highway_scene.py --vru cyclist --vru-motion along --
   point, distance, pose and obstruction cars.
 - *Traffic:* same-direction traffic cars within 12 m of the target are dropped so a moving car
   does not hide it; the manifest lists them under `vru.removed_traffic`. Use `--traffic none` for an empty road.
-- *Not modelled:* target motion (the scene is static; use `--vehicle-speed-kmh` for ego motion blur),
-  bicycle retroreflectors, the soft EPT target's fabric texture.
+- *Motion:* without `--exposure-s` the scene is static. With it, the target moves along its heading
+  at `--vru-speed-kmh` over the whole exposure span (including the rolling-shutter readout), so it
+  is motion-blurred together with the ego and traffic motion. The procedural bicycle's wheels roll,
+  turning by v·t/r about their axles. The builder stops if a wheel would turn more than 150° in the
+  span, because pbrt interpolates the rotation between shutter open and close. The manifest's `vru`
+  has `speed_kmh`, `velocity_world_mps`, `displacement_m` and `wheel_rotation_deg`, and its
+  `bbox_world_m` is at shutter open. The nominal speeds are typical Euro NCAP test speeds, not
+  checked against the protocol text.
+- *Not modelled:* limb motion during the exposure. pbrt-v4 animates only rigid transforms, so legs,
+  arms and cranks keep the `--vru-gait-phase` pose; at 70 rpm the cranks turn about 4° in 10 ms.
+  Also not modelled: wheel rotation on imported models (their wheels are part of one mesh), bicycle
+  retroreflectors, and the soft EPT target's fabric texture.
 
 **Imported two-wheelers under the rider.** `--vru-bike <model>` puts the
 procedural rider on one of the Objaverse CC-BY models from `--two-wheelers`
@@ -928,8 +960,9 @@ read off side and top point-cloud profiles of each prepared mesh to a few
 centimetres. The torso lean is chosen so the arms reach the grips. The manifest's
 `vru.bike` records the model, its nominal length and scale, and `bbox_world_m`
 covers rider and model. Limitations: the models' colours are sRGB texture maps,
-not measured spectra; the rider is static, with no
-steering angle or lean into a turn; the kick e-scooter is not rideable.
+not measured spectra; with `--exposure-s` the model moves rigidly but its wheels don't turn
+(the rider's lamps stay at their shutter-open position); no steering angle or lean into a turn;
+the kick e-scooter is not rideable.
 
 **Two-wheeler lamps** (`--vru-lamps auto|on|off`; `auto` = on at dusk and night for
 `cyclist` and `motorcyclist`). A white front lamp and a red rear lamp, both small Lambertian
@@ -1010,8 +1043,20 @@ truth) and the pillar positions.
   (default) puts LED battens (CIE LED-B4, 4400 lm) over the aisle and twin-T8 fluorescent fittings
   (`--fluorescent-type f2|f11`, 8300 lm) over the bays; `fluorescent` or `led` uses one type
   throughout. `--lights-off-fraction` (default 0.15) leaves fittings dead. Fittings are flat
-  Lambertian diffusers (luminance = flux / (π × area)); fluxes are nominal catalogue values and
-  mains flicker is not modelled.
+  Lambertian diffusers (luminance = flux / (π × area)); fluxes are nominal catalogue values.
+* **Mains flicker:** `--mains-flicker on` (default) gives each fitting a sinusoidal light-output
+  ripple at twice `--mains-hz` (50 or 60). Its depth follows a nominal percent flicker, (max − min)
+  / (max + min): 35 % for `--fluorescent-ballast magnetic` (default), 5 % for `electronic`, and
+  `--led-percent-flicker` (default 10 %) for the LED battens. The three ceiling rows sit on the
+  three supply phases, 120° apart, so they ripple out of step and largely cancel in the ambient
+  light; `--mains-phases 1` puts every fitting on one phase, which gives strong rolling-shutter
+  bands. The peak luminance is set so the
+  time average is the nominal value, so a plain render is unchanged. With `--exposure-s` (and
+  `--rolling-line-time-s`, default 15 µs) the manifest records the exposure, and
+  `tools/render_time_slices.py --linear` renders the per-row banding a short exposure gets (each
+  row is one flicker emitter; the slice mode steps the ripple in 16 levels per period). Real
+  ballast and driver waveforms are not sinusoidal, and the percent-flicker values are nominal, not
+  measured. `--mains-flicker off` writes the fittings inline, as before.
 
 ## Unlit rural road at night (`tools/build_rural_scene.py`)
 
