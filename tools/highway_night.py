@@ -198,6 +198,10 @@ LAMP_SPECTRA = {
     "led_4000k": lambda wl: pc_led(wl, 4000.0, red_phosphor=0.45),
     "hps": hps_spectrum,
     "red_led": red_led_spectrum,
+    "amber_led": taillamps.amber_led_spectrum,
+    "amber_incandescent": taillamps.amber_incandescent_spectrum,
+    "white_led": lambda wl: pc_led(wl, 6000.0),
+    "white_incandescent": lambda wl: planck(wl, 2856.0),
     "red_incandescent": taillamps.red_incandescent_spectrum,
     "night_sky": night_sky_spectrum,
 }
@@ -597,6 +601,20 @@ def add_night_args(ap: argparse.ArgumentParser) -> None:
         help="Traffic rear fog lamps (200 cd, one on the left; detailed tail lamps only). auto = on with --haze fog.",
     )
     g.add_argument(
+        "--indicators",
+        choices=("none", "lead", "all"),
+        default="none",
+        help="Traffic direction indicators flashing (detailed tail lamps; 100 cd amber, 1.5 Hz, nominal). "
+        "With --exposure-s they are PWM emitters for tools/render_time_slices.py.",
+    )
+    g.add_argument("--indicator-side", choices=tuple(taillamps.INDICATOR_SIDES), default="left")
+    g.add_argument(
+        "--reversing-lamps",
+        choices=("none", "lead", "all"),
+        default="none",
+        help="White reversing lamps lit (detailed tail lamps; 150 cd per side, nominal).",
+    )
+    g.add_argument(
         "--rear-lamp-beam",
         choices=("shaped", "lambertian"),
         default="shaped",
@@ -616,6 +634,9 @@ def resolve(args: argparse.Namespace) -> dict:
         "streetlights": ("led_4000k" if dark else "none") if args.streetlights == "auto" else args.streetlights,
         "retroreflective": dark if args.retroreflective == "auto" else args.retroreflective == "on",
         "tail_lamps": getattr(args, "tail_lamps", "detailed"),
+        "indicators": getattr(args, "indicators", "none"),
+        "indicator_side": getattr(args, "indicator_side", "left"),
+        "reversing": getattr(args, "reversing_lamps", "none"),
         "rear_lamp_beam": getattr(args, "rear_lamp_beam", "shaped"),
         "rear_fog": {"on": True, "none": False}.get(
             getattr(args, "rear_fog_lamps", "auto"), getattr(args, "haze", "none") == "fog"
@@ -837,10 +858,33 @@ def vehicle_light_lines(
             spd = "spd/lamp_led_headlamp.spd" if kind == "led" else "spd/lamp_halogen.spd"
             lines += _gonio(p, 0.0, assets[kind]["map"], spd)
         meta["headlamps"].append({"car": "ego", "kind": kind, "flux_lm_per_lamp": assets[kind]["flux_lm"]})
-    lead = None
-    if opts["brake"] == "lead":
-        ahead = [c for c in cars if c["lane"] == opts["ego_lane"] and c["z"] > ego[1]]
-        lead = min(ahead, key=lambda c: c["z"])["id"] if ahead else None
+    ahead = [c for c in cars if c["lane"] == opts["ego_lane"] and c["z"] > ego[1]]
+    lead_id = min(ahead, key=lambda c: c["z"])["id"] if ahead else None
+    lead = lead_id if opts["brake"] == "lead" else None
+
+    def selected(key: str, car_id) -> bool:
+        return opts.get(key, "none") == "all" or (opts.get(key, "none") == "lead" and car_id == lead_id)
+
+    def flasher(k: int, car_id):
+        """``emit`` callback of taillamps.rear_lamp_lines: a PWM emitter include (needs ``out_dir``)."""
+        from highway_incar import PWM, write_emitter
+
+        def emit(name: str, lines_for_level, lamp_meta: dict) -> str:
+            period = 1.0 / taillamps.INDICATOR_HZ
+            pwm = PWM(taillamps.INDICATOR_HZ, taillamps.INDICATOR_DUTY, (0.137 * k) % period)
+            inc, entry = write_emitter(
+                Path(opts["out_dir"]),
+                f"{name}_{car_id}",
+                lines_for_level,
+                pwm=pwm,
+                exposure_window_s=opts.get("exposure_window_s"),
+                meta={"kind": "direction_indicator", "car": car_id},
+            )
+            meta.setdefault("emitters", []).append(entry)
+            return inc
+
+        return emit if opts.get("out_dir") else None
+
     for k, c in enumerate(cars):
         hd, half_l, half_w = c["heading_deg"], c["length_m"] / 2, c["width_m"] / 2
         lamp_y = float(np.clip(0.47 * c["height_m"], 0.55, 0.8))
@@ -864,6 +908,9 @@ def vehicle_light_lines(
                 braking,
                 opts.get("asset_root"),
                 rear_fog=opts.get("rear_fog", False),
+                indicator=opts.get("indicator_side", "left") if selected("indicators", c["id"]) else None,
+                reversing=selected("reversing", c["id"]),
+                emit=flasher(k, c["id"]),
                 beam=assets.get("rear_beam"),
                 reflex_material=opts.get("reflex_material"),
             )
@@ -1028,7 +1075,7 @@ def scene_lights(
         return [], {}
     assets = write_light_assets(out_dir, spd_dir, opts)
     cars = [dict(c, z=c["distance_m"]) for c in cars_meta]
-    vopts = dict(opts, brake=args.brake_lights, ego_lane=args.cam_lane)
+    vopts = dict(opts, brake=args.brake_lights, ego_lane=args.cam_lane, out_dir=out_dir)
     if opts["retroreflective"]:
         vopts["reflex_material"] = car_reflex_material(spd_dir, out_dir)
     lines, vmeta = vehicle_light_lines(cars, (float(eye[0]), float(eye[2])), vopts, assets, place)
@@ -1066,6 +1113,9 @@ def update_manifest(manifest: dict, opts: dict, natural: dict | None, artificial
             "fraction of the flux, so their apparent luminance is lower than real optics."
         )
     if artificial:
+        artificial = dict(artificial)
+        if artificial.get("emitters"):
+            manifest.setdefault("emitters", []).extend(artificial.pop("emitters"))
         manifest.setdefault("lighting", {})["artificial"] = artificial
     if opts["retroreflective"]:
         manifest["approximations"] = [

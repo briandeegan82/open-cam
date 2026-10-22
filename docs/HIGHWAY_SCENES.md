@@ -322,6 +322,25 @@ rear) get generic layouts; trucks, the van and the bus have amber / red / clear 
   renders a lamp from the test directions and checks the radiance follows the map.
 * *Not modelled:* left/right asymmetry of real beams (inboard vs outboard), the inner optics
   (pillow lenses, reflector facets) and sparkle, rear reflex reflectors, indicators flashing and reversing lamps lit. Heavy
+* *Direction indicators* (`--indicators none|lead|all`, `--indicator-side left|right|hazard`) and
+  *reversing lamps* (`--reversing-lamps none|lead|all`), both off by default. `lead` is the nearest
+  car ahead in the camera lane. Indicators are amber (592 nm LED, or 2856 K behind a 575 nm
+  long-pass lens), 100 cd per side, flashing at 1.5 Hz with 50 % on-time (UN R48 asks for
+  90 ± 30 flashes/min). Each car's flasher is a `highway_incar.PWM` emitter in
+  `manifest["emitters"]`, with a per-car phase, so `tools/render_time_slices.py` renders it on or
+  off per row. A still frame without `--exposure-s` shows the time average (half intensity).
+  Reversing lamps are white (6000 K LED or 2856 K), 150 cd per side, steady. The intensities are
+  nominal values in the usual UN R6 / R23 ranges; I couldn't check the regulation texts. The
+  lamps sit in the amber and clear chambers of the trucks, van, bus and tractor. Cars whose
+  cluster has only a red lens get an amber outer third and a clear inner third when either
+  option is on (the red tail and stop lamps keep their intensities over the smaller area). The
+  manifest gives `tail_lamps[*].indicator` and `tail_lamps[*].reversing` (or `null`). Detailed
+  tail lamps only.
+* *Not modelled:* the lamps' angular intensity distribution (they are Lambertian, while R7 lets
+  the intensity fall off away from H-V), the inner optics (pillow lenses, reflector facets) and
+  sparkle, rear reflex reflectors, and front and side indicators. Heavy
+  * *Not modelled:* left/right asymmetry of real beams (inboard vs outboard), the inner optics
+    (pillow lenses, reflector facets) and sparkle, rear reflex reflectors, and front and side indicators. Heavy
   vehicles use the flat rear of their bounding box.
 
 `--tail-lamps simple` restores the old flat 0.30 × 0.10 m red quads at the bounding-box rear
@@ -941,9 +960,19 @@ read off side and top point-cloud profiles of each prepared mesh to a few
 centimetres. The torso lean is chosen so the arms reach the grips. The manifest's
 `vru.bike` records the model, its nominal length and scale, and `bbox_world_m`
 covers rider and model. Limitations: the models' colours are sRGB texture maps,
-not measured spectra; their lamps are unlit; with `--exposure-s` the model moves
-rigidly but its wheels don't turn; no steering angle or lean into a turn; the kick
-e-scooter is not rideable.
+not measured spectra; with `--exposure-s` the model moves rigidly but its wheels don't turn
+(the rider's lamps stay at their shutter-open position); no steering angle or lean into a turn;
+the kick e-scooter is not rideable.
+
+**Two-wheeler lamps** (`--vru-lamps auto|on|off`; `auto` = on at dusk and night for
+`cyclist` and `motorcyclist`). A white front lamp and a red rear lamp, both small Lambertian
+quads with nominal on-axis intensities: bicycle 1000 cd front (about the 10 lx at 10 m that
+StVZO bicycle headlamps must reach) and 4 cd rear, motorbike 1000 cd front and 6 cd rear (as a
+car tail lamp). I haven't checked these against StVZO, UN R50 or R113. Positions are estimated
+from the contact points (front about 10 cm ahead of and below the grips; rear below and behind the
+saddle), not traced from the models. They light the road only as diffuse emitters (no beam shape or
+cut-off), and a crossing target shows them edge-on, so they are mostly visible with `--vru-motion along`.
+The manifest gives `vru.lamps` (or `null`). Parked two-wheelers stay unlit.
 
 ## Falling rain (`--rain-mmh`; `tools/highway_rain.py`)
 
