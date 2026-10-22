@@ -27,6 +27,17 @@ DEFAULT_ASSET_ROOT = REPO / "scenes" / "assets" / "highway"
 
 TAIL_CD, STOP_CD, CHMSL_CD = 6.0, 80.0, 40.0
 FOG_CD = 200.0  # rear fog lamp, UN ECE R38: 150-300 cd at H-V
+# Nominal on-axis intensities (UN R6 category 2a / UN R23 ranges as usually quoted; texts not checked).
+INDICATOR_CD = 100.0  # rear direction indicator, per side
+REVERSING_CD = 150.0  # reversing lamp, per side
+INDICATOR_HZ, INDICATOR_DUTY = 1.5, 0.5  # 90 flashes/min (UN R48: 90 +- 30 /min), nominal on-time
+FUNCTION_SPD = {
+    ("amber", "led"): "spd/lamp_amber_led.spd",
+    ("amber", "incandescent"): "spd/lamp_amber_incandescent.spd",
+    ("clear", "led"): "spd/lamp_white_led.spd",
+    ("clear", "incandescent"): "spd/lamp_white_incandescent.spd",
+}
+INDICATOR_SIDES = {"left": (-1,), "right": (1,), "hazard": (-1, 1)}  # car frame: -x = left
 
 # Beam shapes I(h, v) / I(H-V) of the lit functions, separable f(h) g(v) through (angle [deg],
 # ratio) knots. Tail and stop: the ratios of the FMVSS 108 one-section test-point minima
@@ -395,6 +406,19 @@ def red_incandescent_spectrum(wl: np.ndarray) -> np.ndarray:
     return planck(wl, 2856.0) * _cutoff(wl, 610.0)
 
 
+def amber_incandescent_spectrum(wl: np.ndarray) -> np.ndarray:
+    """2856 K filament behind an amber lens (long-pass at 575 nm)."""
+    from highway_night import planck
+
+    return planck(wl, 2856.0) * _cutoff(wl, 575.0)
+
+
+def amber_led_spectrum(wl: np.ndarray, peak_nm: float = 592.0, fwhm_nm: float = 17.0) -> np.ndarray:
+    """AlInGaP amber LED (as highway_incar.led_spectrum)."""
+    s = fwhm_nm / 2.3548
+    return np.exp(-0.5 * ((np.asarray(wl, dtype=np.float64) - peak_nm) / s) ** 2)
+
+
 def lens_reflectances(wl: np.ndarray) -> dict[str, np.ndarray]:
     """Unlit lens over its reflector/optic (double pass through the filter); nominal, not measured."""
     return {
@@ -557,6 +581,29 @@ def _lamp_lines(
     }
 
 
+def _function_lamp(grids: dict, kind: str, tech: str, intensity_cd: float, sides: tuple[int, ...]):
+    """``lines_for_level`` of the emitters behind the ``kind`` lens sections (lenses are drawn by _lamp_lines)."""
+
+    def lines_for_level(level: float) -> list[str]:
+        out: list[str] = []
+        for sx in sides:
+            g, sections = grids[sx]
+            cells = sections.get(kind)
+            if level <= 0 or cells is None or not cells.any():
+                continue
+            out += [
+                "AttributeBegin",
+                f'    Material "coateddiffuse" "spectrum reflectance" "{LENS_SPD[kind]}" "float roughness" [0]',
+                f'    AreaLightSource "diffuse" "spectrum L" "{FUNCTION_SPD[(kind, tech)]}"'
+                f' "float scale" [{_f(level * intensity_cd / g.area(cells))}]',
+                _patches(g, cells, EMITTER_OFFSET_M),
+                "AttributeEnd",
+            ]
+        return out
+
+    return lines_for_level
+
+
 def _fog_lamp(
     surf: RearSurface | None, layout: LampLayout, half_w: float, rear_z: float, beam: dict | None = None
 ) -> tuple[list[str], dict | None]:
@@ -621,16 +668,25 @@ def rear_lamp_lines(
     braking: bool,
     asset_root: Path | str | None = None,
     rear_fog: bool = False,
+    indicator: str | None = None,
+    reversing: bool = False,
+    emit=None,
     beam: dict | None = None,
     reflex_material=None,
 ) -> tuple[list[str], dict]:
     """pbrt lines (car frame) and manifest entry for one vehicle's rear lamps.
 
+    ``rear_fog``: fog lamp lit. ``indicator`` (``left``/``right``/``hazard``): amber direction indicators
+    lit; ``emit(name, lines_for_level, meta) -> Include line`` makes them flash (a ``highway_incar.PWM``
+    emitter), else they are drawn steady on. ``reversing``: white reversing lamps lit. A layout with only
+    a red lens gets amber (outer third) and clear (inner third) sections when either is requested.
     ``rear_fog``: fog lamp lit; ``beam``: kind -> angular map from ``write_beam_maps`` (None = Lambertian).
     ``reflex_material(name, area_m2) -> lines``: add retroreflective red reflex reflectors (night).
     """
     model = car.get("model", "proxy")
     layout = LAYOUTS.get(model, LAYOUTS["proxy"])
+    if (indicator or reversing) and layout.chambers == ("red",):
+        layout = replace(layout, chambers=("amber", "red", "clear"), chamber_axis="x")
     half_w, half_l = car["width_m"] / 2, car["length_m"] / 2
     rear_z = -half_l - 0.015
     if model == "proxy" or model not in LAYOUTS:
@@ -643,6 +699,7 @@ def rear_lamp_lines(
         ax0, ax1 = half_w - ax0, half_w - ax1
     lines = ["# rear lamps (tools/highway_taillamps.py)"]
     sides = []
+    grids: dict[int, tuple[_Grid, dict[str, np.ndarray]]] = {}
     for sx in (-1, 1):
         g = _grid(surf, sx * ax0, sx * ax1, y0, y1, rear_z, lens)
         if not g.mask.any():  # asset geometry does not match the layout: flat lamp at the bounding-box rear
@@ -651,6 +708,7 @@ def rear_lamp_lines(
         ln, meta = _lamp_lines(g, layout, braking, outer_is_high, beam)
         lines += ln
         sides.append(dict(meta, surface=g.surface))
+        grids[sx] = (g, _chambers(g, layout, outer_is_high))
     chmsl = None
     if layout.chmsl:
         hw, cy0, cy1 = layout.chmsl
@@ -674,6 +732,22 @@ def rear_lamp_lines(
     if rear_fog:
         fog_lines, fog_meta = _fog_lamp(surf, layout, half_w, rear_z, beam)
         lines += fog_lines
+    ind_meta = rev_meta = None
+    if indicator:
+        sel = INDICATOR_SIDES[indicator]
+        lfl = _function_lamp(grids, "amber", layout.tech, INDICATOR_CD, sel)
+        ind_meta = {
+            "side": indicator,
+            "intensity_cd": INDICATOR_CD,
+            "flash_hz": INDICATOR_HZ,
+            "duty": INDICATOR_DUTY,
+            "area_m2": [round(grids[sx][0].area(grids[sx][1]["amber"]), 5) for sx in sel if "amber" in grids[sx][1]],
+        }
+        lines += lfl(1.0) if emit is None else [emit("indicator", lfl, ind_meta)]
+        ind_meta["flashing"] = emit is not None
+    if reversing:
+        lines += _function_lamp(grids, "clear", layout.tech, REVERSING_CD, (-1, 1))(1.0)
+        rev_meta = {"intensity_cd": REVERSING_CD}
     reflex_meta = None
     if reflex_material is not None and layout.reflex is not None:
         rl, reflex_meta = _reflex_lines(surf, layout, half_w, rear_z, car["id"], reflex_material)
@@ -687,6 +761,8 @@ def rear_lamp_lines(
         "sides": sides,
         "chmsl": chmsl,
         "rear_fog": fog_meta,
+        "indicator": ind_meta,
+        "reversing": rev_meta,
         "beam": "fmvss108_ratios" if beam else "lambertian",
         **({"reflex_reflectors": reflex_meta} if reflex_material is not None else {}),
     }

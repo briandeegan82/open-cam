@@ -193,6 +193,13 @@ def add_arguments(ap: argparse.ArgumentParser) -> None:
         default="classic",
         help="extended: add 6 trees and 7 shrubs/grass clumps/stumps (Poly Haven CC0) to the species mix.",
     )
+    g.add_argument(
+        "--plant-variants",
+        choices=("split", "rows"),
+        default="split",
+        help="split: plant files holding a row of 2-7 versions are split and one version is placed at a time "
+        "(same plant count); rows: place the whole row, as before.",
+    )
 
 
 # ---------------------------------------------------------------------------- alignment
