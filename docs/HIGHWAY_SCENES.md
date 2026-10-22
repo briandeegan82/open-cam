@@ -89,9 +89,23 @@ so the albedo comes from the spectrum and the texture adds detail.
 `ground062s` (sandy soil, 1.6 m, `soil`). The distant fields stay grass.
 
 Tile sizes are ambientCG's stated dimensions. The Road0xx series was left out because it has
-lane markings baked in. Road wear and its anti-tiling model asphalt, so `--road-wear` defaults
-to `none` on concrete and paving, and asking for wear there is an error. The setts and the
-gravel use a grey concrete spectrum, not a measured granite or gravel one.
+lane markings baked in. Road wear models asphalt only, so `--road-wear` defaults to `none` on
+concrete and paving, and asking for wear there is an error. The setts and the gravel use a grey
+concrete spectrum, not a measured granite or gravel one.
+
+Without road wear, `--road-detile auto` (default) breaks up the texture repeat, which otherwise
+shows as faint banding across the road (every 2.4 m on concrete):
+- *Asphalt and concrete046* are re-synthesised into a 6 m periodic tile with the wear model's
+  variance-preserving stochastic tiling (below). Concrete uses offsets only, no rotations, so its
+  form marks keep one direction. Luminance and normals are re-tiled; roughness stays 0.35.
+- *Concrete and paving* are also multiplied by a mean-1 tonal mask: 60 m periodic, 3 m correlation,
+  SD 8 %. These are nominal slab/batch-to-batch values, not measured pavement statistics.
+- *Paving* (setts, block paving) is not re-synthesised, because blending offset copies would break
+  the joint pattern. The stone-by-stone pattern still repeats every 1.15 m (setts) or 3.5 m
+  (blocks); only its brightness varies.
+
+Mean reflectance is unchanged. `--road-detile off` writes the old scene file. The manifest
+records `road.detile` (`null` when wear is on or the road is untextured).
 
 ## Road surface wear
 
