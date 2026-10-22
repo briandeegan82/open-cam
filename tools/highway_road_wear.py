@@ -175,8 +175,13 @@ def _load_maps(info: dict, raw: Path, n: int) -> tuple[np.ndarray, np.ndarray, n
     return lum, rough, nrm[..., 0], nrm[..., 1]
 
 
-def detile(chans: list[np.ndarray], n_out: int, cells: int, rng: np.random.Generator) -> list[np.ndarray]:
-    """Variance-preserving stochastic re-tiling of [lum, rough, nx, ny] into an n_out periodic tile."""
+def detile(
+    chans: list[np.ndarray], n_out: int, cells: int, rng: np.random.Generator, rotate: bool = True
+) -> list[np.ndarray]:
+    """Variance-preserving stochastic re-tiling of [lum, rough, nx, ny] into an n_out periodic tile.
+
+    ``rotate=False`` keeps the source orientation (offsets only), for directional textures such as
+    brushed or form-marked concrete."""
     n_src = chans[0].shape[0]
     c = n_out // cells
     d = np.arange(-c, c)
@@ -187,7 +192,9 @@ def detile(chans: list[np.ndarray], n_out: int, cells: int, rng: np.random.Gener
     w2 = np.zeros((n_out, n_out), np.float32)
     for a in range(cells):
         for b in range(cells):
-            r = int(rng.integers(4))
+            r = int(rng.integers(4))  # drawn either way, so the offsets match the rotated tiling
+            if not rotate:
+                r = 0
             oy, ox = rng.integers(n_src, size=2)
             dst = np.ix_((a * c + d) % n_out, (b * c + d) % n_out)
             src = np.ix_((d + oy) % n_src, (d + ox) % n_src)
@@ -199,6 +206,46 @@ def detile(chans: list[np.ndarray], n_out: int, cells: int, rng: np.random.Gener
             w2[dst] += wgt**2
     s = 1.0 / np.sqrt(w2)
     return [m + a * s for a, m in zip(acc, means)]
+
+
+def detiled_maps(aid: str, info: dict, raw: Path, tex_dir: Path, seed: int, rotate: bool = True) -> list[Path]:
+    """Anti-tiled TILE_M periodic [luminance, roughness] EXRs (mean 1) and normal-map PNG of an ambientCG texture."""
+    stem = tex_dir / f"{aid}_detile{TILE_M:g}m{'' if rotate else '_norot'}_s{seed}"
+    paths = [Path(f"{stem}_{s}") for s in ("lum.exr", "rough.exr", "normal.png")]
+    if not all(q.is_file() for q in paths):
+        src_m = float(info["tile_size_m"])
+        n_src = round(TILE_PX * src_m / TILE_M)
+        chans = list(_load_maps(info, raw, n_src))
+        cells = max(2, round(TILE_M / (0.75 * src_m)))
+        n_out = TILE_PX // cells * cells
+        lum, rough, nx, ny = detile(
+            chans, n_out, cells, np.random.default_rng([seed, zlib.crc32(aid.encode())]), rotate
+        )
+        lum = np.clip(lum, 0.02 * lum.mean(), None)
+        write_float_exr(paths[0], lum / lum.mean())
+        rough = np.clip(rough, 0.05 * rough.mean(), None)
+        write_float_exr(paths[1], rough / rough.mean())
+        nz = np.sqrt(np.clip(1.0 - nx**2 - ny**2, 0.04, 1.0))
+        n = np.stack([nx, ny, nz], axis=-1)
+        _write_normal_png(paths[2], n / np.linalg.norm(n, axis=-1, keepdims=True))
+    return paths
+
+
+TONE_TILE_M, TONE_TEXEL_M, TONE_CORR_M, TONE_SD = 60.0, 0.25, 3.0, 0.08
+
+
+def tonal_mask(tex_dir: Path, seed: int) -> Path:
+    """Mean-1 slab/batch-scale brightness variation (TONE_TILE_M periodic, SD TONE_SD, TONE_CORR_M correlation).
+
+    Multiplied onto a pavement texture so its own repeat (2.4 m concrete, 1.15-3.5 m paving) no longer
+    lines up into bands; the values are nominal, not measured pavement statistics."""
+    path = tex_dir / f"tone{TONE_TILE_M:g}m_s{seed}.exr"
+    if not path.is_file():
+        n = round(TONE_TILE_M / TONE_TEXEL_M)
+        a = periodic_noise(np.random.default_rng([seed, 0x70E]), (n, n), (TONE_TEXEL_M,) * 2, (TONE_CORR_M,) * 2)
+        a = np.clip(1.0 + TONE_SD * a, 0.6, 1.4)
+        write_float_exr(path, a / a.mean())
+    return path
 
 
 class RoadWear:
@@ -442,25 +489,7 @@ class RoadWear:
         return L
 
     def detiled(self, aid: str, info: dict, raw: Path) -> tuple[str, str, str]:
-        stem = self.tex_dir / f"{aid}_detile{TILE_M:g}m_s{self.seed}"
-        paths = [Path(f"{stem}_{s}") for s in ("lum.exr", "rough.exr", "normal.png")]
-        if not all(q.is_file() for q in paths):
-            src_m = float(info["tile_size_m"])
-            n_src = round(TILE_PX * src_m / TILE_M)
-            chans = list(_load_maps(info, raw, n_src))
-            cells = max(2, round(TILE_M / (0.75 * src_m)))
-            n_out = TILE_PX // cells * cells
-            lum, rough, nx, ny = detile(
-                chans, n_out, cells, np.random.default_rng([self.seed, zlib.crc32(aid.encode())])
-            )
-            lum = np.clip(lum, 0.02 * lum.mean(), None)
-            write_float_exr(paths[0], lum / lum.mean())
-            rough = np.clip(rough, 0.05 * rough.mean(), None)
-            write_float_exr(paths[1], rough / rough.mean())
-            nz = np.sqrt(np.clip(1.0 - nx**2 - ny**2, 0.04, 1.0))
-            n = np.stack([nx, ny, nz], axis=-1)
-            _write_normal_png(paths[2], n / np.linalg.norm(n, axis=-1, keepdims=True))
-        return tuple(self._rel(q) for q in paths)  # type: ignore[return-value]
+        return tuple(self._rel(q) for q in detiled_maps(aid, info, raw, self.tex_dir, self.seed))  # type: ignore[return-value]
 
     # ------------------------------------------------------------------ markings + RPMs
     def marking_lines(
@@ -652,7 +681,11 @@ def _mesh(p: np.ndarray, tri: np.ndarray, uv: np.ndarray | None = None) -> list[
     def pts(a: np.ndarray) -> str:
         return " ".join(f"{v:.6g}" for v in np.asarray(a, dtype=np.float64).ravel())
 
-    out = ['Shape "trianglemesh"', f'    "point3 P" [ {pts(p)} ]', f'    "integer indices" [ {pts(tri)} ]']
+    out = [
+        'Shape "trianglemesh"',
+        f'    "point3 P" [ {pts(p)} ]',
+        f'    "integer indices" [ {" ".join(map(str, np.asarray(tri, dtype=np.int64).ravel()))} ]',
+    ]
     if uv is not None:
         out.append(f'    "point2 uv" [ {pts(uv)} ]')
     return out

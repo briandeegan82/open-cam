@@ -101,3 +101,78 @@ def test_stochastic_switching_spreads_the_transition():
     assert invalid_fraction(_arch("default_hdr_dcg")) < 0.01
     frac = invalid_fraction(_arch("default_hdr_dcg", switch_threshold_std=0.03))
     assert 0.08 < frac < 0.25  # Phi(-1) = 0.16
+
+
+def test_adc_dnl_code_widths_and_missing_codes():
+    t0 = hp.dnl_transitions(4095, 0.0, np.random.default_rng(0))
+    ramp = np.linspace(-3.0, 4100.0, 200001) + 1e-7  # no exact halves
+    assert np.array_equal(np.searchsorted(t0, ramp, side="right"), np.clip(np.rint(ramp), 0, 4095))
+    t = hp.dnl_transitions(4095, 0.3, np.random.default_rng(1))
+    assert t[0] == pytest.approx(0.5) and t[-1] == pytest.approx(4094.5)
+    counts = np.bincount(np.searchsorted(t, np.linspace(0.0, 4095.0, 4_095_001), side="right"), minlength=4096)
+    widths = counts[1:-1] / 1000.0
+    assert widths.std() == pytest.approx(0.3, rel=0.1)
+    assert np.allclose(widths, np.diff(t), atol=2e-3)
+    inl = t - (np.arange(4095) + 0.5)
+    assert np.abs(inl).max() < 5 * 0.3 / np.sqrt(2)  # bounded, not a random walk
+    missing = np.mean(np.diff(hp.dnl_transitions(4095, 1.0, np.random.default_rng(2))) == 0)
+    assert 0.12 < missing < 0.2  # about Phi(-1) = 0.16
+
+
+def test_adc_dnl_is_a_fixed_code_table_in_the_readouts():
+    a = _arch("default_hdr_dcg", adc_dnl_lsb=0.5)
+    r = a.readouts[0]
+    sig = np.linspace(0.0, 0.5 * (r.max_dn - r.black_DN) * r.K_e_per_DN, 64 * 512).reshape(64, 512)
+    d1, d2 = _sim(a, sig, seed=3)[r.name], _sim(a, sig, seed=4)[r.name]
+    d0 = _sim(_arch("default_hdr_dcg"), sig, seed=3)[r.name]
+    assert not np.array_equal(d1, d0)
+    assert np.abs(d1 - d0).max() <= 2  # transitions move by < 2 LSB
+    codes = np.unique(np.concatenate([d1.ravel(), d2.ravel()]))
+    t = hp.dnl_transitions(r.max_dn, 0.5, np.random.default_rng(7))
+    assert codes.size > 100 and t.size == int(r.max_dn)
+
+
+def test_lofic_soft_knee_compresses_hcg_and_conserves_charge():
+    a0, a1 = _arch("default_hdr_lofic"), _arch("default_hdr_lofic", lofic_knee_e=400.0)
+    fw = a0.collector("pd").full_well_e
+    q = np.array([0.5 * fw, 0.9 * fw, fw, 2.0 * fw])
+    qpd = hp.lofic_soft_split(q, fw, 400.0)
+    assert qpd[2] == pytest.approx(fw - 400.0 * np.log(2.0), rel=1e-9)
+    assert qpd[0] == pytest.approx(0.5 * fw - 400.0 * np.exp(-0.5 * fw / 400.0), abs=1e-6)
+    assert qpd[3] == pytest.approx(fw, abs=1e-3)
+    assert np.array_equal(hp.lofic_soft_split(q, fw, 0.0), np.minimum(q, fw))
+    sig = np.full((32, 64), 0.85 * fw)
+    h, lc = a0.readouts[0], a0.readouts[1]
+    s0, s1 = _sim(a0, sig), _sim(a1, sig)
+    deficit = 400.0 * np.log1p(np.exp((0.85 * fw - fw) / 400.0))
+    assert (s0[h.name] - s1[h.name]).mean() * h.K_e_per_DN == pytest.approx(deficit, rel=0.05)
+    assert np.array_equal(s0[lc.name], s1[lc.name])
+    m0, m1 = hp.merge_captures(a0, s0)[0].mean(), hp.merge_captures(a1, s1)[0].mean()
+    assert m1 - m0 < -0.5 * deficit  # the HCG-weighted merge inherits the compression
+    with pytest.raises(ValueError):
+        _arch("default_hdr_dcg", lofic_knee_e=100.0)
+
+
+def test_spd_centroid_offset_shifts_only_the_spd_image():
+    yy, xx = np.mgrid[0:64, 0:64].astype(float)
+    blob = np.exp(-((xx - 30.0) ** 2 + (yy - 33.0) ** 2) / (2 * 3.0**2))
+    sh = hp.spd_centroid_shift(blob, 0.4, -0.25)
+    cx, cy = (sh * xx).sum() / sh.sum(), (sh * yy).sum() / sh.sum()
+    assert cx == pytest.approx(30.0 - 0.4, abs=0.01) and cy == pytest.approx(33.0 + 0.25, abs=0.01)
+    mosaic = hp.spd_centroid_shift(np.repeat(np.repeat(blob[::2, ::2], 2, 0), 2, 1), 0.4, 0.0, "RGGB")
+    assert np.allclose(mosaic[0::2, 0::2], mosaic[1::2, 1::2])  # planes shifted alike, colours not mixed
+    assert hp.spd_centroid_shift(blob, 0.0, 0.0) is not None and np.array_equal(hp.spd_centroid_shift(blob, 0, 0), blob)
+
+    base = _arch("default_hdr_split_pixel")
+    lpd_top = max(t for n, t in base.transitions_e() if n.startswith("lpd"))
+    edge = np.clip((xx - 32.0) / 6.0 + 0.5, 0.0, 1.0)  # a 6 px ramp, all of it above the LPD transition
+    sig = lpd_top * (2.0 + 20.0 * edge)
+
+    def half_level_x(a):
+        m = hp.merge_captures(a, _sim(a, sig))[0].mean(axis=0)
+        return np.interp(0.5 * (m[2] + m[-3]), m[2:-2], xx[0, 2:-2])
+
+    a1 = _arch("default_hdr_split_pixel", spd_centroid_offset_x_px=0.5)
+    assert half_level_x(a1) - half_level_x(base) == pytest.approx(-0.5, abs=0.05)
+    with pytest.raises(ValueError):
+        _arch("default_hdr_dcg", spd_centroid_offset_x_px=0.5)

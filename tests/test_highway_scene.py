@@ -228,6 +228,13 @@ class TestBuildHighwayScene(unittest.TestCase):
                 hw.main(["--out-dir", str(Path(td) / "s"), "--asset-manifest", str(am)])
 
 
+def test_mesh_indices_above_1e6_are_integers() -> None:
+    p = np.zeros((1_200_001, 3))
+    lines = hw.mesh(p, np.array([[0, 1_000_000, 1_200_000]]))
+    idx = next(ln for ln in lines if "integer indices" in ln)
+    assert "1000000 1200000" in idx and "e+" not in idx
+
+
 if __name__ == "__main__":
     unittest.main()
 

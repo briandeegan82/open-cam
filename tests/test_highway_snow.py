@@ -139,3 +139,29 @@ def test_snow_coat_args(tmp_path):
         assert f"snow_coat/{k}.ply" in scene and (tmp_path / "snow_coat" / f"{k}.ply").is_file()
     scene2, m2 = _build(tmp_path / "n", "--snow", "verges", "--snow-coat", "none")
     assert "coat" not in m2["snow"] and "snow_coat/" not in scene2
+
+
+def test_coat_split_plants_per_object(tmp_path):
+    import build_highway_scene as bhs
+    from fetch_highway_assets import write_ply
+
+    tri = np.array([[0, 1, 2]])
+    for k, y in enumerate((1.0, 2.0)):
+        write_ply(tmp_path / f"p{k}.ply", np.array([[0, y, 0], [1, y, 0], [0, y, 1]], float), None, None, tri)
+    lines = [
+        'MakeNamedMaterial "v:0" "string type" "diffuse"',
+        'ObjectBegin "v#0"',
+        'NamedMaterial "v:0"',
+        'Shape "plymesh" "string filename" "p0.ply"',
+        "ObjectEnd",
+        'ObjectBegin "v#1"',
+        'NamedMaterial "v:0"',
+        'Shape "plymesh" "string filename" "p1.ply"',
+        "ObjectEnd",
+    ]
+    coat = snow.Coat(tmp_path)
+    out = bhs.coat_vegetation(coat, lines, "v", 1.0)
+    assert out[0] == lines[0] and out.count("ObjectEnd") == 2 and out.count('ObjectBegin "v#0"') == 1
+    assert sorted(coat.meta()["assets"]) == ["v#0", "v#1"]  # one coat per plant, inside its own object
+    i0, i1 = out.index('ObjectBegin "v#1"'), out.index("ObjectEnd")
+    assert i1 < i0 and any("snow_coat/v#0.ply" in ln for ln in out[:i1])

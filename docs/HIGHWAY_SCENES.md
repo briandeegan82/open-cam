@@ -89,9 +89,23 @@ so the albedo comes from the spectrum and the texture adds detail.
 `ground062s` (sandy soil, 1.6 m, `soil`). The distant fields stay grass.
 
 Tile sizes are ambientCG's stated dimensions. The Road0xx series was left out because it has
-lane markings baked in. Road wear and its anti-tiling model asphalt, so `--road-wear` defaults
-to `none` on concrete and paving, and asking for wear there is an error. The setts and the
-gravel use a grey concrete spectrum, not a measured granite or gravel one.
+lane markings baked in. Road wear models asphalt only, so `--road-wear` defaults to `none` on
+concrete and paving, and asking for wear there is an error. The setts and the gravel use a grey
+concrete spectrum, not a measured granite or gravel one.
+
+Without road wear, `--road-detile auto` (default) breaks up the texture repeat, which otherwise
+shows as faint banding across the road (every 2.4 m on concrete):
+- *Asphalt and concrete046* are re-synthesised into a 6 m periodic tile with the wear model's
+  variance-preserving stochastic tiling (below). Concrete uses offsets only, no rotations, so its
+  form marks keep one direction. Luminance and normals are re-tiled; roughness stays 0.35.
+- *Concrete and paving* are also multiplied by a mean-1 tonal mask: 60 m periodic, 3 m correlation,
+  SD 8 %. These are nominal slab/batch-to-batch values, not measured pavement statistics.
+- *Paving* (setts, block paving) is not re-synthesised, because blending offset copies would break
+  the joint pattern. The stone-by-stone pattern still repeats every 1.15 m (setts) or 3.5 m
+  (blocks); only its brightness varies.
+
+Mean reflectance is unchanged. `--road-detile off` writes the old scene file. The manifest
+records `road.detile` (`null` when wear is on or the road is untextured).
 
 ## Road surface wear
 
@@ -296,16 +310,54 @@ rear) get generic layouts; trucks, the van and the bus have amber / red / clear 
   the same chamber (dual filament). Spectrum: 2856 K behind a 610 nm long-pass red lens.
 * *Unlit lenses:* glossy `coateddiffuse` with nominal red, amber or clear reflectances, so they
   reflect other cars' headlamps.
-* *Rear fog lamps* (`--rear-fog-lamps auto|on|none`; `auto` = on with `--haze fog`): one 200 cd
+* *Rear fog lamps* (`--rear-fog-lamps auto|on|none`; `auto` = on when the haze visibility is below
+  `--rear-fog-visibility-m`, default 50 m as in StVO §17(3); the visibility is the MOR, converted from
+  `--visibility-definition koschmieder` and taken inside a `--fog-bank`, so the default `--haze fog`
+  at 150 m leaves them off): one 200 cd
   lamp (UN ECE R38: 150–300 cd) on the car's left side, as R48 requires when only one is fitted in
   right-hand traffic. It's placed at least 100 mm from the stop lamp: low in the bumper (BMW,
   proxy), beside the combination lamp (trucks, tractor), below the vertical cluster (van) or inboard
   of it (bus). The Pontiac and the vintage car have none, as cars of their era weren't fitted with
   them. StVO §17 only permits them below 50 m visibility; `auto` turns them on for any `--haze fog`
   scene. The manifest gives `tail_lamps[*].rear_fog` (intensity, area, peak luminance) or `null`.
+* *Beam shape* (`--rear-lamp-beam shaped`, default; `lambertian` = cosine emitters): the
+  H-V intensities above are kept and the intensity falls off away from straight behind as
+  I(h, v) = I(H-V) f(h) g(v). For tail and stop lamps f and g go through the ratios of the
+  FMVSS 108 one-section test-point minima (49 CFR 571.108 Table VIII taillamp and Table IX
+  stop lamp, e.g. tail H-V 2.0, H-10 0.8, 5U-20 0.3 cd), within 0.07 at every test point;
+  so 10° to the side a tail lamp gives 40 % and 20° to the side 15 % of its H-V intensity.
+  The scaled intensities meet every FMVSS minimum and stay below its maxima. ECE R7 tests the
+  same kind of grid (H, 5° and 10° up/down, out to 20° left/right); its text wasn't available to
+  check, so the shape follows the FMVSS ratios. The rear fog lamp has a nominal R38-style
+  field (≥ 75 % of H-V within ±10° H, ±5° V, so ≥ 150 cd; R38 text not checked). Beyond the
+  test grid the beam keeps falling to zero at 90°. Lamps whose one emitter carries tail and
+  stop (bulbs, LED fallback) use the intensity-weighted mix; the CHMSL uses the stop shape.
+  Emitters stay diffuse area lights (so the lens is seen lit), and pbrt patch 0016 scales their
+  radiance by shape / cos θ from equal-area maps written to `textures/rear_beam_*.exr`; this is
+  exact for patches facing straight back, while body-conforming lenses tilt a few degrees. The
+  manifest gives `tail_lamps[*].beam` (`fmvss108_ratios` or `lambertian`). `TestPbrtAngularAreaLight`
+  renders a lamp from the test directions and checks the radiance follows the map.
+* *Not modelled:* left/right asymmetry of real beams (inboard vs outboard), the inner optics
+  (pillow lenses, reflector facets) and sparkle, rear reflex reflectors, indicators flashing and reversing lamps lit. Heavy
+* *Direction indicators* (`--indicators none|lead|all`, `--indicator-side left|right|hazard`) and
+  *reversing lamps* (`--reversing-lamps none|lead|all`), both off by default. `lead` is the nearest
+  car ahead in the camera lane. Indicators are amber (592 nm LED, or 2856 K behind a 575 nm
+  long-pass lens), 100 cd per side, flashing at 1.5 Hz with 50 % on-time (UN R48 asks for
+  90 ± 30 flashes/min). Each car's flasher is a `highway_incar.PWM` emitter in
+  `manifest["emitters"]`, with a per-car phase, so `tools/render_time_slices.py` renders it on or
+  off per row. A still frame without `--exposure-s` shows the time average (half intensity).
+  Reversing lamps are white (6000 K LED or 2856 K), 150 cd per side, steady. The intensities are
+  nominal values in the usual UN R6 / R23 ranges; I couldn't check the regulation texts. The
+  lamps sit in the amber and clear chambers of the trucks, van, bus and tractor. Cars whose
+  cluster has only a red lens get an amber outer third and a clear inner third when either
+  option is on (the red tail and stop lamps keep their intensities over the smaller area). The
+  manifest gives `tail_lamps[*].indicator` and `tail_lamps[*].reversing` (or `null`). Detailed
+  tail lamps only.
 * *Not modelled:* the lamps' angular intensity distribution (they are Lambertian, while R7 lets
   the intensity fall off away from H-V), the inner optics (pillow lenses, reflector facets) and
-  sparkle, rear reflex reflectors, indicators flashing and reversing lamps lit. Heavy
+  sparkle, rear reflex reflectors, and front and side indicators. Heavy
+  * *Not modelled:* left/right asymmetry of real beams (inboard vs outboard), the inner optics
+    (pillow lenses, reflector facets) and sparkle, rear reflex reflectors, and front and side indicators. Heavy
   vehicles use the flat rear of their bounding box.
 
 `--tail-lamps simple` restores the old flat 0.30 × 0.10 m red quads at the bounding-box rear
@@ -431,7 +483,28 @@ rut-depth proxy — the wheel-path map of `tools/highway_road_wear.py`, normalis
 by a 6 m longitudinal unevenness — exceeds a level (wet 0.8, flooded 0.6): ≈1 % (wet) and a few
 % (flooded) of the road area, concentrated in the wheel paths. Puddles are a smooth water
 surface (roughness 0) over the wet body (pbrt `mix` with the puddle mask); the road geometry
-stays flat (no depressed water surface, no waves/rain ripples).
+stays flat (no depressed water surface).
+
+**Raindrop ripples** (`--rain-ripples auto|off`, default `auto`: on when `--rain-mmh` > 0). The
+standing water — the puddles, and the whole film at `flooded` — gets a normal map of impact
+rings, one 6 m tile (2 mm texels) on the road-wear UVs. Impacts are a Poisson process at the
+Marshall-Palmer rate of drops ≥ 0.5 mm reaching the road (∫N(D) v(D) dD: ≈750 m⁻² s⁻¹ at
+1 mm/h, ≈3100 at 10 mm/h, ≈6400 at 40 mm/h); each leaves a ring wave packet moving out at
+0.23 m/s (the minimum phase speed of capillary-gravity waves, λ = 17 mm), with an amplitude
+∝ D that decays with a 0.25 s time constant and spreads as 1/√r. The ring speed and wavelength
+are textbook water-wave values; the decay time and the 0.15 peak slope of a ring from a 2 mm
+drop are nominal, not fitted to measurements. The map is a frozen snapshot: it doesn't move
+during `--exposure-s` or between frames. Not modelled: splash crowns, secondary droplets,
+bubbles, and ripples on the thin `wet` film outside the puddles. The manifest's
+`road.wet.ripples` records the impact rate, the ring count and the rms and 99th-percentile
+slopes of the map.
+
+**Tyre tracks** (`--tyre-tracks F`, 0–1, default 0 = off; `damp`/`wet`, no `--puddles`, needs
+`--road-wear` ≠ none). Tyres squeeze the film out of the wheel paths, so they dry first on a
+drying road. The wheel-path map (normalised) sets a dryness mask, smoothstep 0.3–0.8 scaled by
+`F`, that mixes the wet film with the dry road (pbrt `mix`; the dry road's textures are kept
+under `dry:` names). It can't be combined with `--puddles`, which put the water *in* the
+wheel-path ruts. `road.wet.tyre_tracks` records the dry area fraction.
 
 **Wet markings** (night / `--retroreflective on`). The retroreflective paint's R_L is replaced
 by EN 1436:2018 wet classes: wet → RW2 35 mcd·m⁻²·lx⁻¹ (white) / RW1 25 (yellow), the wet-recovery
@@ -642,6 +715,17 @@ fixed order, so the same N always gives the same `highway.pbrt` and manifest:
   `python tools/fetch_highway_assets.py` (about 870 MB at 1k; the fir tree alone is 460 MB
   and 7.0 M triangles, the jacaranda 200 MB and 3.9 M; a 1280-px day frame with both peaks
   at 6 GB in pbrt).
+  Several Poly Haven files are a row of 2-7 versions of one plant: the fir tree, fir and pine
+  saplings, both Searsias, wild rooibos, shrubs 02 and 03 and the medium grass clumps.
+  `--plant-variants split` (default) splits them into separate plants
+  (`tools/plant_variants.py`: shapes are grouped by ground footprint, so each trunk stays with
+  its crown) and places one randomly chosen version, centred, at each placement. Spacing is
+  divided by the number of versions, so the plant count matches the old rows. Each version keeps
+  its own height from the file. The version choice has its own random stream; the positions,
+  scales and rotations are still seeded from `--seed`, but there are more placements, so they
+  differ from the old rows. `--plant-variants rows` writes the old scene file. Bermuda grass is
+  a sparse patch of single blades and stays whole. The manifest's `vegetation` entries record
+  `plants_in_file`.
 
 Individual flags override the seeded draw: `--curve-radius` (m, + bends right, 0 straight),
 `--clothoid-length`, `--grade` (%), `--lamp-posts/--gantry/--overpass on|off`. Every draw is
@@ -773,9 +857,10 @@ choose the rendered band. See [SWIR.md](SWIR.md#highway-scene-in-the-swir-toolsh
   to the patched pbrt `retroreflective` material (see "Night and dusk" below).
 - By default the sky radiance is RGB, upsampled by pbrt; only the sun is spectral (see
   [Spectral sky](#spectral-sky) for the opt-in spectral sky).
-- Texture colour maps only modulate luminance. Wet road: flat puddles (no depression, no
-  ripples/raindrop impacts on the water; falling rain is opt-in, see
-  [Falling rain](#falling-rain---rain-mmh-toolshighway_rainpy)), no tyre-track drying, spray density
+- Texture colour maps only modulate luminance. Wet road: flat puddles (no depression; raindrop
+  ripples are a static normal map, no splashes; falling rain is opt-in, see
+  [Falling rain](#falling-rain---rain-mmh-toolshighway_rainpy)), tyre tracks only from the
+  wheel-path map (no per-vehicle wet tracks or spray-wetted lanes), spray density
   scaling (car factor, flooded ×2, linear speed) assumed; wet markings use EN 1436 class
   minima, not a measured wet retroreflection function.
 - Haze: one HG phase function per medium (Rayleigh folded into g), horizontally uniform
@@ -883,6 +968,7 @@ venv/bin/python tools/build_highway_scene.py --vru cyclist --vru-motion along --
 | `--vru-offset-m` | target centre from the right carriageway edge; negative = into the lane (default 0.4 m, i.e. on the shoulder) |
 | `--vru-motion` | `crossing` (facing right-to-left, nearside scenarios) or `along` (longitudinal) |
 | `--vru-gait-phase` | stride / pedal phase in [0, 1) |
+| `--vru-speed-kmh` | target speed during an exposure (`--exposure-s`); default nominal 5 km/h walking, 15 km/h cycling, 30 km/h motorcycling; `0` = static |
 | `--vru-obstruction parked-cars` | two parked cars on the shoulder with a 1 m gap around the target |
 | `--vru-clothing` | `ncap` (black top, blue trousers, as the Euro NCAP targets), `dark`, `light`, `red`, `yellow` |
 | `--vru-skin-tau` | melanin optical depth of the skin reflectance (`iqlab.skin`) |
@@ -899,8 +985,18 @@ venv/bin/python tools/build_highway_scene.py --vru cyclist --vru-motion along --
   point, distance, pose and obstruction cars.
 - *Traffic:* same-direction traffic cars within 12 m of the target are dropped so a moving car
   does not hide it; the manifest lists them under `vru.removed_traffic`. Use `--traffic none` for an empty road.
-- *Not modelled:* target motion (the scene is static; use `--vehicle-speed-kmh` for ego motion blur),
-  bicycle retroreflectors, the soft EPT target's fabric texture.
+- *Motion:* without `--exposure-s` the scene is static. With it, the target moves along its heading
+  at `--vru-speed-kmh` over the whole exposure span (including the rolling-shutter readout), so it
+  is motion-blurred together with the ego and traffic motion. The procedural bicycle's wheels roll,
+  turning by v·t/r about their axles. The builder stops if a wheel would turn more than 150° in the
+  span, because pbrt interpolates the rotation between shutter open and close. The manifest's `vru`
+  has `speed_kmh`, `velocity_world_mps`, `displacement_m` and `wheel_rotation_deg`, and its
+  `bbox_world_m` is at shutter open. The nominal speeds are typical Euro NCAP test speeds, not
+  checked against the protocol text.
+- *Not modelled:* limb motion during the exposure. pbrt-v4 animates only rigid transforms, so legs,
+  arms and cranks keep the `--vru-gait-phase` pose; at 70 rpm the cranks turn about 4° in 10 ms.
+  Also not modelled: wheel rotation on imported models (their wheels are part of one mesh), bicycle
+  retroreflectors, and the soft EPT target's fabric texture.
 
 **Imported two-wheelers under the rider.** `--vru-bike <model>` puts the
 procedural rider on one of the Objaverse CC-BY models from `--two-wheelers`
@@ -914,8 +1010,19 @@ read off side and top point-cloud profiles of each prepared mesh to a few
 centimetres. The torso lean is chosen so the arms reach the grips. The manifest's
 `vru.bike` records the model, its nominal length and scale, and `bbox_world_m`
 covers rider and model. Limitations: the models' colours are sRGB texture maps,
-not measured spectra; their lamps are unlit; the rider is static, with no
-steering angle or lean into a turn; the kick e-scooter is not rideable.
+not measured spectra; with `--exposure-s` the model moves rigidly but its wheels don't turn
+(the rider's lamps stay at their shutter-open position); no steering angle or lean into a turn;
+the kick e-scooter is not rideable.
+
+**Two-wheeler lamps** (`--vru-lamps auto|on|off`; `auto` = on at dusk and night for
+`cyclist` and `motorcyclist`). A white front lamp and a red rear lamp, both small Lambertian
+quads with nominal on-axis intensities: bicycle 1000 cd front (about the 10 lx at 10 m that
+StVZO bicycle headlamps must reach) and 4 cd rear, motorbike 1000 cd front and 6 cd rear (as a
+car tail lamp). I haven't checked these against StVZO, UN R50 or R113. Positions are estimated
+from the contact points (front about 10 cm ahead of and below the grips; rear below and behind the
+saddle), not traced from the models. They light the road only as diffuse emitters (no beam shape or
+cut-off), and a crossing target shows them edge-on, so they are mostly visible with `--vru-motion along`.
+The manifest gives `vru.lamps` (or `null`). Parked two-wheelers stay unlit.
 
 ## Falling rain (`--rain-mmh`; `tools/highway_rain.py`)
 
@@ -939,7 +1046,8 @@ also sets `--road-wetness wet` when the road is dry or damp.
   streaks change a pixel by about 1 %, below the render noise at a few hundred spp; at 256 spp they show
   up mostly as fine speckle rather than lines. Only drops within 1–2 m, or a long exposure,
   give clear streaks. Raise `--pixelsamples` to resolve them.
-* **Not modelled:** oblate or oscillating drops, splashes and ripples on the road, rain on the
+* **Not modelled:** oblate or oscillating drops, splashes on the road (ripples on puddles: see
+  `--rain-ripples` under [Wet road](#wet-road-puddles-and-vehicle-spray-tools-highway_wetpy)), rain on the
   windscreen (see `--windscreen-rain`).
 
 ## Winter / snow (`--snow`, `--snowfall-mmh`; `tools/highway_snow.py`)
@@ -993,8 +1101,20 @@ truth) and the pillar positions.
   (default) puts LED battens (CIE LED-B4, 4400 lm) over the aisle and twin-T8 fluorescent fittings
   (`--fluorescent-type f2|f11`, 8300 lm) over the bays; `fluorescent` or `led` uses one type
   throughout. `--lights-off-fraction` (default 0.15) leaves fittings dead. Fittings are flat
-  Lambertian diffusers (luminance = flux / (π × area)); fluxes are nominal catalogue values and
-  mains flicker is not modelled.
+  Lambertian diffusers (luminance = flux / (π × area)); fluxes are nominal catalogue values.
+* **Mains flicker:** `--mains-flicker on` (default) gives each fitting a sinusoidal light-output
+  ripple at twice `--mains-hz` (50 or 60). Its depth follows a nominal percent flicker, (max − min)
+  / (max + min): 35 % for `--fluorescent-ballast magnetic` (default), 5 % for `electronic`, and
+  `--led-percent-flicker` (default 10 %) for the LED battens. The three ceiling rows sit on the
+  three supply phases, 120° apart, so they ripple out of step and largely cancel in the ambient
+  light; `--mains-phases 1` puts every fitting on one phase, which gives strong rolling-shutter
+  bands. The peak luminance is set so the
+  time average is the nominal value, so a plain render is unchanged. With `--exposure-s` (and
+  `--rolling-line-time-s`, default 15 µs) the manifest records the exposure, and
+  `tools/render_time_slices.py --linear` renders the per-row banding a short exposure gets (each
+  row is one flicker emitter; the slice mode steps the ripple in 16 levels per period). Real
+  ballast and driver waveforms are not sinusoidal, and the percent-flicker values are nominal, not
+  measured. `--mains-flicker off` writes the fittings inline, as before.
 
 ## Unlit rural road at night (`tools/build_rural_scene.py`)
 
