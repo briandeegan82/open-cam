@@ -30,19 +30,20 @@ import math
 from pathlib import Path
 
 import numpy as np
-import street_furniture as sf
 import two_wheelers as tw
 
 REPO = Path(__file__).resolve().parents[1]
 USGS = REPO / "spectra" / "usgs_nir"
 
-HEIGHT_M = {"pedestrian": 1.80, "child": 1.154, "cyclist": 1.80, "motorcyclist": 1.80}
-RIDERS = ("cyclist", "motorcyclist")
+HEIGHT_M = {"pedestrian": 1.80, "child": 1.154, "cyclist": 1.80, "motorcyclist": 1.80, "escooter": 1.80}
+RIDERS = ("cyclist", "motorcyclist", "escooter")
 # Nominal target speeds [km/h] during an exposure (typical Euro NCAP VRU test speeds; not checked
 # against the protocol text).
-NOMINAL_SPEED_KMH = {"pedestrian": 5.0, "child": 5.0, "cyclist": 15.0, "motorcyclist": 30.0}
+NOMINAL_SPEED_KMH = {"pedestrian": 5.0, "child": 5.0, "cyclist": 15.0, "motorcyclist": 30.0, "escooter": 20.0}
 MAX_WHEEL_ROTATION_DEG = 150.0  # pbrt interpolates the rotation between shutter open and close
 DEFAULT_MOTO = "moto_80s"
+DEFAULT_KICK = "kickscooter_electric"
+G = 9.81
 WHEEL_D, WHEELBASE = 0.70, 1.05
 CLOTHING = {
     # preset: (top, trousers) USGS chart files
@@ -86,6 +87,27 @@ def add_args(ap: argparse.ArgumentParser) -> None:
         f"bicycle), a motorbike, moped or scooter for --vru motorcyclist (default: {DEFAULT_MOTO}).",
     )
     g.add_argument(
+        "--vru-turn-radius-m",
+        type=float,
+        default=None,
+        help="Riders: steady turn of this radius (+ = to the rider's left, - = right). Sets the lean "
+        "atan(v^2 / (g R)) at the target speed and the kinematic steer atan(wheelbase / R) unless "
+        "--vru-lean-deg / --vru-steer-deg are given. The path stays straight during the exposure.",
+    )
+    g.add_argument(
+        "--vru-lean-deg",
+        type=float,
+        default=None,
+        help="Riders: roll of bike + rider about the tyre contact line (+ = left).",
+    )
+    g.add_argument(
+        "--vru-steer-deg",
+        type=float,
+        default=None,
+        help="Riders: handlebar angle about the steering axis (+ = left). Procedural bicycle only; imported "
+        "models are single meshes and keep straight bars.",
+    )
+    g.add_argument(
         "--vru-lamps",
         choices=("auto", "on", "off"),
         default="auto",
@@ -105,11 +127,23 @@ def check_args(args: argparse.Namespace) -> None:
     args.vru_bike = getattr(args, "vru_bike", None)
     if args.vru == "motorcyclist" and args.vru_bike is None:
         args.vru_bike = DEFAULT_MOTO
+    if args.vru == "escooter" and args.vru_bike is None:
+        args.vru_bike = DEFAULT_KICK
     if args.vru_bike is not None:
         if args.vru not in RIDERS:
-            raise SystemExit("--vru-bike needs --vru cyclist or --vru motorcyclist")
-        if (tw.MODELS[args.vru_bike][0] == "bicycle") != (args.vru == "cyclist"):
-            raise SystemExit("--vru cyclist takes a bicycle model; --vru motorcyclist a motorbike, moped or scooter")
+            raise SystemExit("--vru-bike needs --vru cyclist, motorcyclist or escooter")
+        kind = {"bicycle": "cyclist", "kickscooter": "escooter"}.get(tw.MODELS[args.vru_bike][0], "motorcyclist")
+        if kind != args.vru:
+            raise SystemExit(
+                "--vru cyclist takes a bicycle model; --vru escooter a kick e-scooter; --vru motorcyclist a "
+                "motorbike, moped or scooter"
+            )
+    for k in ("vru_turn_radius_m", "vru_lean_deg", "vru_steer_deg"):
+        if getattr(args, k, None) is not None and args.vru not in RIDERS:
+            raise SystemExit(f"--{k.replace('_', '-')} needs a rider (--vru cyclist, motorcyclist or escooter)")
+    r = getattr(args, "vru_turn_radius_m", None)
+    if r is not None and abs(r) < 2.0:
+        raise SystemExit("--vru-turn-radius-m: |R| must be >= 2 m")
     if not enabled(args):
         return
     if getattr(args, "vru_lamps", "auto") == "on" and getattr(args, "time_of_day", "day") == "day":
@@ -125,6 +159,38 @@ def check_args(args: argparse.Namespace) -> None:
 def speed_kmh(args: argparse.Namespace) -> float:
     v = getattr(args, "vru_speed_kmh", None)
     return NOMINAL_SPEED_KMH[args.vru] if v is None else v
+
+
+def turn(args: argparse.Namespace, wheelbase_m: float) -> dict:
+    """Lean and steer [deg] (+ = left) from --vru-turn-radius-m and the explicit overrides.
+
+    Steady turn of a point-mass rider: tan(lean) = v^2 / (g R); kinematic steer tan(delta) = wheelbase / R
+    (no trail, caster or tyre slip)."""
+    r = getattr(args, "vru_turn_radius_m", None)
+    v = speed_kmh(args) / 3.6
+    lean = math.degrees(math.atan(v * v / (G * r))) if r else 0.0
+    steer = math.degrees(math.atan(wheelbase_m / r)) if r else 0.0
+    if getattr(args, "vru_lean_deg", None) is not None:
+        lean = args.vru_lean_deg
+    if getattr(args, "vru_steer_deg", None) is not None:
+        steer = args.vru_steer_deg
+    return {"lean_deg": lean, "steer_deg": steer, "turn_radius_m": r, "wheelbase_m": wheelbase_m}
+
+
+def _rotate_parts(src: Parts, dst: Parts, origin, axis, deg: float) -> None:
+    """Merge ``src`` into ``dst`` rotated by ``deg`` about the line through ``origin`` along ``axis``."""
+    rot = _axis_rotation(axis, deg)
+    o = np.asarray(origin, float)
+    for mat, items in src.parts.items():
+        for p, t, n in items:
+            dst.add(mat, (p - o) @ rot.T + o, t, n @ rot.T)
+
+
+def _axis_rotation(axis, deg: float) -> np.ndarray:
+    k = np.asarray(axis, float) / np.linalg.norm(axis)
+    a = math.radians(deg)
+    K = np.array([[0.0, -k[2], k[1]], [k[2], 0.0, -k[0]], [-k[1], k[0], 0.0]])
+    return np.eye(3) + math.sin(a) * K + (1 - math.cos(a)) * K @ K
 
 
 # ---------------------------------------------------------------- spectra
@@ -407,19 +473,27 @@ def _bicycle_reflectors(parts: Parts, rear, front, rw: float, seat, bar, pedals,
         p_.plate("vru:reflex_spoke", c + d * (rw - 0.12), d * w, e * h, (0.006, 0, 0))
 
 
-def cyclist(height: float, phase: float, wheels: list | None = None, reflectors: bool = False) -> Parts:
+def cyclist(
+    height: float, phase: float, wheels: list | None = None, reflectors: bool = False, steer_deg: float = 0.0
+) -> Parts:
     """Bicycle (axles along x, travelling +z) with a seated rider; total height ~``height``.
 
     With a ``wheels`` list the wheels are built about their own axle centres and appended to it as
     ``(centre, Parts)`` (for rolling them), instead of being part of the returned mesh.
     ``reflectors``: add the 16 CFR 1512 reflector set (materials from reflector_material_lines).
+    ``steer_deg``: fork, front wheel and handlebar turn about the head-tube axis (+ = left); wheel entries
+    are ``(centre, Parts, steer)`` with ``steer = (deg, axis)`` or None.
     """
     s = height / 1.80
     parts = Parts()
+    fe = Parts() if steer_deg else parts  # front end (steered); built in place when straight
     rw = WHEEL_D / 2
     rear, front = np.array([0.0, rw, -WHEELBASE / 2]), np.array([0.0, rw, WHEELBASE / 2])
+    head = np.array([0.0, 0.98, 0.38])
+    steer_axis = head - front
     for centre in (rear, front):
-        w, c = (Parts(), np.zeros(3)) if wheels is not None else (parts, centre)
+        tgt = fe if centre is front else parts
+        w, c = (Parts(), np.zeros(3)) if wheels is not None else (tgt, centre)
         w.torus("vru:tyre", c, rw - 0.016, 0.016)
         w.torus("vru:rim", c, rw - 0.04, 0.008, n_v=6)
         for k in range(6):  # spoke stand-ins
@@ -427,10 +501,9 @@ def cyclist(height: float, phase: float, wheels: list | None = None, reflectors:
             d = np.array([0.0, math.cos(a), math.sin(a)]) * (rw - 0.045)
             w.tube("vru:rim", c - d, c + d, 0.003, caps=False, n_u=4)
         if wheels is not None:
-            wheels.append((centre, w))
+            wheels.append((centre, w, (steer_deg, steer_axis) if centre is front and steer_deg else None))
     bb = np.array([0.0, 0.28, -0.05])
     seat = np.array([0.0, 0.88, -0.25])
-    head = np.array([0.0, 0.98, 0.38])
     for a, b in (
         (rear, bb),
         (rear, seat - [0, 0.08, 0]),
@@ -439,10 +512,13 @@ def cyclist(height: float, phase: float, wheels: list | None = None, reflectors:
         (seat - [0, 0.08, 0], head),
     ):
         parts.tube("vru:frame", a, b, 0.017)
-    parts.tube("vru:frame", head, front, 0.014)
-    parts.tube("vru:frame", head, head + [0.0, 0.08, -0.02], 0.014)
+    fe.tube("vru:frame", head, front, 0.014)
+    fe.tube("vru:frame", head, head + [0.0, 0.08, -0.02], 0.014)
     bar = head + [0.0, 0.08, -0.02]
-    parts.tube("vru:frame", bar - [0.24, 0, 0], bar + [0.24, 0, 0], 0.012)
+    fe.tube("vru:frame", bar - [0.24, 0, 0], bar + [0.24, 0, 0], 0.012)
+    if steer_deg:
+        _rotate_parts(fe, parts, head, steer_axis, steer_deg)
+    steer_rot = _axis_rotation(steer_axis, steer_deg)
     parts.ellipsoid("vru:tyre", seat, (0.07, 0.025, 0.13))
     # rider
     hip = seat + [0.0, 0.07, 0.0]
@@ -451,7 +527,7 @@ def cyclist(height: float, phase: float, wheels: list | None = None, reflectors:
         bb + np.array([side * 0.11, -0.17 * math.cos(a + ph), 0.17 * math.sin(a + ph)])
         for side, ph in ((-1.0, 0.0), (1.0, math.pi))
     ]
-    grips = [bar + [side * 0.22, 0.0, 0.0] for side in (-1.0, 1.0)]
+    grips = [head + steer_rot @ (bar + [side * 0.22, 0.0, 0.0] - head) for side in (-1.0, 1.0)]
     _seated_rider(parts, s, hip, pedals, grips, 40.0)
     if reflectors:
         _bicycle_reflectors(parts, rear, front, rw, seat, bar, pedals, wheels)
@@ -496,9 +572,12 @@ def _seated_rider(parts: Parts, s: float, hip, feet, grips, lean_deg: float, hel
 def imported_rider(aid: str, phase: float) -> Parts:
     """1.80 m rider posed on imported two-wheeler ``aid`` from its ``two_wheelers.RIDER`` contact points."""
     s = 1.0
-    (sz, sy), (gz, gy, gw), (fz, fy, fw) = tw.RIDER[aid]
-    hip = np.array([0.0, sy + 0.07, sz])
-    if tw.MODELS[aid][0] == "bicycle":
+    seat, (gz, gy, gw), (fz, fy, fw) = tw.RIDER[aid]
+    standing = seat is None  # kick e-scooter: standing on the deck, one foot ahead of the other
+    hip = np.array([0.0, fy + 0.86, fz]) if standing else np.array([0.0, seat[1] + 0.07, seat[0]])
+    if standing:
+        feet = [np.array([-fw, fy, fz + 0.10]), np.array([fw, fy, fz - 0.10])]
+    elif tw.MODELS[aid][0] == "bicycle":
         a = 2 * math.pi * phase
         bb = np.array([0.0, fy, fz])
         feet = [
@@ -513,9 +592,9 @@ def imported_rider(aid: str, phase: float) -> Parts:
         sh = hip + 0.55 * s * np.array([0.0, math.cos(math.radians(lean)), math.sin(math.radians(lean))])
         return abs(float(np.linalg.norm(sh + [0.18 * s, -0.03, 0.0] - grips[1])) - 0.5 * s)
 
-    lean = min(np.arange(5.0, 70.5, 1.0), key=reach_error)  # torso lean that lets the arms reach the grips
+    lean = min(np.arange(0.0 if standing else 5.0, 70.5, 1.0), key=reach_error)  # arms reach the grips
     parts = Parts()
-    _seated_rider(parts, s, hip, feet, grips, float(lean), helmet=tw.MODELS[aid][0] != "bicycle")
+    _seated_rider(parts, s, hip, feet, grips, float(lean), helmet=tw.MODELS[aid][0] not in ("bicycle", "kickscooter"))
     return parts
 
 
@@ -555,7 +634,10 @@ def lamp_positions(aid: str | None) -> tuple[str, np.ndarray, np.ndarray]:
     """Kind and (front, rear) lamp centres in the target frame (+z forward); estimates from the contact points."""
     if aid is None:  # procedural bicycle: head tube top and below the saddle
         return "bicycle", np.array([0.0, 0.96, 0.48]), np.array([0.0, 0.78, -0.43])
-    (sz, sy), (gz, gy, _), _ = tw.RIDER[aid]
+    seat, (gz, gy, _), (fz, fy, _) = tw.RIDER[aid]
+    if seat is None:  # kick e-scooter: stem lamp below the grips, rear lamp at the back of the deck
+        return "bicycle", np.array([0.0, gy - 0.35, gz + 0.05]), np.array([0.0, fy + 0.05, fz - 0.35])
+    sz, sy = seat
     if tw.MODELS[aid][0] == "bicycle":
         return "bicycle", np.array([0.0, gy - 0.10, gz + 0.10]), np.array([0.0, sy - 0.12, sz - 0.20])
     return "motor", np.array([0.0, gy - 0.10, gz + 0.15]), np.array([0.0, sy - 0.05, sz - 0.55])
@@ -596,7 +678,7 @@ def scene_lines(
     height = HEIGHT_M[kind]
     bike, bike_meta, defs = None, None, []
     if kind in RIDERS and args.vru_bike and asset is not None:
-        placer = tw.Placer(asset, out_dir)
+        placer = tw.Placer(asset, out_dir, upright=True)
         bike, defs = placer.variant(args.vru_bike), placer.lines
         bike_meta = {
             "asset": args.vru_bike,
@@ -607,16 +689,21 @@ def scene_lines(
         }
     v = speed_kmh(args) / 3.6 if span else 0.0
     wheels = [] if v > 0 and kind in RIDERS and bike is None else None
+    tr = None
+    if kind in RIDERS:
+        tr = turn(args, WHEELBASE if bike is None else 0.62 * tw.MODELS[args.vru_bike][2])
     if bike is not None:
         parts = imported_rider(args.vru_bike, args.vru_gait_phase)
     elif kind in RIDERS:
-        parts = cyclist(height, args.vru_gait_phase, wheels, reflectors=reflex_lines is not None)
+        parts = cyclist(
+            height, args.vru_gait_phase, wheels, reflectors=reflex_lines is not None, steer_deg=tr["steer_deg"]
+        )
     else:
         parts = pedestrian(height, args.vru_gait_phase, child=kind == "child")
     x, z = road_edge_x + args.vru_offset_m, args.vru_distance_m
     yaw = -90.0 if args.vru_motion == "crossing" else 0.0  # local +z -> world -x (towards the median)
     lo, hi = parts.bounds()
-    for centre, w in wheels or []:
+    for centre, w, _ in wheels or []:
         wlo, whi = w.bounds()
         lo, hi = np.minimum(lo, wlo + centre), np.maximum(hi, whi + centre)
     wheel_deg = math.degrees(v * span / (WHEEL_D / 2)) if wheels else None
@@ -629,6 +716,9 @@ def scene_lines(
         hi = np.maximum(hi, (bike["hi"] - bike["c"]) * bike["scale"])
     c, s_ = math.cos(math.radians(yaw)), math.sin(math.radians(yaw))
     corners = np.array([[a, b, d] for a in (lo[0], hi[0]) for b in (lo[1], hi[1]) for d in (lo[2], hi[2])])
+    lean = tr["lean_deg"] if tr else 0.0
+    if lean:
+        corners = corners @ tw.rot_z(-lean).T
     world = np.stack(
         [c * corners[:, 0] + s_ * corners[:, 2], corners[:, 1], -s_ * corners[:, 0] + c * corners[:, 2]], -1
     )
@@ -645,14 +735,17 @@ def scene_lines(
     lamp_meta = None
     if lamps_on(args):  # pbrt cannot move area lights: the lamps stay at the shutter-open position
         ll, lamp_meta = lamp_lines(args.vru_bike if bike is not None else None)
-        L += ll
+        L += ["AttributeBegin", *([f"Rotate {-lean:.6g} 0 0 1"] if lean else []), *ll, "AttributeEnd"]
     if v > 0:  # rigid motion along the target's heading (local +z) during the exposure
         L += ["ActiveTransform EndTime", f"Translate 0 0 {v * span:.6g}", "ActiveTransform All"]
+    if lean:  # roll about the tyre contact line (local z through the origin); + = top to the rider's left (+x)
+        L += [f"Rotate {-lean:.6g} 0 0 1"]
     L += parts.lines()
-    for centre, w in wheels or []:  # rolling: rotation about the axle (x), top of the wheel moving forward
+    for centre, w, steer in wheels or []:  # rolling: rotation about the axle (x), top of the wheel moving forward
         L += [
             "AttributeBegin",
             f"Translate {centre[0]:.6g} {centre[1]:.6g} {centre[2]:.6g}",
+            *([f"Rotate {steer[0]:.6g} {steer[1][0]:.6g} {steer[1][1]:.6g} {steer[1][2]:.6g}"] if steer else []),
             "ActiveTransform EndTime",
             f"Rotate {wheel_deg:.6g} 1 0 0",
             "ActiveTransform All",
@@ -660,7 +753,7 @@ def scene_lines(
             "AttributeEnd",
         ]
     if bike is not None:
-        L += sf.instance_lines(bike["name"], (0.0, 0.0, 0.0), bike["yaw0"], bike["scale"], bike["origin"])
+        L += tw.instance_lines(bike, (0.0, 0.0, 0.0), 0.0)
     L += ["AttributeEnd"]
     obstruction = []
     if args.vru_obstruction == "parked-cars":
@@ -695,6 +788,18 @@ def scene_lines(
         "velocity_world_mps": [round(v * s_, 6), 0.0, round(v * c, 6)],
         "displacement_m": round(v * span, 6) if v else 0.0,
         "wheel_rotation_deg": None if wheel_deg is None else round(wheel_deg, 4),
+        **(
+            {
+                "turn": {
+                    **{k: (None if x is None else round(x, 4)) for k, x in tr.items()},
+                    "steer_applied": bike is None or tr["steer_deg"] == 0,
+                    "model": "steady turn: tan(lean) = v^2/(g R), kinematic steer tan(delta) = wheelbase/R; "
+                    "straight path during the exposure",
+                }
+            }
+            if tr
+            else {}
+        ),
         "motion_model": None
         if v == 0
         else "rigid translation over the exposure span (bbox_world_m at shutter open); procedural bicycle "

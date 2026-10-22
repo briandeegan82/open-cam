@@ -95,3 +95,20 @@ def test_two_wheelers_avoid_street_furniture(tmp_path):
         lo, hi = np.array(t["box_world"])
         for b in boxes:
             assert np.any(hi < b[0]) or np.any(lo > b[1]), (t["asset"], b)
+
+
+def test_side_lean_fit_and_upright_instance():
+    rng = np.random.default_rng(0)
+    y = rng.uniform(0.0, 1.0, 4000)
+    up = np.stack([rng.normal(0, 0.05, 4000), y, rng.uniform(-1, 1, 4000)], 1)
+    leaning = up @ tw.rot_z(-20.0).T  # top towards +x by 20 deg
+    assert tw.side_lean_deg(leaning) == pytest.approx(20.0, abs=0.5)
+    pts = leaning @ tw.rot_y(tw.MODELS["moped_solifer_export"][1]).T  # stored frame of a DELEAN model
+    v = {"name": "m", **tw.placement("moped_solifer_export", pts, upright=True)}
+    assert v["roll"] == pytest.approx(20.0, abs=0.5)
+    assert tw.placement("moped_solifer_export", pts)["roll"] == 0.0  # parked: stays on the stand
+    # instance transform == placed frame: s (Rz Ry p - c)
+    m = tw.rot_z(v["roll"]) @ tw.rot_y(v["yaw0"])
+    np.testing.assert_allclose(v["scale"] * (pts - v["origin"]) @ m.T, v["scale"] * (pts @ m.T - v["c"]), atol=1e-9)
+    lines = tw.instance_lines(v, (1.0, 0.0, 2.0), 90.0)
+    assert any("0 0 1" in s for s in lines)
