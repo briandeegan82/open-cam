@@ -31,6 +31,7 @@ SiO2 Ghosh-o/e data. These give n_o = 1.5442 and n_e = 1.5533 at 589 nm. A 45° 
 | `thickness_x_um`, `thickness_y_um` | quartz plate thickness; d(λ) = t·tan ρ(λ) |
 | `axis_angle_deg` | optic-axis angle of the plates, default 45 |
 | `exr_pixel_pitch_um` | EXR pixel pitch if it differs from `sensor.pixel_pitch_um` |
+| `interpolation` | fractional-split weights: `box` (default, no ringing) or `fourier` (band-limited) |
 
 Example for a 4 µm pixel with full Nyquist suppression on both axes: `{enabled: true, split_pixels: 1.0}`.
 The same filter in quartz is `{enabled: true, thickness_x_um: 680, thickness_y_um: 680}`, giving a
@@ -52,7 +53,13 @@ filter is applied twice.
 - pbrt has already integrated each EXR pixel over its area, so the filter acts as its transfer
   function on the sampled image. The spots sit at (0, 0), (d, 0), (0, d) and (d, d), as behind a
   real plate where the ordinary ray is undeviated, so the image moves by d/2 and integer splits are
-  exact pixel shifts with no ringing. Fractional splits are a band-limited interpolation, whose small undershoot at hard edges is clipped and reported. The
+  exact pixel shifts with no ringing. For fractional splits, `interpolation: box` (default) takes the
+  irradiance as constant over each EXR pixel, so a spot d = n + f px away lands with weights (1 − f, f)
+  on pixels n and n + 1. The kernel is non-negative, so it cannot ring, and it adds a little blur
+  (MTF |½(1 + (1 − f)e^(−2πiνn) + f e^(−2πiν(n+1)))| instead of |cos πνd|). `interpolation: fourier` is the
+  band-limited version with the exact cos OTF, but pbrt's box-filtered pixels are not band-limited:
+  around a lamp or window hundreds of times brighter than the room, its ringing runs along the whole
+  row and column. Its undershoot is clipped and reported. The
   filter removes detail below the pixel Nyquist frequency and the CFA colour aliasing it causes.
   It cannot remove luma aliasing that pbrt has already folded into the pixel grid above Nyquist.
   Doing that would need a supersampled render followed by pixel integration.

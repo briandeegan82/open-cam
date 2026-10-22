@@ -163,18 +163,22 @@ def test_spd_centroid_offset_shifts_only_the_spd_image():
     mosaic = hp.spd_centroid_shift(np.repeat(np.repeat(blob[::2, ::2], 2, 0), 2, 1), 0.4, 0.0, "RGGB")
     assert np.allclose(mosaic[0::2, 0::2], mosaic[1::2, 1::2])  # planes shifted alike, colours not mixed
     assert hp.spd_centroid_shift(blob, 0.0, 0.0) is not None and np.array_equal(hp.spd_centroid_shift(blob, 0, 0), blob)
+    step = np.where(xx < 32.0, 1.0, 1000.0)  # a window edge 1000x its surround must not ring on any sub-lattice
+    rs = hp.spd_centroid_shift(step, 0.3, 0.3, "RGGB")
+    assert rs.min() >= 1.0 - 1e-9 and rs.max() <= 1000.0 + 1e-9
+    np.testing.assert_allclose(rs[:, :28], 1.0) and np.testing.assert_allclose(rs[:, 36:], 1000.0)
 
     rccb = CfaLayout(tile=(("R", "C"), ("C", "B")), qe_csv={"R": "r", "C": "c", "B": "b"})
     level = rccb.site_index(64, 64).astype(float) * 4.0 + 1.0  # a different level per channel
     g = hp.spd_centroid_shift(level * blob, 0.4, 0.0, cfa_layout=rccb)
     for i in (0, 1):
         for j in (0, 1):  # each tile site is shifted on its own sub-lattice, so channels don't mix
-            want = np.maximum(level[i, j] * hp._fourier_shift(blob[i::2, j::2], 0.2, 0.0), 0.0)
+            want = np.maximum(level[i, j] * hp._box_shift(blob[i::2, j::2], 0.2, 0.0), 0.0)
             assert np.allclose(g[i::2, j::2], want, atol=1e-12)
     assert np.array_equal(g, hp.spd_centroid_shift(level * blob, 0.4, 0.0, "RGGB"))
     rgbw = CfaLayout(tile=(("R", "G", "B", "W"),) * 4, qe_csv={c: c for c in "RGBW"})
     g4 = hp.spd_centroid_shift(blob, 0.4, 0.0, cfa_layout=rgbw)
-    assert np.allclose(g4[:, 1::4], np.maximum(hp._fourier_shift(blob[:, 1::4], 0.1, 0.0), 0.0), atol=1e-12)
+    assert np.allclose(g4[:, 1::4], np.maximum(hp._box_shift(blob[:, 1::4], 0.1, 0.0), 0.0), atol=1e-12)
     arch = _arch("default_hdr_split_pixel", spd_centroid_offset_x_px=0.4)
     caps = hp.simulate_captures(
         arch,

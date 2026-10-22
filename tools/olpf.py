@@ -19,9 +19,12 @@ The filter acts on the spectral EXR before the radiance -> electrons conversion,
 sensor pixel (as in that conversion). The EXR is already integrated over each pixel, so the filter is
 applied as its transfer function on the sampled image. The spots sit at (0, 0), (d, 0), (0, d), (d, d)
 as behind a real plate (the ordinary ray is undeviated), so integer splits are exact pixel shifts;
-fractional splits are a band-limited interpolation: it suppresses detail below the pixel Nyquist frequency and the CFA colour
-aliasing that comes from it, but cannot remove aliasing that pbrt already folded into the pixel
-grid above Nyquist.
+fractional splits (``interpolation: box``, default) take the irradiance as constant over each EXR
+pixel, so a spot d = n + f px away re-integrates to weights (1 - f, f) on pixels n and n + 1: a
+non-negative kernel that cannot ring around very bright sources (lamps, windows, the sun) and adds a
+little blur. ``interpolation: fourier`` is the band-limited alternative (exact cos OTF, but it rings
+along rows and columns at edges far above the pixel Nyquist, which pbrt's box-filtered pixels are).
+Neither removes aliasing that pbrt already folded into the pixel grid above Nyquist.
 
 Angle of incidence (``angle_dependence``, opt-in, quartz ``thickness_*`` filters only): off axis the
 chief ray reaches the plates at the chief-ray angle (CRA). Each plate is then traced exactly: the
@@ -68,6 +71,7 @@ DEFAULTS = {
     "exr_pixel_pitch_um": None,
     # Opt-in: {enabled, cra: table|linear, max_cra_deg, field_grid: [gy, gx]}.
     "angle_dependence": None,
+    "interpolation": "box",
 }
 
 ANGLE_DEFAULTS = {"enabled": False, "cra": "linear", "max_cra_deg": 25.0, "field_grid": [5, 7]}
@@ -204,13 +208,35 @@ def transfer(fx, fy, dx_px: float, dy_px: float) -> np.ndarray:
     return np.cos(np.pi * np.asarray(fx) * dx_px) * np.cos(np.pi * np.asarray(fy) * dy_px)
 
 
-def apply_plane(img: np.ndarray, dx_px: float, dy_px: float) -> np.ndarray:
-    """Filter one image plane: spots at 0 and +d on each axis (``transfer`` times a d/2 shift, reflect-padded).
+def spot_sum(img: np.ndarray, spots) -> np.ndarray:
+    """Mean of copies of ``img`` moved by each (sx, sy) px spot, out(x) = mean a(x - s), with box-pixel
+    (bilinear) weights for fractional moves; reflect-padded. Non-negative weights: no ringing."""
+    a = np.asarray(img, dtype=np.float64)
+    pad = int(math.ceil(max(max(abs(sx), abs(sy)) for sx, sy in spots))) + 2
+    p = np.pad(a, pad, mode="reflect")
+    h, w = a.shape
+    out = np.zeros_like(a)
+    for sx, sy in spots:
+        ix, iy = math.floor(sx), math.floor(sy)
+        fx, fy = sx - ix, sy - iy
+        for oy, wy in ((iy, 1.0 - fy), (iy + 1, fy)):
+            for ox, wx in ((ix, 1.0 - fx), (ix + 1, fx)):
+                if wy * wx:
+                    out += wy * wx * p[pad - oy : pad - oy + h, pad - ox : pad - ox + w]
+    return out / len(spots)
 
-    Spots at +-d/2 would need half-pixel shifts for odd integer splits, whose band-limited interpolation
-    rings along rows and columns around very bright sources (clipped lamps, the sun)."""
+
+def apply_plane(img: np.ndarray, dx_px: float, dy_px: float, interpolation: str = "box") -> np.ndarray:
+    """Filter one image plane: spots at 0 and +d on each axis, reflect-padded.
+
+    ``box``: ``spot_sum`` (box-pixel weights, no ringing). ``fourier``: ``transfer`` times a d/2 shift
+    (band-limited; rings along rows and columns around very bright sources at fractional splits).
+    Spots at +-d/2 would need half-pixel shifts even for odd integer splits."""
     if dx_px == 0 and dy_px == 0:
         return img
+    if interpolation == "box":
+        spots = [(0.0, 0.0), (dx_px, 0.0), (0.0, dy_px), (dx_px, dy_px)]
+        return spot_sum(img, spots).astype(img.dtype, copy=False)
     a = np.asarray(img, dtype=np.float64)
     pad = int(math.ceil(max(abs(dx_px), abs(dy_px)))) + 4
     p = np.pad(a, pad, mode="reflect")
@@ -221,10 +247,14 @@ def apply_plane(img: np.ndarray, dx_px: float, dy_px: float) -> np.ndarray:
     return out[pad:-pad, pad:-pad].astype(img.dtype, copy=False)
 
 
-def apply_plane_vec(img: np.ndarray, d1: tuple[float, float], d2: tuple[float, float]) -> np.ndarray:
+def apply_plane_vec(
+    img: np.ndarray, d1: tuple[float, float], d2: tuple[float, float], interpolation: str = "box"
+) -> np.ndarray:
     """Four spots at 0, d1, d2, d1 + d2 (2-D split vectors in px): ``apply_plane`` for oblique splits."""
     if not any((*d1, *d2)):
         return img
+    if interpolation == "box":
+        return spot_sum(img, [(0.0, 0.0), tuple(d1), tuple(d2), (d1[0] + d2[0], d1[1] + d2[1])])
     a = np.asarray(img, dtype=np.float64)
     pad = int(math.ceil(abs(d1[0]) + abs(d2[0]) + abs(d1[1]) + abs(d2[1]))) + 4
     p = np.pad(a, pad, mode="reflect")
@@ -242,8 +272,8 @@ def apply_channels(
 ) -> tuple[dict[str, np.ndarray], dict]:
     """Apply ``sensor.olpf`` to every image channel (S0.<lambda>nm at its wavelength, others at 550 nm).
 
-    Negative undershoot of the band-limited interpolation at hard edges (a few % for fractional splits)
-    is clipped to zero; the clipped energy is reported.
+    With ``interpolation: fourier``, negative undershoot of the band-limited interpolation at hard edges
+    (a few % for fractional splits) is clipped to zero; the clipped energy is reported.
     """
     from exr_multispectral import parse_s0_wavelength_nm
 
@@ -252,6 +282,9 @@ def apply_channels(
         return chans, {"enabled": False}
     ad = {**ANGLE_DEFAULTS, **(cfg.get("angle_dependence") or {})}
     angular = bool(ad["enabled"])
+    interp = str(cfg.get("interpolation") or "box")
+    if interp not in ("box", "fourier"):
+        raise ValueError(f"sensor.olpf.interpolation must be box or fourier, got {interp!r}")
     if angular and (cfg.get("split_pixels") is not None or cfg.get("split_x_um") or cfg.get("split_y_um")):
         raise ValueError("olpf.angle_dependence needs the quartz plates (thickness_x_um / thickness_y_um)")
     out, splits, clipped, total = {}, {}, 0.0, 0.0
@@ -269,14 +302,14 @@ def apply_channels(
             f = np.zeros(arr.shape, dtype=np.float64)
             for k, z in enumerate(zones):
                 wz = wy[k // gx][:, None] * wx[k % gx][None, :]
-                f += apply_plane_vec(arr.astype(np.float64) * wz, z["d1_px"], z["d2_px"])
+                f += apply_plane_vec(arr.astype(np.float64) * wz, z["d1_px"], z["d2_px"], interp)
             dx = min(z["dx_px"] for z in zones)
             dy = min(z["dy_px"] for z in zones)
             if zone_info is None or abs(lam - 550.0) < abs(zone_info["lambda_nm"] - 550.0):
                 zone_info = {"lambda_nm": lam, "zones": zones}
         else:
             dx, dy = float(split_px(cfg, "x", lam)[0]), float(split_px(cfg, "y", lam)[0])
-            f = apply_plane(arr, dx, dy)
+            f = apply_plane(arr, dx, dy, interp)
         neg = f < 0
         clipped += float(-f[neg].sum())
         total += float(np.abs(arr).sum())
@@ -294,6 +327,7 @@ def apply_channels(
         if vals
         else None,
         "clipped_energy_fraction": clipped / total if total else 0.0,
+        "interpolation": interp,
     }
     if zone_info is not None:
         zs = zone_info["zones"]
