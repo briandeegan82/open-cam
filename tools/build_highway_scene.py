@@ -394,6 +394,19 @@ def vegetation_object(
     return out
 
 
+def coat_vegetation(coat, lines: list[str], vid: str, scale: float) -> list[str]:
+    """Snow coat per pbrt object: a whole-file object, or each split plant ``<vid>#<k>`` on its own."""
+    if lines and lines[0].startswith("ObjectBegin"):
+        return coat.lines(lines, vid, scale)
+    k0 = next((i for i, ln in enumerate(lines) if ln.startswith("ObjectBegin")), len(lines))
+    prelude, out, k = lines[:k0], list(lines[:k0]), 0
+    while k0 < len(lines):
+        k1 = lines.index("ObjectEnd", k0) + 1
+        out += coat.lines(prelude + lines[k0:k1], f"{vid}#{k}", scale)[len(prelude) :]
+        k0, k = k1, k + 1
+    return out
+
+
 def add_camera_args(ap: argparse.ArgumentParser, fov: float = 31.0, focus_distance: float = 25.0) -> None:
     """Camera / lens options shared with the other road-scene builders (tools/build_tunnel_scene.py)."""
     ap.add_argument("--camera", choices=("perspective", "pinhole", "thinlens", "realistic"), default="pinhole")
@@ -1011,6 +1024,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
     rng = np.random.default_rng(7 if args.seed is None else args.seed)
     plant_rng = np.random.default_rng((7 if args.seed is None else args.seed) + 104729)
     veg_meta = []
+    coat = snow.Coat(out_dir) if snow.coat_on(args) else None
     for vid, kind in var.species:
         if args.vegetation == "none" or (args.vegetation == "shrubs" and kind == "tree"):
             continue
@@ -1024,7 +1038,10 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         plants = plant_variants.split(vid, info, prep) if args.plant_variants == "split" else None
         if plants is not None and len(plants) < 2:
             plants = None
-        L += vegetation_object(vid, info, raw, out_dir, plants)
+        vobj = vegetation_object(vid, info, raw, out_dir, plants)
+        if coat is not None:  # mean instance scale below: trees 2.6-3.8, shrubs 0.8-1.4
+            vobj = coat_vegetation(coat, vobj, vid, (3.2 if kind == "tree" else 1.1) * var.species_scale(vid))
+        L += vobj
         n_var = len(plants) if plants else 1  # one plant per placement: same plant count as the row
         n = 0
         for side, edge in ((1.0, Layout.right_paved), (-1.0, Layout.opp_paved)):
@@ -1087,6 +1104,8 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
                 body = variety.proxy_vehicle(model, paint_spd, inst, mesh, box) or proxy_car(paint_spd, inst)
                 yaw_model = heading
             body = mats.car_body(body, var.paints.get(paint, (paint,))[0])
+            if coat is not None:
+                body = coat.lines(body, model)
             inc = car_dir / f"{inst}.pbrt"
             inc.write_text("\n".join(body) + "\n")
             motion, motion_meta = fx.car_lines(inst, lane, speeds[k], "\n".join(body))
@@ -1196,6 +1215,8 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         L[w + 1 : w + 1] = smats
         L += [*sgeom, ""]
         snow_meta["notes"] = snow_notes
+        if coat is not None:
+            snow_meta["coat"] = coat.meta()
     L += fx.windscreen_lines(out_dir, wl, eye)
     wet_meta = None
     if wet.enabled(args):  # last: also wets the road-wear marking materials emitted with the geometry
