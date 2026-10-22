@@ -310,7 +310,10 @@ rear) get generic layouts; trucks, the van and the bus have amber / red / clear 
   the same chamber (dual filament). Spectrum: 2856 K behind a 610 nm long-pass red lens.
 * *Unlit lenses:* glossy `coateddiffuse` with nominal red, amber or clear reflectances, so they
   reflect other cars' headlamps.
-* *Rear fog lamps* (`--rear-fog-lamps auto|on|none`; `auto` = on with `--haze fog`): one 200 cd
+* *Rear fog lamps* (`--rear-fog-lamps auto|on|none`; `auto` = on when the haze visibility is below
+  `--rear-fog-visibility-m`, default 50 m as in StVO §17(3); the visibility is the MOR, converted from
+  `--visibility-definition koschmieder` and taken inside a `--fog-bank`, so the default `--haze fog`
+  at 150 m leaves them off): one 200 cd
   lamp (UN ECE R38: 150–300 cd) on the car's left side, as R48 requires when only one is fitted in
   right-hand traffic. It's placed at least 100 mm from the stop lamp: low in the bumper (BMW,
   proxy), beside the combination lamp (trucks, tractor), below the vertical cluster (van) or inboard

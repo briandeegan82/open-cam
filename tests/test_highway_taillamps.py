@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import os
 import re
 import subprocess
@@ -9,6 +10,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import highway_atmosphere as atm
 import highway_night as night
 import highway_taillamps as tl
 import numpy as np
@@ -152,9 +154,29 @@ class TestBuilderHook(unittest.TestCase):
             m = build_without_assets(Path(td), "--time-of-day", "night")
             self.assertTrue(all(t["rear_fog"] is None for t in m["lighting"]["artificial"]["tail_lamps"]))
         with tempfile.TemporaryDirectory() as td:
-            m = build_without_assets(Path(td), "--time-of-day", "night", "--haze", "fog")
+            m = build_without_assets(Path(td), "--time-of-day", "night", "--haze", "fog", "--visibility-m", "40")
             lamps = m["lighting"]["artificial"]["tail_lamps"]
             self.assertTrue(all(t["rear_fog"]["intensity_cd"] == tl.FOG_CD for t in lamps))
+
+    def test_rear_fog_auto_gated_at_50_m(self) -> None:
+        def auto(*argv: str) -> bool:
+            ap = argparse.ArgumentParser()
+            night.add_night_args(ap)
+            atm.add_cli_args(ap)
+            args = ap.parse_args(list(argv))
+            args.time_of_day = "night"
+            return night.resolve(args)["rear_fog"]
+
+        self.assertFalse(auto())
+        self.assertFalse(auto("--haze", "fog"))  # preset 150 m
+        self.assertTrue(auto("--haze", "fog", "--visibility-m", "49"))
+        self.assertFalse(auto("--haze", "fog", "--visibility-m", "51"))
+        self.assertTrue(auto("--haze", "mist", "--visibility-m", "30"))
+        # Koschmieder 2 % range 60 m = MOR 46 m
+        self.assertTrue(auto("--haze", "fog", "--visibility-m", "60", "--visibility-definition", "koschmieder"))
+        self.assertTrue(auto("--haze", "fog", "--rear-fog-visibility-m", "200"))
+        self.assertFalse(auto("--haze", "fog", "--visibility-m", "40", "--rear-fog-lamps", "none"))
+        self.assertTrue(auto("--rear-fog-lamps", "on"))
 
 
 # FMVSS 108 one-section minima [cd] (49 CFR 571.108 Table VIII taillamp, Table IX stop lamp):

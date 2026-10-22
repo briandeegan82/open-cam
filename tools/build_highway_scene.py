@@ -115,9 +115,13 @@ def _pts(a: np.ndarray) -> str:
     return " ".join(_f(v) for v in np.asarray(a, dtype=np.float64).ravel())
 
 
+def _idx(a: np.ndarray) -> str:
+    return " ".join(map(str, np.asarray(a, dtype=np.int64).ravel()))
+
+
 def mesh(p: np.ndarray, tri: np.ndarray, uv: np.ndarray | None = None, n: np.ndarray | None = None) -> list[str]:
     p, tri, uv, n = variety.warp_mesh(p, tri, uv, n)
-    out = ['Shape "trianglemesh"', f'    "point3 P" [ {_pts(p)} ]', f'    "integer indices" [ {_pts(tri)} ]']
+    out = ['Shape "trianglemesh"', f'    "point3 P" [ {_pts(p)} ]', f'    "integer indices" [ {_idx(tri)} ]']
     if uv is not None:
         out.append(f'    "point2 uv" [ {_pts(uv)} ]')
     if n is not None:
