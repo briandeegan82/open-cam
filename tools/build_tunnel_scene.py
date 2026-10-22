@@ -41,6 +41,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import road_rtable as rt  # noqa: E402
+import tunnel_interreflection as ti  # noqa: E402
 from build_highway_scene import (  # noqa: E402
     DASH,
     GAP,
@@ -194,6 +195,34 @@ TRANSITION_STEPS = (0.15, 0.05, 0.02)
 EXIT_STEPS = (3.0, 5.0)
 
 
+# Zone lengths from the design speed: [S23]'s example lengths (2 x 42 m threshold, 72 / 89 / 133 m transition,
+# 30 + 30 m exit) at its 80 km/h, scaled with speed. The threshold scales with the stopping distance
+# v t_r + v^2 / (2 a) (it is at least the stopping distance [H24]); the other zones scale with v (same time to drive).
+SPEED_REF_KMH = 80.0
+SPEED_REF_LENGTHS = {"threshold": 84.0, "transition": (72.0, 89.0, 133.0), "exit": (30.0, 30.0)}
+SSD_REACTION_S = 2.5
+SSD_DECEL_M_S2 = 3.4
+
+
+def stopping_distance(speed_kmh: float) -> float:
+    v = speed_kmh / 3.6
+    return v * SSD_REACTION_S + v * v / (2.0 * SSD_DECEL_M_S2)
+
+
+def zone_lengths_for_speed(speed_kmh: float) -> tuple[float, tuple[float, ...], tuple[float, ...]]:
+    """(threshold length, transition step lengths, exit step lengths) [m] for a design speed [km/h]."""
+    if speed_kmh <= 0:
+        raise SystemExit("--design-speed-kmh must be positive")
+    f_ssd = stopping_distance(speed_kmh) / stopping_distance(SPEED_REF_KMH)
+    f_v = speed_kmh / SPEED_REF_KMH
+    ref = SPEED_REF_LENGTHS
+    return (
+        ref["threshold"] * f_ssd,
+        tuple(ln * f_v for ln in ref["transition"]),
+        tuple(ln * f_v for ln in ref["exit"]),
+    )
+
+
 def zone_profile(
     z_in: float,
     z_out: float,
@@ -273,13 +302,15 @@ def solve_lamp_luminance(
     rho: float,
     table: rt.RTable | None = None,
     k_tint: float = 1.0,
+    indirect: np.ndarray | None = None,
 ) -> dict[str, float]:
     """Lamp luminance per zone so the direct road luminance (all zones' lamps) hits each zone's design value.
 
     Lambertian road: solves ``rho / pi * sum_j E_ij L_j = L_road,i`` where E_ij is the mean horizontal
     illuminance at zone i's centre grid from unit-luminance lamps of zone j (spill across zone boundaries
     included). r-table road: E_ij is replaced by the r-table luminance (``direct_road_luminance``) times
-    ``k_tint``, the luminous factor of the road tint under the lamp.
+    ``k_tint``, the luminous factor of the road tint under the lamp. ``indirect[i, j]`` (optional) adds
+    zone j's interreflected road luminance at zone i per unit lamp luminance (``interreflected_road_luminance``).
     """
     names = [zn["zone"] for zn in zones]
     if table is None:
@@ -290,10 +321,38 @@ def solve_lamp_luminance(
             [[direct_road_luminance(zone_road_points(zi), lamps, j, table).mean() for j in names] for zi in zones]
         )
         b = np.array([zn["road_luminance"] for zn in zones])
+    if indirect is not None:
+        a = a + indirect * (b / np.array([zn["road_luminance"] for zn in zones]))[:, None]
     lum = np.linalg.solve(a, b)
     if np.any(lum <= 0):
         raise SystemExit(f"no non-negative lamp solution for zones {names}: lengthen the short zones")
     return {n: float(v) for n, v in zip(names, lum)}
+
+
+def interreflected_road_luminance(
+    zones: list[dict],
+    lamps: list[tuple[float, float, str]],
+    z_in: float,
+    z_out: float,
+    rho_road: float,
+    rho_lining: float,
+    road_q0: float | None = None,
+) -> tuple[np.ndarray, ti.TubeRadiosity]:
+    """``M[i, j]``: interreflected road luminance [cd/m^2] at zone i's centre grid from unit-luminance lamps of zone j.
+
+    Radiosity of the lit tube (``tunnel_interreflection``): lamp light on the road, walls and vault, then every
+    further bounce. The road reflects interreflected light as ``rho_road / pi`` (Lambertian) or ``road_q0``
+    (r-table road: the light arrives from all directions, so its average luminance coefficient Q0)."""
+    tube = ti.TubeRadiosity(tube_profile(), lambda x: rho_road, rho_lining, z_out - z_in)
+    names = [zn["zone"] for zn in zones]
+    k = rho_road / math.pi if road_q0 is None else road_q0
+    m = np.zeros((len(zones), len(zones)))
+    for j, name in enumerate(names):
+        e = tube.bounce(tube.direct_from_lamps([(x, z - z_in) for x, z, zz in lamps if zz == name], LAMP_Y, LAMP_SIZE))
+        for i, zn in enumerate(zones):
+            zc, h = 0.5 * (zn["z0"] + zn["z1"]) - z_in, min(6.0, 0.4 * (zn["z1"] - zn["z0"]))
+            m[i, j] = k * tube.floor_mean(e, 0.5, ROAD_W - 0.5, zc - h, zc + h)
+    return m, tube
 
 
 def direct_road_illuminance(points: np.ndarray, lamps: list[tuple[float, float, str]], zone: str) -> np.ndarray:
@@ -411,6 +470,13 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         default="stepped",
         help="stepped: threshold, transition, interior and exit zones; two-step: threshold then interior only.",
     )
+    ap.add_argument(
+        "--design-speed-kmh",
+        type=float,
+        default=None,
+        help="Derive the threshold, transition and exit lengths from this design speed (overrides "
+        "--threshold-length, --transition-lengths and --exit-lengths; see docs/TUNNEL_SCENES.md).",
+    )
     ap.add_argument("--threshold-length", type=float, default=80.0, help="Threshold-zone length (both halves) [m].")
     ap.add_argument(
         "--transition-lengths",
@@ -426,6 +492,13 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     ap.add_argument("--spacing-interior", type=float, default=9.0, help="Luminaire spacing, interior zone [m].")
     ap.add_argument("--spacing-exit", type=float, default=4.5, help="Luminaire spacing, exit zone [m].")
     ap.add_argument("--lamp", choices=("led_4000k", "hps"), default="led_4000k")
+    ap.add_argument(
+        "--luminaire-solve",
+        choices=("interreflection", "direct"),
+        default="interreflection",
+        help="Size the luminaires for the road luminance including light interreflected by the road and lining "
+        "(radiosity of the tube, default) or for the direct lamp light only (earlier behaviour).",
+    )
     ap.add_argument("--target", action=argparse.BooleanOptionalAction, default=True, help="Place the target cars.")
     add_camera_args(ap, fov=30.0)
     ap.add_argument("--cam-height", type=float, default=1.35, help="Camera height above the road [m].")
@@ -524,23 +597,30 @@ def build(args: argparse.Namespace) -> dict:  # noqa: C901 (linear scene assembl
         "interior": args.spacing_interior,
         "exit": args.spacing_exit,
     }
+    if args.design_speed_kmh is None:
+        lengths = (float(args.threshold_length), tuple(args.transition_lengths), tuple(args.exit_lengths))
+    else:
+        lengths = zone_lengths_for_speed(float(args.design_speed_kmh))
     zones = zone_profile(
         z_in,
         z_out,
         l_th,
         l_in,
-        float(args.threshold_length),
-        tuple(args.transition_lengths),
-        tuple(args.exit_lengths),
+        *lengths,
         spacing,
         args.zone_profile,
     )
     lamps = luminaire_positions(zones)
+    indirect = None
+    if args.luminaire_solve == "interreflection":
+        rho_lining = luminous_reflectance(reflectance("concrete", wl), np.interp(wl, LIGHT_WL, lamp_spd), wl)
+        q0 = None if table is None else k_lamp * table.q0()
+        indirect, _ = interreflected_road_luminance(zones, lamps, z_in, z_out, rho_lamp, rho_lining, q0)
     if table is None:
-        lamp_l = solve_lamp_luminance(zones, lamps, rho_lamp)
+        lamp_l = solve_lamp_luminance(zones, lamps, rho_lamp, indirect=indirect)
         l_ext = rho_sun * e_ref / math.pi
     else:
-        lamp_l = solve_lamp_luminance(zones, lamps, rho_lamp, table, k_lamp)
+        lamp_l = solve_lamp_luminance(zones, lamps, rho_lamp, table, k_lamp, indirect)
         hs = math.hypot(sun_w[0], sun_w[2])
         beta_sun = math.degrees(math.acos(max(-1.0, min(1.0, sun_w[2] / max(hs, 1e-12)))))
         q_sun = float(table.q(1.0 / math.tan(math.radians(max(elev, 1e-3))), beta_sun))
@@ -643,11 +723,17 @@ def build(args: argparse.Namespace) -> dict:  # noqa: C901 (linear scene assembl
             "rows_x_m": list(LAMP_X),
             "spacing_m": {zn["zone"]: zn["spacing"] for zn in zones},
             "luminance_cd_m2": lamp_l,
+            "solve": args.luminaire_solve,
+            "interreflected_road_luminance_cd_m2": None
+            if indirect is None
+            else {zn["zone"]: float(indirect[i] @ [lamp_l[z["zone"]] for z in zones]) for i, zn in enumerate(zones)},
         },
         "photometry": {
             "l20_cd_m2": float(args.l20),
             "k": float(args.k),
             "threshold_road_luminance_cd_m2": l_th,
+            "design_speed_kmh": args.design_speed_kmh,
+            "stopping_distance_m": None if args.design_speed_kmh is None else stopping_distance(args.design_speed_kmh),
             "interior_road_luminance_cd_m2": l_in,
             "threshold_length_m": float(args.threshold_length),
             "zone_profile": args.zone_profile,
@@ -665,7 +751,9 @@ def build(args: argparse.Namespace) -> dict:  # noqa: C901 (linear scene assembl
             "exterior_road_luminance_cd_m2": l_ext,
             "road_luminous_reflectance": {"daylight": rho_sun, "lamp": rho_lamp},
             "road_reflection": road_refl,
-            "note": "tunnel road luminances are design values for the direct lamp light (interreflections add to them)",
+            "note": "tunnel road luminances are design values for the lamp light: direct only with luminaires.solve "
+            "'direct'; direct + interreflected in the lit tube with 'interreflection' (daylight entering through "
+            "the portals adds to them in both cases)",
         },
         "lighting": {
             "sun": {"elevation_deg": elev, "azimuth_deg": args.sun_azimuth, "direct_normal_lux": e_dn},
@@ -686,7 +774,12 @@ def build(args: argparse.Namespace) -> dict:  # noqa: C901 (linear scene assembl
                 if args.zone_profile == "two-step"
                 else "stepped zone luminances (constant per step), not a continuous adaptation curve"
             ),
-            "zone lengths are fixed in metres, not derived from design speed / stopping distance",
+            "zone lengths are fixed in metres, not derived from design speed / stopping distance"
+            if args.design_speed_kmh is None
+            else f"zone lengths scaled from [S23]'s 80 km/h example to {args.design_speed_kmh:g} km/h "
+            "(threshold with the stopping distance, the rest with speed); not a CIE 88 design",
+            "luminaire solve ('interreflection'): radiosity of the lit tube only (Lambertian road and lining, "
+            "no cars, no daylight entering through the portals)",
             "lamp output solved for direct road luminance only; walls and daylight spill add to it",
             "box proxy cars as targets",
         ],

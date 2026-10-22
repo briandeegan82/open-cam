@@ -1,0 +1,40 @@
+# Delta from config/sensor_models/default.yaml — the default_hdr_dcg pixel behind the default_rccb CFA.
+# Illustrative parameters (not a specific commercial sensor / datasheet). See docs/HDR_PIXELS.md
+# and docs/CFA_NIR.md.
+schema_version: 1
+sensor:
+  pixel_pitch_um: 3.0
+  quantum_efficiency:
+    green_csv: spectra/QE/interpolated/QE_cyan.csv
+cfa:
+  layout: RCCB
+  demosaic: gradient
+noise:
+  emva:                       # single-exposure base = the LCG path (used when hdr.enabled: false)
+    overall_system_gain_K_e_per_DN: 6.25
+    sigma_d_e: 8.0
+    black_level_DN: 64
+  adc:
+    bit_depth: 12
+    full_well_e: 25000
+  hdr:
+    enabled: true
+    architecture: dcg
+    dcg:
+      readout: dual
+      photodiode_full_well_e: 25000
+      hcg: {K_e_per_DN: 0.7, sigma_e: 1.5, full_well_e: 2800}
+      lcg: {K_e_per_DN: 6.25, sigma_e: 8.0, full_well_e: 25000}
+    merge:
+      method: snr_weighted
+      threshold_fraction: 0.9
+    compand:
+      enabled: false
+source:
+  qe_variant: default_rccb
+model:
+  name: default_hdr_dcg_rccb
+  display_name: Default DCG HDR behind an RCCB CFA (illustrative)
+validation:
+  datasheet:
+    enabled: false          # illustrative model, no datasheet

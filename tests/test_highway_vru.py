@@ -169,3 +169,73 @@ class TestBicycleReflectors(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestRiderLamps(unittest.TestCase):
+    def args(self, **kw):
+        base = {"vru": "cyclist", "vru_lamps": "auto", "time_of_day": "night", "vru_distance_m": 30.0}
+        return argparse.Namespace(**{**base, "vru_gait_phase": 0.25, "vru_bike": None, **kw})
+
+    def test_auto_on_at_night_for_riders_only(self) -> None:
+        self.assertTrue(vru.lamps_on(self.args()))
+        self.assertFalse(vru.lamps_on(self.args(time_of_day="day")))
+        self.assertFalse(vru.lamps_on(self.args(vru="pedestrian")))
+        self.assertFalse(vru.lamps_on(self.args(vru_lamps="off")))
+        with self.assertRaises(SystemExit):
+            vru.check_args(self.args(vru_lamps="on", time_of_day="day"))
+
+    def test_lamp_intensities_and_directions(self) -> None:
+        for aid, kind in ((None, "bicycle"), ("bike_ardis_verona", "bicycle"), ("moto_80s", "motor")):
+            lines, meta = vru.lamp_lines(aid)
+            self.assertEqual(meta["kind"], kind)
+            self.assertGreater(meta["front"]["position_m"][2], meta["rear"]["position_m"][2])
+            for name in ("front", "rear"):
+                cd, (w, h) = vru.VRU_LAMPS[kind][name]
+                self.assertEqual(meta[name]["intensity_cd"], cd)
+            text = "\n".join(lines)
+            self.assertIn("lamp_white_led", text)
+            self.assertIn("lamp_red_led", text)
+
+
+class TestMotion(unittest.TestCase):
+    def test_static_without_exposure(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            v = build_without_assets(Path(td), "--vru", "cyclist")["vru"]
+            self.assertTrue(v["static"])
+            self.assertEqual(v["displacement_m"], 0.0)
+            self.assertIsNone(v["wheel_rotation_deg"])
+
+    def test_crossing_cyclist_moves_and_wheels_roll(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            v = build_without_assets(Path(td), "--vru", "cyclist", "--exposure-s", "0.01")["vru"]
+            txt = (Path(td) / "scene" / "highway.pbrt").read_text()
+        ms = 15.0 / 3.6
+        self.assertFalse(v["static"])
+        self.assertAlmostEqual(v["displacement_m"], ms * 0.01, places=6)
+        np.testing.assert_allclose(v["velocity_world_mps"], [-ms, 0.0, 0.0], atol=1e-6)  # right-to-left
+        deg = np.degrees(ms * 0.01 / (vru.WHEEL_D / 2))
+        self.assertAlmostEqual(v["wheel_rotation_deg"], deg, places=3)
+        self.assertIn(f"Translate 0 0 {ms * 0.01:.6g}", txt)
+        self.assertEqual(txt.count(f"Rotate {deg:.6g} 1 0 0"), 2)
+
+    def test_speed_zero_and_wheel_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            v = build_without_assets(Path(td), "--vru", "pedestrian", "--exposure-s", "0.01", "--vru-speed-kmh", "0")[
+                "vru"
+            ]
+            self.assertTrue(v["static"])
+        with tempfile.TemporaryDirectory() as td, self.assertRaises(SystemExit):
+            build_without_assets(Path(td), "--vru", "cyclist", "--exposure-s", "0.25")
+
+    def test_separate_wheels_keep_geometry(self) -> None:
+        wheels: list = []
+        joint = vru.cyclist(1.80, 0.25)
+        body = vru.cyclist(1.80, 0.25, wheels)
+        self.assertEqual(len(wheels), 2)
+        lo, hi = body.bounds()
+        for c, w in wheels:
+            wlo, whi = w.bounds()
+            lo, hi = np.minimum(lo, wlo + c), np.maximum(hi, whi + c)
+        jlo, jhi = joint.bounds()
+        np.testing.assert_allclose(lo, jlo, atol=1e-9)
+        np.testing.assert_allclose(hi, jhi, atol=1e-9)

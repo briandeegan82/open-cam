@@ -1,0 +1,133 @@
+--- a/src/pbrt/lights.cpp
++++ b/src/pbrt/lights.cpp
+@@ -30,6 +30,7 @@
+ #include <pbrt/util/stats.h>
+ 
+ #include <algorithm>
++#include <map>
+ #include <mutex>
+ 
+ namespace pbrt {
+@@ -693,7 +694,7 @@
+                                    const MediumInterface &mediumInterface, Spectrum Le,
+                                    Float scale, const Shape shape, FloatTexture alpha,
+                                    Image im, const RGBColorSpace *imageColorSpace,
+-                                   bool twoSided)
++                                   bool twoSided, const Image *angular)
+     : LightBase(
+           [](FloatTexture alpha) {
+               // Special case handling for area lights with constant zero-valued alpha
+@@ -717,6 +718,7 @@
+       alpha(type == LightType::Area ? alpha : nullptr),
+       area(shape.Area()),
+       twoSided(twoSided),
++      angular(angular),
+       Lemit(LookupSpectrum(Le)),
+       scale(scale),
+       image(std::move(im)),
+@@ -873,6 +875,36 @@
+                         twoSided ? "true" : "false", area, image);
+ }
+ 
++// open-cam: angular emission maps are shared by every DiffuseAreaLight of a mesh (one light
++// per triangle/patch), so each file is read once.
++static const Image *DiffuseAreaLightAngularMap(const std::string &filename,
++                                               const FileLoc *loc, Allocator alloc) {
++    static std::mutex mutex;
++    static std::map<std::string, const Image *> cache;
++    std::lock_guard<std::mutex> lock(mutex);
++    auto it = cache.find(filename);
++    if (it != cache.end())
++        return it->second;
++    ImageAndMetadata im = Image::Read(filename, alloc);
++    if (im.image.Resolution().x != im.image.Resolution().y)
++        ErrorExit(loc, "%s: angular map must be a square equal-area image.", filename);
++    ImageChannelDesc yDesc = im.image.GetChannelDesc({"Y"});
++    if (!yDesc)
++        ErrorExit(loc, "%s: angular map must have a \"Y\" channel.", filename);
++    if (im.image.HasAnyInfinitePixels() || im.image.HasAnyNaNPixels())
++        ErrorExit(loc, "%s: angular map has non-finite values.", filename);
++    Image *y = alloc.new_object<Image>(im.image.SelectChannels(yDesc, alloc));
++    Float maxValue = 0;
++    for (int py = 0; py < y->Resolution().y; ++py)
++        for (int px = 0; px < y->Resolution().x; ++px)
++            maxValue = std::max(maxValue, y->GetChannel({px, py}, 0));
++    if (maxValue > 1)
++        Warning(loc, "%s: angular map exceeds 1 (%f); light bounds will be too small.",
++                filename, maxValue);
++    cache[filename] = y;
++    return y;
++}
++
+ DiffuseAreaLight *DiffuseAreaLight::Create(const Transform &renderFromLight,
+                                            Medium medium,
+                                            const ParameterDictionary &parameters,
+@@ -882,6 +914,10 @@
+     Spectrum L = parameters.GetOneSpectrum("L", nullptr, SpectrumType::Illuminant, alloc);
+     Float scale = parameters.GetOneFloat("scale", 1);
+     bool twoSided = parameters.GetOneBool("twosided", false);
++    std::string angularFile =
++        ResolveFilename(parameters.GetOneString("angularfilename", ""));
++    const Image *angular =
++        angularFile.empty() ? nullptr : DiffuseAreaLightAngularMap(angularFile, loc, alloc);
+ 
+     std::string filename = ResolveFilename(parameters.GetOneString("filename", ""));
+     Image image(alloc);
+@@ -948,7 +984,7 @@
+ 
+     return alloc.new_object<DiffuseAreaLight>(renderFromLight, medium, L, scale, shape,
+                                               alphaTex, std::move(image), imageColorSpace,
+-                                              twoSided);
++                                              twoSided, angular);
+ }
+ 
+ // UniformInfiniteLight Method Definitions
+--- a/src/pbrt/lights.h
++++ b/src/pbrt/lights.h
+@@ -410,7 +410,8 @@
+     DiffuseAreaLight(const Transform &renderFromLight,
+                      const MediumInterface &mediumInterface, Spectrum Le, Float scale,
+                      const Shape shape, FloatTexture alpha, Image image,
+-                     const RGBColorSpace *imageColorSpace, bool twoSided);
++                     const RGBColorSpace *imageColorSpace, bool twoSided,
++                     const Image *angular = nullptr);
+ 
+     static DiffuseAreaLight *Create(const Transform &renderFromLight, Medium medium,
+                                     const ParameterDictionary &parameters,
+@@ -446,6 +447,15 @@
+         if (AlphaMasked(Interaction(p, uv)))
+             return SampledSpectrum(0.f);
+ 
++        // open-cam: "angularfilename" equal-area map (light-space directions) scaling the
++        // radiance with the emission direction, e.g. a signal lamp's beam shape.
++        Float a = 1;
++        if (angular) {
++            Vector3f wl = Normalize(renderFromLight.ApplyInverse(w));
++            a = angular->BilerpChannel(EqualAreaSphereToSquare(wl), 0,
++                                       WrapMode::OctahedralSphere);
++        }
++
+         if (image) {
+             // Return _DiffuseAreaLight_ emission using image
+             RGB rgb;
+@@ -453,10 +463,10 @@
+             for (int c = 0; c < 3; ++c)
+                 rgb[c] = image.BilerpChannel(uv, c);
+             RGBIlluminantSpectrum spec(*imageColorSpace, ClampZero(rgb));
+-            return scale * spec.Sample(lambda);
++            return a * scale * spec.Sample(lambda);
+ 
+         } else
+-            return scale * Lemit->Sample(lambda);
++            return a * scale * Lemit->Sample(lambda);
+     }
+ 
+     PBRT_CPU_GPU
+@@ -477,6 +487,7 @@
+     Float scale;
+     Image image;
+     const RGBColorSpace *imageColorSpace;
++    const Image *angular;
+ 
+     // DiffuseAreaLight Private Methods
+     PBRT_CPU_GPU

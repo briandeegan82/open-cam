@@ -120,7 +120,7 @@ def test_photometry_and_dynamic_range(built):
 
 
 def test_lamp_solve_hits_design_luminance(built):
-    """Direct road luminance at every zone centre, summed over all zones' lamps, equals the design value."""
+    """Direct + interreflected road luminance at every zone centre, summed over all zones' lamps, is the design value."""
     m = built["outside_in"]["meta"]
     zones = [
         {"zone": z["zone"], "z0": z["z_start_m"], "z1": z["z_end_m"], "spacing": z["luminaire_spacing_m"]}
@@ -133,7 +133,40 @@ def test_lamp_solve_hits_design_luminance(built):
     for zn, design in zip(zones, m["photometry"]["zones"]):
         pts = bts.zone_road_points(zn)
         e = sum(bts.direct_road_illuminance(pts, lamps, j).mean() * lamp_l[j] for j in lamp_l)
+        ind = m["luminaires"]["interreflected_road_luminance_cd_m2"][zn["zone"]]
+        assert 0.05 < ind / design["road_luminance_cd_m2"] < 0.25, zn["zone"]
+        assert rho * e / math.pi + ind == pytest.approx(design["road_luminance_cd_m2"], rel=1e-9), zn["zone"]
+
+
+def test_direct_lamp_solve_is_legacy(tmp_path):
+    """--luminaire-solve direct sizes the lamps for direct light only, brighter than the interreflection solve."""
+    m = _build(tmp_path, "--luminaire-solve", "direct")["outside_in"]["meta"]
+    assert m["luminaires"]["solve"] == "direct"
+    assert m["luminaires"]["interreflected_road_luminance_cd_m2"] is None
+    zones = [
+        {"zone": z["zone"], "z0": z["z_start_m"], "z1": z["z_end_m"], "spacing": z["luminaire_spacing_m"]}
+        for z in m["photometry"]["zones"]
+    ]
+    lamps = bts.luminaire_positions(zones)
+    lamp_l = m["luminaires"]["luminance_cd_m2"]
+    rho = m["photometry"]["road_luminous_reflectance"]["lamp"]
+    for zn, design in zip(zones, m["photometry"]["zones"]):
+        e = sum(bts.direct_road_illuminance(bts.zone_road_points(zn), lamps, j).mean() * lamp_l[j] for j in lamp_l)
         assert rho * e / math.pi == pytest.approx(design["road_luminance_cd_m2"], rel=1e-9), zn["zone"]
+
+
+def test_tube_radiosity_closed_enclosure_limit():
+    """Far from the portals a long tube is a closed enclosure: uniform albedo rho and uniform direct
+    irradiance E give E_ind = E rho / (1 - rho) on every surface (the bounce series rho + rho^2 + ...)."""
+    import tunnel_interreflection as ti
+
+    rho = 0.4
+    tube = ti.TubeRadiosity(bts.tube_profile(), lambda x: rho, rho, 600.0, rays=8192)
+    e_ind = tube.bounce(np.ones((len(tube.len), tube.nz)))
+    mid = e_ind[:, 250:350]
+    assert mid.mean() == pytest.approx(rho / (1 - rho), rel=0.01)
+    assert mid.min() > 0.97 * rho / (1 - rho)
+    assert e_ind[:, 0].mean() < 0.8 * mid.mean()  # light escapes through the portals
 
 
 def test_rois_inside_frame_and_nondegenerate(built):
@@ -237,6 +270,7 @@ def test_rtable_lamp_solve_hits_design_luminance(built_rtable):
     for zn, design in zip(zones, m["photometry"]["zones"]):
         pts = bts.zone_road_points(zn)
         lum = k * sum(bts.direct_road_luminance(pts, lamps, j, table).mean() * lamp_l[j] for j in lamp_l)
+        lum += m["luminaires"]["interreflected_road_luminance_cd_m2"][zn["zone"]]
         assert lum == pytest.approx(design["road_luminance_cd_m2"], rel=1e-9), zn["zone"]
 
 
@@ -323,3 +357,19 @@ def test_sky_portal_guide_off_and_validation(tmp_path):
     assert "guideportals" not in b["outside_in"]["scene"].read_text()
     with pytest.raises(ValueError):
         bts.sky_guide_lines(1.0, 40.0, 440.0)
+
+
+def test_zone_lengths_from_design_speed(tmp_path):
+    """80 km/h gives [S23]'s example lengths; the threshold grows with the stopping distance, the rest with v."""
+    th, tr, ex = bts.zone_lengths_for_speed(80.0)
+    assert th == pytest.approx(84.0) and tr == pytest.approx((72.0, 89.0, 133.0)) and ex == pytest.approx((30.0, 30.0))
+    th100, tr100, _ = bts.zone_lengths_for_speed(100.0)
+    assert th100 / th == pytest.approx(bts.stopping_distance(100.0) / bts.stopping_distance(80.0))
+    assert tr100[0] / tr[0] == pytest.approx(100.0 / 80.0)
+    m = _build(tmp_path, "--design-speed-kmh", "100", "--exit-distance", "120")["outside_in"]["meta"]
+    z = {zn["zone"]: zn["z_end_m"] - zn["z_start_m"] for zn in m["photometry"]["zones"]}
+    assert z["threshold_1"] + z["threshold_2"] == pytest.approx(th100)
+    assert z["transition_1"] == pytest.approx(tr100[0])
+    assert m["photometry"]["design_speed_kmh"] == 100.0
+    with pytest.raises(SystemExit):
+        bts.zone_lengths_for_speed(0.0)

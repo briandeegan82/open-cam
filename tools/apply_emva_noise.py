@@ -1716,19 +1716,19 @@ def main() -> None:
         dn_noisy = dn_noisy + black_dn
     hdr_run = None
     if hdr_pixel.hdr_enabled(cfg):
-        if cfa_layout is not None:
-            raise ValueError("hdr pixel modes are not yet supported with a generic cfa.layout")
+        if cfa_binning != "none":
+            raise ValueError("hdr pixel modes are not supported with cfa.binning (charge or digital)")
         if si_diffusion_on:
             raise ValueError("spatial_crosstalk.model silicon_diffusion is not yet supported for HDR captures")
 
         def _hdr_capture(p: Path) -> np.ndarray:
             e = load_electrons_npz(p.resolve())
             e = (apply_channel_crosstalk(e, crosstalk_matrix) if crosstalk_enabled else e) * exposure_scale
-            return (
-                apply_cfa_spatial_crosstalk(bayer_sample_rgb(e, bayer_pat), spatial_xtalk_cfg, bayer_pat)
-                if bayer_on
-                else e
-            )
+            if bayer_on:
+                return apply_cfa_spatial_crosstalk(bayer_sample_rgb(e, bayer_pat), spatial_xtalk_cfg, bayer_pat)
+            if cfa_layout is not None:
+                return apply_site_crosstalk(cfa_sample(e, cfa_layout), cfa_layout, spatial_xtalk_cfg)
+            return e
 
         hdr_base = {"K_e_per_DN": K_e_per_DN, "sigma_d_e": sigma_d_e, "full_well_e": full_well_e, "black_DN": black_dn}
         hdr_base |= {"bit_depth": bit_depth, "t_int_s": t_int_s, "dark_current_e_per_s": dark_current_e_per_s}
@@ -1741,6 +1741,7 @@ def main() -> None:
             spatial_seed=_spatial_seed,
             raw_out=raw_out,
             bayer_pattern=bayer_pat if bayer_on else None,
+            cfa_layout=cfa_layout,
             use_poisson=use_poisson,
             capture_paths=hdr_pixel.parse_capture_args(args.hdr_capture_electrons),
             capture_loader=_hdr_capture,
