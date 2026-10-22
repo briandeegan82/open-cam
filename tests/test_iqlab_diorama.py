@@ -138,3 +138,56 @@ def test_glass_roughness_is_opt_in(tmp_path):
     assert '"float roughness" [0.15]' in glass_line("--glass-roughness", "0.15")
     with pytest.raises(ValueError):
         dio.write_diorama(dio.build_parser().parse_args(["--out-dir", str(tmp_path), "--glass-roughness", "-0.1"]))
+
+
+def test_caustic_split_scenes(tmp_path):
+    args = ["--out-dir", str(tmp_path), "--caustics", "photons", "--pixelsamples", "64"]
+    meta = dio.write_diorama(dio.build_parser().parse_args([*args, "--caustic-photons", "1000"]))
+    path = (tmp_path / "iq_diorama.pbrt").read_text()
+    caustic = (tmp_path / "iq_diorama_caustics.pbrt").read_text()
+    assert 'Integrator "volpath" "integer maxdepth" [6] "bool skipcaustics" true\n' in path
+    assert "regularize" not in path
+    assert '"bool causticsonly" true "integer photonsperiteration" [1000] "float radius" [0.005]' in caustic
+    split = meta["caustic_split"]
+    assert f'"{split["path_output"]}"' in path and f'"{split["caustic_output"]}"' in caustic
+    assert meta["film_output"] == "iq_diorama_spectral.exr" and split["caustic_iterations"] == 64
+    # the two scenes differ only in sampler count, integrator and output name
+    differ = [a for a, b in zip(path.splitlines(), caustic.splitlines()) if a != b]
+    assert len(differ) == 2 and len(path.splitlines()) == len(caustic.splitlines())
+    for bad in (["--integrator", "sppm"], ["--film", "rgb"], ["--caustic-radius", "0"]):
+        with pytest.raises(ValueError):
+            dio.write_diorama(dio.build_parser().parse_args([*args, *bad]))
+
+
+@pytest.mark.skipif(not PBRT.is_file(), reason="pbrt binary not built")
+def test_caustic_split_sums_to_volpath(tmp_path):
+    """volpath "skipcaustics" + sppm "causticsonly" (patch 0021) = plain volpath, per bucket."""
+    import combine_caustics
+
+    base = ["--xres", "60", "--yres", "40", "--spectral-nbuckets", "8"]
+    ref = tmp_path / "ref"
+    meta = dio.write_diorama(dio.build_parser().parse_args(["--out-dir", str(ref), *base, "--pixelsamples", "256"]))
+    scene = ref / "iq_diorama.pbrt"
+    scene.write_text(scene.read_text().replace(' "bool regularize" true', ""))
+    subprocess.run([str(PBRT), "--quiet", "--seed", "1", scene.name], cwd=ref, check=True, timeout=600)
+    vol, vb = _spectral_exr(ref / meta["film_output"])
+    split = tmp_path / "split"
+    args = [
+        "--out-dir",
+        str(split),
+        *base,
+        "--pixelsamples",
+        "256",
+        "--caustics",
+        "photons",
+        "--caustic-photons",
+        "20000",
+    ]
+    dio.write_diorama(dio.build_parser().parse_args(args))
+    combine_caustics.render(split, PBRT, ["--seed", "2"])
+    tot, sb = _spectral_exr(split / "iq_diorama_spectral.exr")
+    caus, _ = _spectral_exr(split / "iq_diorama_spectral_caustics.exr")
+    assert sb == vb and all(np.isfinite(tot[c]).all() for c in tot)
+    assert sum(caus[c].mean() for c in sb) > 0
+    ratio = np.array([tot[c].mean() / vol[c].mean() for c in vb])
+    assert np.all(np.abs(ratio - 1) < 0.05), ratio
