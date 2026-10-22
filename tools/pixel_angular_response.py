@@ -250,6 +250,119 @@ def pixel_response(
     return np.einsum("xnkq,ynkq,n->yxk", fx, fy, w) / norm
 
 
+NB_KEYS = {-1: "m1", 0: "0", 1: "p1"}
+
+
+def _angles_deg(a: np.ndarray, b: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Direction cosines -> projected angles atan(a/c), atan(b/c) [deg] (c = z cosine)."""
+    c = np.sqrt(np.clip(1.0 - a * a - b * b, 1e-12, None))
+    return np.degrees(np.arctan2(a, c)), np.degrees(np.arctan2(b, c))
+
+
+def _cosines(ax_deg: np.ndarray, ay_deg: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    tx, ty = np.tan(np.radians(ax_deg)), np.tan(np.radians(ay_deg))
+    c = 1.0 / np.sqrt(1.0 + tx * tx + ty * ty)
+    return tx * c, ty * c
+
+
+class ResponseTable:
+    """Pixel angular response from a wave-optics (FDTD/RCWA) or measured table.
+
+    CSV columns ``wavelength_nm, angle_x_deg, angle_y_deg, own`` and optionally the neighbour
+    windows ``n_<ky>_<kx>`` (``ky, kx`` in ``m1, 0, p1``): the absolute fraction of a collimated
+    plane wave at projected air angles ``(atan(a/c), atan(b/c))`` collected by the pixel's own
+    window and its neighbours, for an unshifted microlens. The rows must fill a regular grid.
+    Interpolation is multilinear; angles outside the grid are clamped to its edge."""
+
+    def __init__(self, path: Path) -> None:
+        d = np.genfromtxt(path, delimiter=",", names=True, comments="#")
+        names = d.dtype.names or ()
+        for k in ("wavelength_nm", "angle_x_deg", "angle_y_deg", "own"):
+            if k not in names:
+                raise ValueError(f"{path}: pixel response table needs column {k!r}")
+        self.path = str(path)
+        self.lam, self.ax, self.ay = (np.unique(d[k]) for k in ("wavelength_nm", "angle_x_deg", "angle_y_deg"))
+        shape = (self.lam.size, self.ax.size, self.ay.size)
+        if d.size != int(np.prod(shape)):
+            raise ValueError(f"{path}: {d.size} rows do not fill the {shape} wavelength x angle_x x angle_y grid")
+        il = np.searchsorted(self.lam, d["wavelength_nm"])
+        ix = np.searchsorted(self.ax, d["angle_x_deg"])
+        iy = np.searchsorted(self.ay, d["angle_y_deg"])
+        self.data = np.zeros((*shape, 3, 3))
+        self.neighbours = []
+        for ky in (-1, 0, 1):
+            for kx in (-1, 0, 1):
+                col = "own" if ky == kx == 0 else f"n_{NB_KEYS[ky]}_{NB_KEYS[kx]}"
+                if col in names:
+                    self.data[il, ix, iy, 1 + ky, 1 + kx] = d[col]
+                    if col != "own":
+                        self.neighbours.append(col)
+
+    def _interp(self, lam: np.ndarray, ax: np.ndarray, ay: np.ndarray) -> np.ndarray:
+        from scipy.interpolate import RegularGridInterpolator  # noqa: PLC0415
+
+        axes = (self.lam, self.ax, self.ay)
+        pts = [np.clip(v, g[0], g[-1]) for v, g in zip((lam, ax, ay), axes, strict=True)]
+        if any(g.size == 1 for g in axes):  # a single wavelength or angle: no interpolation along it
+            keep = [i for i, g in enumerate(axes) if g.size > 1]
+            data = self.data.reshape(*[g.size for g in axes], 3, 3)[
+                tuple(slice(None) if g.size > 1 else 0 for g in axes)
+            ]
+            if not keep:
+                return np.broadcast_to(data, (*np.shape(pts[0]), 3, 3)).copy()
+            f = RegularGridInterpolator([axes[i] for i in keep], data)
+            return f(np.stack([pts[i] for i in keep], -1))
+        return RegularGridInterpolator(axes, self.data)(np.stack(pts, -1))
+
+    def response(self, a, b, weights, design_dir: tuple[float, float], lambdas_nm) -> np.ndarray:
+        """Collected fractions [3, 3, K] like :func:`pixel_response`. A shifted microlens is
+        approximated by shifting the table's angles by the design chief ray ``design_dir`` (air
+        direction cosines): the table is for an unshifted pixel."""
+        a = np.atleast_1d(np.asarray(a, dtype=np.float64))
+        b = np.atleast_1d(np.asarray(b, dtype=np.float64))
+        w = np.atleast_1d(np.asarray(weights, dtype=np.float64))
+        lam = np.atleast_1d(np.asarray(lambdas_nm, dtype=np.float64))
+        if a.size == 0 or float(np.sum(w)) <= 0.0:
+            return np.zeros((3, 3, lam.size))
+        ax, ay = _angles_deg(a, b)
+        dx, dy = _angles_deg(np.array([design_dir[0]]), np.array([design_dir[1]]))
+        ax, ay = ax - dx[0], ay - dy[0]
+        L, X = np.meshgrid(lam, ax, indexing="ij")
+        _, Y = np.meshgrid(lam, ay, indexing="ij")
+        r = self._interp(L, X, Y)  # [K, N, 3, 3]
+        return np.einsum("knyx,n->yxk", r, w) / float(np.sum(w))
+
+    def normal_incidence(self, lambdas_nm) -> np.ndarray:
+        lam = np.atleast_1d(np.asarray(lambdas_nm, dtype=np.float64))
+        return self._interp(lam, np.zeros_like(lam), np.zeros_like(lam))[:, 1, 1]
+
+
+def export_response_table(path: Path, stack: PixelStack, lambdas_nm, angles_deg, *, repo: Path | None = None) -> Path:
+    """Write the geometric model's collimated response in the :class:`ResponseTable` format (a
+    template for wave-optics results, and a round-trip check)."""
+    lam = np.atleast_1d(np.asarray(lambdas_nm, dtype=np.float64))
+    ang = np.atleast_1d(np.asarray(angles_deg, dtype=np.float64))
+    cols = ["own"] + [f"n_{NB_KEYS[ky]}_{NB_KEYS[kx]}" for ky in (-1, 0, 1) for kx in (-1, 0, 1) if ky or kx]
+    rows = []
+    for gx in ang:
+        for gy in ang:
+            a, b = _cosines(np.array([gx]), np.array([gy]))
+            r = pixel_response(a, b, np.ones(1), (0.0, 0.0), lam, stack, repo=repo)
+            for k, lk in enumerate(lam):
+                vals = [r[1, 1, k]] + [r[1 + ky, 1 + kx, k] for ky in (-1, 0, 1) for kx in (-1, 0, 1) if ky or kx]
+                rows.append([lk, gx, gy, *vals])
+    path = Path(path)
+    np.savetxt(
+        path,
+        np.array(rows),
+        delimiter=",",
+        fmt="%.6g",
+        header="wavelength_nm,angle_x_deg,angle_y_deg," + ",".join(cols),
+        comments="",
+    )
+    return path
+
+
 def normal_incidence_response(lambdas_nm: np.ndarray, stack: PixelStack, *, repo: Path | None = None) -> np.ndarray:
     """Own-window collection [K] for a collimated normal beam on an unshifted pixel (QE reference)."""
     return pixel_response(np.zeros(1), np.zeros(1), np.ones(1), (0.0, 0.0), lambdas_nm, stack, repo=repo)[1, 1]
@@ -497,6 +610,11 @@ def compute_maps(
     geometry = dict(geometry or {})
     lens = lens_cfg or {}
     stack = PixelStack.from_config(cfg.get("stack"), pitch_um)
+    rt_path = cfg.get("response_table")
+    rtab = None
+    if rt_path:
+        rp = Path(rt_path)
+        rtab = ResponseTable(rp if rp.is_absolute() else repo / rp)
     shift_cfg = dict(cfg.get("microlens_shift") or {"mode": "matched"})
     shift_mode = str(shift_cfg.get("mode", "matched")).lower()
     source = incidence_source(cfg, lens, geometry)
@@ -573,7 +691,10 @@ def compute_maps(
             s_air = math.sin(math.radians(design[iy, ix]))
             tdx, tdy = stack_tangents(np.array([s_air * az[0]]), np.array([s_air * az[1]]), stack.stack_index)
             shift = (-stack.stack_height_um * float(tdx[0]), -stack.stack_height_um * float(tdy[0]))
-            resp = pixel_response(a, b, w, shift, lam, stack, repo=repo)
+            if rtab is not None:
+                resp = rtab.response(a, b, w, (s_air * az[0], s_air * az[1]), lam)
+            else:
+                resp = pixel_response(a, b, w, shift, lam, stack, repo=repo)
             if ircf_curve is not None:
                 fac = ircf_angle_factor(a, b, w, lam, *ircf_curve, n_eff)
                 ir_min = min(ir_min, float(fac.min()))
@@ -582,7 +703,7 @@ def compute_maps(
             nb[iy, ix] = resp
     norm_mode = str(cfg.get("normalize", "normal_incidence")).lower()
     if norm_mode == "normal_incidence":
-        ref = normal_incidence_response(lam, stack, repo=repo)
+        ref = rtab.normal_incidence(lam) if rtab is not None else normal_incidence_response(lam, stack, repo=repo)
     elif norm_mode == "center":
         ref = _bilinear_point(own, rows_px, cols_px, cy, cx)
     else:
@@ -602,6 +723,13 @@ def compute_maps(
             "own_max": float(own.max()),
         }
     )
+    if rtab is not None:
+        meta["response_table"] = {
+            "path": rtab.path,
+            "grid": [int(rtab.lam.size), int(rtab.ax.size), int(rtab.ay.size)],
+            "neighbours": rtab.neighbours,
+            "microlens_shift": "approximated as an angle offset by the design chief ray",
+        }
     if ircf_curve is not None:
         meta["ircf_angle_shift"] = {"n_eff": n_eff, "ircf_csv": str(ir_cfg["ircf_csv"]), "min_factor": ir_min}
     return AngularResponseMaps(rows_px, cols_px, own, nb, cra, design, psa, hn, meta)

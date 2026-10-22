@@ -11,6 +11,7 @@ import apply_emva_noise
 import numpy as np
 import pbrt_spectral_exr_to_electrons as pbrt_tool
 import pixel_angular_response as par
+import pytest
 from lens_prescription import traced_f_number
 from sensor_radiometry import integrate_spectral_planes
 from synthetic_data import REPO, SPECTRAL_LAMBDAS_NM, write_gaussian_qe, write_spectral_exr
@@ -330,3 +331,26 @@ class TestPipelineHook(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_response_table_round_trip_matches_geometric_model(tmp_path):
+    import pixel_angular_response as par
+
+    stack = par.PixelStack(pitch_um=1.4)
+    lam = np.array([450.0, 550.0, 650.0])
+    path = par.export_response_table(tmp_path / "t.csv", stack, lam, np.arange(-30.0, 30.01, 1.0))
+    tab = par.ResponseTable(path)
+    assert tab.data.shape == (3, 61, 61, 3, 3) and len(tab.neighbours) == 8
+    np.testing.assert_allclose(tab.normal_incidence(lam), par.normal_incidence_response(lam, stack), rtol=1e-5)
+    a, b, w = par.cone_directions(15.0, (0.6, 0.8), 1 / (2 * 2.8), 16)
+    geo = par.pixel_response(a, b, w, (0.0, 0.0), lam, stack)
+    np.testing.assert_allclose(tab.response(a, b, w, (0.0, 0.0), lam), geo, atol=0.01 * geo[1, 1].max())
+
+
+def test_response_table_rejects_a_ragged_grid(tmp_path):
+    import pixel_angular_response as par
+
+    p = tmp_path / "bad.csv"
+    p.write_text("wavelength_nm,angle_x_deg,angle_y_deg,own\n550,0,0,0.5\n550,10,0,0.4\n550,0,10,0.4\n")
+    with pytest.raises(ValueError, match="regular|fill"):
+        par.ResponseTable(p)
