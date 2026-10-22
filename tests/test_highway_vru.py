@@ -181,6 +181,37 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class TestRiderLamps(unittest.TestCase):
+    def args(self, **kw):
+        base = {"vru": "cyclist", "vru_lamps": "auto", "time_of_day": "night", "vru_distance_m": 30.0}
+        return argparse.Namespace(**{**base, "vru_gait_phase": 0.25, "vru_bike": None, **kw})
+
+    def test_auto_on_at_night_for_riders_only(self) -> None:
+        self.assertTrue(vru.lamps_on(self.args()))
+        self.assertFalse(vru.lamps_on(self.args(time_of_day="day")))
+        self.assertFalse(vru.lamps_on(self.args(vru="pedestrian")))
+        self.assertFalse(vru.lamps_on(self.args(vru_lamps="off")))
+        with self.assertRaises(SystemExit):
+            vru.check_args(self.args(vru_lamps="on", time_of_day="day"))
+
+    def test_lamp_intensities_and_directions(self) -> None:
+        for aid, kind in (
+            (None, "bicycle"),
+            ("bike_ardis_verona", "bicycle"),
+            ("moto_80s", "motor"),
+            ("kickscooter_electric", "bicycle"),
+        ):
+            lines, meta = vru.lamp_lines(aid)
+            self.assertEqual(meta["kind"], kind)
+            self.assertGreater(meta["front"]["position_m"][2], meta["rear"]["position_m"][2])
+            for name in ("front", "rear"):
+                cd, (w, h) = vru.VRU_LAMPS[kind][name]
+                self.assertEqual(meta[name]["intensity_cd"], cd)
+            text = "\n".join(lines)
+            self.assertIn("lamp_white_led", text)
+            self.assertIn("lamp_red_led", text)
+
+
 class TestMotion(unittest.TestCase):
     def test_static_without_exposure(self) -> None:
         with tempfile.TemporaryDirectory() as td:

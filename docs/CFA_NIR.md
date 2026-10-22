@@ -69,7 +69,11 @@ model. Example: [`config/examples/cfa_custom_layout.yaml`](../config/examples/cf
 
 ### Not modelled / approximations
 
-* HDR pixel modes (DCG / split pixel / LOFIC / multi-exposure) run only on the legacy Bayer/RGB path; combining them with a generic `cfa.layout` raises an error.
+* HDR pixel modes (DCG / split pixel / LOFIC / multi-exposure) run on a generic `cfa.layout`:
+  each capture is sampled into the mosaic (with site crosstalk) and merged per site. Not with
+  `cfa.binning` (charge or digital) or the `silicon_diffusion` crosstalk model, which raise an
+  error. A per-channel split-pixel ratio (`sensitivity_ratio_rgb`) only maps R, G and B sites;
+  a layout with C, W, Ye, Cy, IR or other channels must use the scalar `sensitivity_ratio`.
 * The X-Rite ColorChecker (`spectra/xrite`, 380-730 nm) and the skin chart built from its
   light-skin patch have no public measured NIR data; pbrt holds each patch at its 730 nm value, so
   their no-IRCF, clear-channel and 850/940 nm results are extrapolations. Use the measured

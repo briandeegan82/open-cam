@@ -107,6 +107,13 @@ def add_args(ap: argparse.ArgumentParser) -> None:
         help="Riders: handlebar angle about the steering axis (+ = left). Procedural bicycle only; imported "
         "models are single meshes and keep straight bars.",
     )
+    g.add_argument(
+        "--vru-lamps",
+        choices=("auto", "on", "off"),
+        default="auto",
+        help="Front (white) and rear (red) lamps of a ridden two-wheeler; auto = on at dusk/night (nominal "
+        "intensities, Lambertian, no road beam).",
+    )
     g.add_argument("--vru-obstruction", choices=("none", "parked-cars"), default="none")
     g.add_argument("--vru-clothing", choices=sorted(CLOTHING), default="ncap")
     g.add_argument("--vru-skin-tau", type=float, default=0.35, help="Melanin optical depth (iqlab.skin).")
@@ -139,6 +146,8 @@ def check_args(args: argparse.Namespace) -> None:
         raise SystemExit("--vru-turn-radius-m: |R| must be >= 2 m")
     if not enabled(args):
         return
+    if getattr(args, "vru_lamps", "auto") == "on" and getattr(args, "time_of_day", "day") == "day":
+        raise SystemExit("--vru-lamps on needs --time-of-day dusk or night")
     if args.vru_distance_m <= 2.0:
         raise SystemExit("--vru-distance-m must be > 2 m")
     if not 0.0 <= args.vru_gait_phase < 1.0:
@@ -600,6 +609,46 @@ def clear_traffic(args, traffic: list[tuple]) -> tuple[list[tuple], list[dict]]:
     return keep, removed
 
 
+# Nominal on-axis intensities [cd] and lens sizes (w, h) [m]; not checked against StVZO / UN R50 / R113.
+VRU_LAMPS = {
+    "bicycle": {"front": (1000.0, (0.05, 0.03)), "rear": (4.0, (0.04, 0.03))},
+    "motor": {"front": (1000.0, (0.16, 0.12)), "rear": (6.0, (0.10, 0.05))},
+}
+
+
+def lamps_on(args) -> bool:
+    mode = getattr(args, "vru_lamps", "auto")
+    return args.vru in RIDERS and (mode == "on" or (mode == "auto" and getattr(args, "time_of_day", "day") != "day"))
+
+
+def lamp_positions(aid: str | None) -> tuple[str, np.ndarray, np.ndarray]:
+    """Kind and (front, rear) lamp centres in the target frame (+z forward); estimates from the contact points."""
+    if aid is None:  # procedural bicycle: head tube top and below the saddle
+        return "bicycle", np.array([0.0, 0.96, 0.48]), np.array([0.0, 0.78, -0.43])
+    seat, (gz, gy, _), (fz, fy, _) = tw.RIDER[aid]
+    if seat is None:  # kick e-scooter: stem lamp below the grips, rear lamp at the back of the deck
+        return "bicycle", np.array([0.0, gy - 0.35, gz + 0.05]), np.array([0.0, fy + 0.05, fz - 0.35])
+    sz, sy = seat
+    if tw.MODELS[aid][0] == "bicycle":
+        return "bicycle", np.array([0.0, gy - 0.10, gz + 0.10]), np.array([0.0, sy - 0.12, sz - 0.20])
+    return "motor", np.array([0.0, gy - 0.10, gz + 0.15]), np.array([0.0, sy - 0.05, sz - 0.55])
+
+
+def lamp_lines(aid: str | None) -> tuple[list[str], dict]:
+    from highway_night import _quad_light
+
+    kind, front, rear = lamp_positions(aid)
+    out, meta = [], {"kind": kind}
+    for name, p, sign, spd in (
+        ("front", front, 1.0, "spd/lamp_white_led.spd"),
+        ("rear", rear, -1.0, "spd/lamp_red_led.spd"),
+    ):
+        cd, (w, h) = VRU_LAMPS[kind][name]
+        out += _quad_light(tuple(p), (sign * w / 2, 0, 0), (0, h / 2, 0), spd, cd / (w * h))  # I(0) = L A
+        meta[name] = {"intensity_cd": cd, "position_m": p.round(3).tolist(), "lens_m": [w, h]}
+    return out, meta
+
+
 def scene_lines(
     args,
     road_edge_x: float,
@@ -674,6 +723,10 @@ def scene_lines(
         *place(x, 0.0, z),
     ]
     L += [f"Rotate {yaw:.6g} 0 1 0"]
+    lamp_meta = None
+    if lamps_on(args):  # pbrt cannot move area lights: the lamps stay at the shutter-open position
+        ll, lamp_meta = lamp_lines(args.vru_bike if bike is not None else None)
+        L += ["AttributeBegin", *([f"Rotate {-lean:.6g} 0 0 1"] if lean else []), *ll, "AttributeEnd"]
     if v > 0:  # rigid motion along the target's heading (local +z) during the exposure
         L += ["ActiveTransform EndTime", f"Translate 0 0 {v * span:.6g}", "ActiveTransform All"]
     if lean:  # roll about the tyre contact line (local z through the origin); + = top to the rider's left (+x)
@@ -720,6 +773,7 @@ def scene_lines(
         "bbox_world_m": [world.min(0).round(4).tolist(), world.max(0).round(4).tolist()],
         "triangles": int(sum(len(t) for v in parts.parts.values() for _, t, _ in v)),
         "obstruction": obstruction,
+        "lamps": lamp_meta,
         "static": v == 0,
         "speed_kmh": round(v * 3.6, 4),
         "velocity_world_mps": [round(v * s_, 6), 0.0, round(v * c, 6)],
