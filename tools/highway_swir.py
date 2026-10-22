@@ -172,7 +172,12 @@ def manifest(args: argparse.Namespace) -> dict:
     return {
         "lambda_max_nm": float(args.spectral_lambda_max),
         "sun": f"ASTM G173-03 direct shape above {JOIN_NM:g} nm (pvlib copy, BSD-3)",
-        "sky": f"CIE daylight basis extended with the G173 diffuse (global - direct) shape above {JOIN_NM:g} nm",
+        "sky": (
+            f"CIE daylight basis extended with the G173 diffuse (global - direct) shape above {JOIN_NM:g} nm"
+            if getattr(args, "sky", None) != "prague"
+            else "Prague sky model SWIR channels: one least-squares tail per daylight basis spectrum "
+            "(lighting.sky.spectral.swir_tails; G173 diffuse if the dataset stops at 830 nm)"
+        ),
         "vegetation": f"USGS splib07a fresh oak leaf ({LEAF_CSV}) above {LEAF_JOIN_NM:g} nm",
         "surfaces": {k: f"USGS splib07a {v} shape above {JOIN_NM:g} nm" for k, v in SURFACE_PROXIES.items()},
         "surface_note": "paint/sheeting proxies are pigmented polymers or painted aluminium, not the real materials",

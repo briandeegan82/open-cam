@@ -281,6 +281,45 @@ def prague_xyz_map(
     return out
 
 
+def prague_swir_tails(
+    n: int,
+    sun_elevation_deg: float,
+    w: np.ndarray,
+    dataset: str | os.PathLike | None,
+    visibility_km: float,
+    albedo: float,
+    lambda_max: float,
+    stride: int = 7,
+) -> dict | None:
+    """SWIR tails for the three daylight basis spectra from the Prague channels above 830 nm.
+
+    The map stores 3 weights per pixel, so each basis spectrum k gets one tail T_k chosen by least
+    squares over the dome (every ``stride``-th pixel) to make sum_k w_k T_k match the model's SWIR
+    channels. The model-to-basis scale comes from the 700-830 nm channels. None if the dataset has
+    no channels above 830 nm.
+    """
+    from prague_sky import PragueSky
+
+    sky = PragueSky(dataset)
+    e = sky.channel_edges_nm
+    swir = np.nonzero((e[:-1] >= 830.0) & (e[:-1] < lambda_max))[0]
+    ref = np.nonzero((e[:-1] >= 700.0) & (e[1:] <= 830.0))[0]
+    if swir.size == 0 or ref.size == 0:
+        return None
+    d = equal_area_directions(n)
+    up = d[..., 2] > 0.0
+    dirs, wts = d[up][::stride], w[up][::stride]
+    rad = sky.radiance(dirs, sun_elevation_deg, visibility_km, albedo, channels=np.concatenate([ref, swir]))
+    bwl, b = basis_spectra()
+    bref = np.stack([b[:, (bwl >= e[k]) & (bwl < e[k + 1])].mean(1) for k in ref], 1)
+    pred = wts @ bref
+    scale = float((pred * rad[:, : ref.size]).sum() / max(float((pred * pred).sum()), 1e-30))
+    target = rad[:, ref.size :] / scale
+    tails = np.clip(np.linalg.lstsq(wts, target, rcond=None)[0], 0.0, None)
+    rms = float(np.linalg.norm(wts @ tails - target) / max(float(np.linalg.norm(target)), 1e-30))
+    return {"centres_nm": sky.channel_centres_nm[swir], "tails": tails, "fit_relative_rms": rms}
+
+
 def write_weight_exr(path: Path, w: np.ndarray) -> None:
     """Basis-weight map as a float EXR with channels B0..B{K-1} (pbrt patch convention)."""
     import OpenEXR
@@ -301,14 +340,20 @@ def read_weight_exr(path: Path) -> np.ndarray:
         return np.stack([np.asarray(ch[f"B{i}"].pixels, float) for i in range(k)], -1)
 
 
-def write_basis_spds(spd_dir: Path, prefix: str = "sky_basis", lambda_max: float | None = None) -> list[Path]:
+def write_basis_spds(
+    spd_dir: Path, prefix: str = "sky_basis", lambda_max: float | None = None, tails: dict | None = None
+) -> list[Path]:
     """Write the unit-luminance basis spectra as pbrt .spd files; returns their paths.
 
-    ``lambda_max`` beyond the CIE table's 830 nm extends them with the G173 diffuse-sky shape
-    (tools/highway_swir.py).
+    ``lambda_max`` beyond the CIE table's 830 nm extends them with ``tails`` (prague_swir_tails) or
+    else the G173 diffuse-sky shape (tools/highway_swir.py).
     """
     wl, b = basis_spectra()
-    if lambda_max is not None and lambda_max > wl[-1]:
+    if tails is not None and lambda_max is not None and lambda_max > wl[-1]:
+        extra = np.arange(wl[-1] + 5.0, lambda_max + 1e-9, 5.0)
+        tb = np.stack([np.interp(extra, tails["centres_nm"], t) for t in tails["tails"]])
+        wl, b = np.concatenate([wl, extra]), np.concatenate([b, tb], axis=1)
+    elif lambda_max is not None and lambda_max > wl[-1]:
         import highway_swir
 
         wl, b = highway_swir.extend_sky_basis(wl, b, lambda_max)
@@ -376,6 +421,9 @@ def spectral_sky_light(args, sky_file: Path, elev: float, out_dir: Path, spd_dir
     """
     if args.sky not in ("hosek", "prague") and args.sky_spectrum == "rgb":
         return None
+    import highway_swir
+
+    swir_tails = None
     tex = out_dir / "textures"
     info: dict = {"basis": "CIE daylight S0 + M1 S1 + M2 S2 (doi:10.25039/CIE.DS.w7zunnny)"}
     info["basis_m1_m2"] = BASIS_M.tolist()
@@ -408,6 +456,10 @@ def spectral_sky_light(args, sky_file: Path, elev: float, out_dir: Path, spd_dir
         c = xyz_to_coeffs(prague_xyz_map(HOSEK_MAP_SIZE, elev, ds, vis, HOSEK_GROUND_ALBEDO))
         w = coeffs_to_weights(c)
         write_weight_exr(f, w)
+        if highway_swir.enabled(args):
+            swir_tails = prague_swir_tails(
+                HOSEK_MAP_SIZE, elev, w, ds, vis, HOSEK_GROUND_ALBEDO, args.spectral_lambda_max
+            )
         desc = f"Prague sky model (visibility {vis:g} km) on a CIE daylight basis"
         info |= {
             "model": "Prague sky model ground-level radiance -> daylight-model spectrum with the same XYZ per pixel",
@@ -419,8 +471,18 @@ def spectral_sky_light(args, sky_file: Path, elev: float, out_dir: Path, spd_dir
         approx = (
             "Sky radiance: Prague sky model (Wilkie et al. 2021; 40 nm channels, user-supplied dataset) "
             "represented by its CIE daylight-model metamer per pixel; absolute level from the builder's "
-            "clear-sky fit; wavelengths above 830 nm are not rendered."
+            "clear-sky fit; "
+            + (
+                "above 830 nm, one least-squares tail per basis spectrum from the model's SWIR channels."
+                if swir_tails
+                else "wavelengths above 830 nm use the G173 diffuse shape."
+            )
         )
+        if swir_tails:
+            info["swir_tails"] = {
+                "channels_nm": [float(c) for c in swir_tails["centres_nm"]],
+                "fit_relative_rms": round(swir_tails["fit_relative_rms"], 4),
+            }
     else:
         f = tex / f"{sky_file.stem}_daylight.exr"
         c = xyz_to_coeffs(rgb_to_xyz(read_rgb_exr(sky_file)))
@@ -435,9 +497,8 @@ def spectral_sky_light(args, sky_file: Path, elev: float, out_dir: Path, spd_dir
     up = equal_area_directions(w.shape[0])[..., 2] > 0.0
     info["out_of_gamut_luminance_fraction"] = round(out_of_gamut_fraction(c[up]), 4)
     info |= sky_colour_summary(w)
-    import highway_swir
-
-    spds = write_basis_spds(spd_dir, lambda_max=args.spectral_lambda_max if highway_swir.enabled(args) else None)
+    lmax = args.spectral_lambda_max if highway_swir.enabled(args) else None
+    spds = write_basis_spds(spd_dir, lambda_max=lmax, tails=swir_tails)
     rel = [Path(os.path.relpath(p, out_dir)).as_posix() for p in spds]
     info["spectra"] = rel
     return {

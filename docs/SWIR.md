@@ -83,9 +83,38 @@ extended with the G173 diffuse shape (an RGB sky map is switched to `--sky-spect
 pbrt's RGB upsampling is zero above 830 nm), and grass/leaves follow the measured USGS fresh oak
 leaf above 800 nm. Visible spectra are unchanged. `--film-lambda-min/max` set the rendered band (an
 ideal passband, here 900-1600 nm) while the spectra keep the visible part that the photometric
-`illuminance` normalisation needs. Car/road paint and sign sheeting stay analytic, flat above 830 nm.
+`illuminance` normalisation needs. Car/road paint and sign sheeting stay analytic below 830 nm (SWIR tails: see below).
 
 ![Highway, visible vs SWIR 900-1600 nm](images/highway_vis_vs_swir_900_1600.jpg)
+
+## Prague SWIR sky
+
+With `--sky prague` and a SWIR dataset (`PragueSkyModelDatasetSWIR.dat`, 280-2480 nm, 40 nm
+channels; user-downloaded, not redistributable; see `tools/prague_sky.py`), the sky above 830 nm
+comes from the model instead of the G173 diffuse shape. The sky map stores three daylight-basis
+weights per pixel, so each basis spectrum gets one SWIR tail, fitted by least squares over the dome
+so that the per-pixel mix matches the model's SWIR channels (scale from the 700-830 nm channels).
+The manifest records the fit residual (`lighting.sky.spectral.swir_tails.fit_relative_rms`); a sky
+whose SWIR colour varies independently of its visible colour is only matched on average. The test
+uses a synthetic dataset; the real one is never committed.
+
+## Lens transmission
+
+`tools/lens_glass.py <lens>.dat --out t.csv [--coating uncoated|mgf2|qhq --design-nm 550]` writes
+a lens's on-axis transmittance to 2500 nm for `calibration.optics_transmittance_csv`: the SCHOTT
+internal transmittance (TAUI10 now to 2500 nm) over each element's centre thickness times the
+normal-incidence transmittance of every surface, from the `<lens>.glass.yaml` glasses. For
+`config/lenses/wide_22mm.dat`:
+
+| | 550 nm | 900 nm | 1550 nm | 2000 nm | 2500 nm |
+|---|---|---|---|---|---|
+| uncoated | 0.53 | 0.55 | 0.55 | 0.50 | 0.24 |
+| MgF2 @ 550 nm | 0.85 | 0.73 | 0.60 | 0.52 | 0.24 |
+| QHQ @ 550 nm | 1.00 | 0.39 | 0.16 | 0.15 | 0.09 |
+
+A visible broadband AR coating loses most of the SWIR, and the glasses absorb above 2 um. The
+coatings are idealised (`tools/lens_coatings.py`); real lens coatings and off-axis paths are not
+modelled, and the pbrt `realistic` camera itself does not attenuate.
 
 ## SWIR surfaces, lamps and path absorption (highway)
 
@@ -125,6 +154,4 @@ With SWIR enabled (`--spectral-lambda-max` > 830 nm), `tools/highway_swir.py` al
 
 ## Not yet SWIR-aware
 
-The Prague SWIR sky (280-2480 nm, user-downloaded; see `tools/prague_sky.py`) is not wired in
-above 830 nm, and lens glass / coating transmission is not modelled. The night sky (OH airglow)
-and moonlight are not extended past 830 nm.
+The night sky (OH airglow) and moonlight are not extended past 830 nm.
