@@ -615,12 +615,36 @@ and the transport is unbiased. Thin regions only cost extra null collisions.
 `tests/test_fog_patchy.py` checks the map and a pbrt transmittance through a bank against
 exp(-sigma * integral of m).
 
-`--haze-phase mixed` (opt-in) replaces the single effective Henyey-Greenstein lobe with the
-physical mixture `p = w_R p_Rayleigh + (1 - w_R) p_HG(g)`, `w_R = sigma_R / sigma_s` at 550 nm
-(pbrt patch 0011, medium parameter `"float rayleighfraction"`). Both modes have the same mean
-cosine; the mixture puts more light into side and back scatter in clear air (w_R 0.12 for
-`clear`, 0.03 `hazy`, ~0 in `mist`/`fog`). pbrt's phase function is wavelength-independent, so
-w_R is fixed at its 550 nm value. The
+`--haze-phase two-component` (opt-in) treats the air molecules and the aerosol as two media
+in one: the aerosol keeps the preset profile and HG g, and the molecules get their own density
+grid, exp(-y / 8434 m) (the US Standard Atmosphere 1976 scale height at 288 K), with a Rayleigh
+phase function (pbrt patch 0019: `"float rayleighdensity"` and `"spectrum sigma_rayleigh"` on
+`uniformgrid`). At each point pbrt mixes the two phase functions by the local share of
+scattering at 550 nm, so the Rayleigh share grows with height, from 0.03 at the road in `hazy`
+to about 0.5 at the top of the layer. Both components are 1 at the road, so V is unchanged. In
+`hazy` the molecular column in the 5 km layer is 3.7 km of sea-level air instead of the
+aerosol's 1 km (vertical Rayleigh optical depth 0.043 instead of 0.012 at 550 nm). The
+ground-level sun spectrum already includes the whole molecular column, so with two components
+the sun SPD and its top-of-layer illuminance are divided by the layer's molecular transmittance
+along the sun path (manifest `sun_rayleigh_compensation`). The layer's molecules also scatter
+some of that sunlight down, which the ground-level sky already contains. To avoid counting it
+twice, the sky dome is scaled (`sky_scale`) so that a layer of molecules alone gives the road
+illuminance of the scene without a medium. The sky's colour is not changed, and the sky seen
+through the layer is still counted twice in part: in `clear` the sky at the top of the frame is
+about 6 % brighter and less blue than with `effective` (blue/red 1.77 instead of 1.96), because
+the layer's molecules add in-scatter that the sky map already holds. For that reason the mode is
+opt-in. Removing the double count properly would need the sun at the top of the atmosphere and
+a sky rendered from the medium, with no sky map.
+Droplet fog (`--fog-droplets`) keeps its single Mie component.
+
+`--haze-phase mixed` gives the molecules the aerosol's profile and a fixed share of the phase
+function, `p = w_R p_Rayleigh + (1 - w_R) p_HG(g)`, `w_R = sigma_R / sigma_s` at 550 nm and road
+level (pbrt patch 0011, `"float rayleighfraction"`). `--haze-phase effective` folds the
+molecules into one HG lobe with the scattering-weighted g (the default). The mixed and effective modes have the
+same mean cosine; the mixture puts more light into side and back scatter in clear air (w_R 0.12
+for `clear`, 0.03 `hazy`, ~0 in `mist`/`fog`). pbrt's phase function is wavelength-independent,
+so in every mode the Rayleigh share is taken at 550 nm, although the real share rises toward
+blue. The
 medium is a `uniformgrid` that is horizontally uniform over +-200 km and varies only with height:
 density 1 at the road (so V holds at the camera) and either exp(-y/H) or a layer of depth H with
 a smooth top. Each medium interaction counts as a bounce in `volpath`, so `maxdepth` is raised
@@ -863,7 +887,8 @@ choose the rendered band. See [SWIR.md](SWIR.md#highway-scene-in-the-swir-toolsh
   wheel-path map (no per-vehicle wet tracks or spray-wetted lanes), spray density
   scaling (car factor, flooded ×2, linear speed) assumed; wet markings use EN 1436 class
   minima, not a measured wet retroreflection function.
-- Haze: one HG phase function per medium (Rayleigh folded into g), horizontally uniform
+- Haze: the Rayleigh share of the phase function is taken at 550 nm (pbrt's phase function is
+  scalar), the sky dome's colour is not compensated for the layer's molecules, horizontally uniform
   medium, flat Earth for the medium (the backdrop has curvature); without `--haze` the horizon
   is sharp and aerial perspective comes only from the sky map.
 - Asset car materials other than paint/glass/tyres are the authors' RGB values unless `--spectral-library usgs` (chrome and near-black trim only, see below); sign sheeting is diffuse by day unless `--fluorescent-sign`.
