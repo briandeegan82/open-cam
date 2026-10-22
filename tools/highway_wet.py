@@ -99,6 +99,16 @@ SPRAY_SEGMENTS = 1  # homogeneous slabs along the plume (see spray_lines)
 SPRAY_FLOOR = 0.5  # box floor below the road (see spray_lines)
 WET_SPDS = ("asphalt_aged", "asphalt_new", "asphalt_patch", "crack_sealant", "paint_road_white", "paint_road_yellow")
 ROAD_MATERIALS = ("asphalt", "rw:asphaltA", "rw:asphaltB", "rw:sealant", "paint_white", "paint_yellow")
+# raindrop ripples on standing water (nominal values, not fitted to measurements)
+RIPPLE_SPEED_M_S = 0.23  # minimum phase speed of capillary-gravity waves on water
+RIPPLE_WAVELENGTH_M = 0.017  # wavelength at that minimum
+RIPPLE_DECAY_S = 0.25  # e-folding time of a ring's amplitude
+RIPPLE_SLOPE = 0.15  # peak surface slope of a fresh ring from a 2 mm drop (scales with D)
+RIPPLE_R0_M = 0.01  # geometric spreading ~ sqrt(r0 / (r0 + r))
+RIPPLE_DMIN_MM = 0.5  # smaller drops leave no visible ring
+RIPPLE_TEXEL_M = 0.002
+RIPPLE_AGE_BINS = 12
+TRACK_EDGES = (0.3, 0.8)  # wheel-path map (normalised) from which the tyre tracks start / are fully dried
 
 
 # ------------------------------------------------------------------ optics
@@ -251,6 +261,18 @@ def add_args(ap: argparse.ArgumentParser) -> None:
     g.add_argument(
         "--wet-marking-rl", type=float, default=None, help="Wet marking R_L [mcd/m^2/lx] (default: EN 1436 class)."
     )
+    g.add_argument(
+        "--rain-ripples",
+        choices=("auto", "off"),
+        default="auto",
+        help="auto: raindrop impact ripples on puddles (and the flooded film) when --rain-mmh > 0.",
+    )
+    g.add_argument(
+        "--tyre-tracks",
+        type=float,
+        default=0.0,
+        help="Drier tyre tracks on a damp/wet road: 0 = off, 1 = wheel-path centres fully dry (needs --road-wear).",
+    )
 
 
 def enabled(args: argparse.Namespace) -> bool:
@@ -263,6 +285,86 @@ def check_args(args: argparse.Namespace, has_wear: bool) -> None:
         raise SystemExit("--puddles/--spray need --road-wetness wet or flooded")
     if args.puddles and not has_wear:
         raise SystemExit("--puddles uses the road-wear wheel-path map: needs --road-wear != none")
+    tracks = getattr(args, "tyre_tracks", 0.0)
+    if not 0.0 <= tracks <= 1.0:
+        raise SystemExit("--tyre-tracks must be in [0, 1]")
+    if tracks > 0 and (lvl not in ("damp", "wet") or args.puddles or not has_wear):
+        raise SystemExit("--tyre-tracks needs --road-wetness damp or wet, no --puddles, and --road-wear != none")
+
+
+def ripples_on(args: argparse.Namespace) -> bool:
+    return getattr(args, "rain_ripples", "auto") == "auto" and getattr(args, "rain_mmh", 0.0) > 0
+
+
+def impact_rate(rate_mmh: float, dmin_mm: float = RIPPLE_DMIN_MM) -> float:
+    """Raindrop impacts per m^2 per s with D >= dmin (Marshall-Palmer N(D), Atlas-type terminal velocity)."""
+    from highway_rain import marshall_palmer, terminal_velocity
+
+    if rate_mmh <= 0:
+        return 0.0
+    n0, lam = marshall_palmer(rate_mmh)
+    d = np.linspace(dmin_mm, dmin_mm + 12.0 / lam, 2000)
+    f = n0 * np.exp(-lam * d) * terminal_velocity(d)
+    return float(np.sum((f[1:] + f[:-1]) * np.diff(d)) / 2.0)
+
+
+def ripple_field(rate_mmh: float, tile_m: float, rng: np.random.Generator, texel_m: float = RIPPLE_TEXEL_M):
+    """(normals (n, n, 3) in tangent space, stats) of a periodic tile of raindrop ripple rings.
+
+    Impacts are a Poisson process in space and time at ``impact_rate``; each leaves a ring wave packet
+    moving out at RIPPLE_SPEED_M_S, decaying with RIPPLE_DECAY_S and spreading as 1/sqrt(r). The tile
+    is a snapshot: impacts of the last 3 decay times, binned by age and summed by FFT convolution."""
+    from highway_rain import marshall_palmer
+
+    n = max(int(round(tile_m / texel_m)), 8)
+    dx = tile_m / n
+    t_max = 3.0 * RIPPLE_DECAY_S
+    rate = impact_rate(rate_mmh)
+    k = int(rng.poisson(rate * tile_m * tile_m * t_max))
+    _, lam = marshall_palmer(rate_mmh)
+    d = RIPPLE_DMIN_MM + rng.exponential(1.0 / lam, k)
+    age = rng.random(k) * t_max
+    ij = rng.integers(0, n, (k, 2))
+    f = np.fft.fftfreq(n, dx)
+    c = np.minimum(np.arange(n), n - np.arange(n)) * dx
+    rho = np.hypot(c[:, None], c[None, :])
+    amp0 = RIPPLE_SLOPE * RIPPLE_WAVELENGTH_M / (2.0 * math.pi) / 2.0  # height of a ring from a D = 2 mm drop
+    H = np.zeros((n, n // 2 + 1), np.complex128)
+    edges = np.linspace(0.0, t_max, RIPPLE_AGE_BINS + 1)
+    for b in range(RIPPLE_AGE_BINS):
+        sel = (age >= edges[b]) & (age < edges[b + 1])
+        if not sel.any():
+            continue
+        t = 0.5 * (edges[b] + edges[b + 1])
+        r = RIPPLE_SPEED_M_S * t
+        x = (rho - r) / RIPPLE_WAVELENGTH_M
+        kern = math.exp(-t / RIPPLE_DECAY_S) * math.sqrt(RIPPLE_R0_M / (RIPPLE_R0_M + r))
+        kern = kern * np.cos(2.0 * math.pi * x) * np.exp(-0.5 * x * x)
+        imp = np.zeros((n, n))
+        np.add.at(imp, (ij[sel, 0], ij[sel, 1]), d[sel] / 2.0)
+        H += np.fft.rfft2(imp) * np.fft.rfft2(kern)
+    H *= amp0
+    fr = np.fft.rfftfreq(n, dx)
+    hy = np.fft.irfft2(H * (2j * math.pi * f[:, None]), (n, n))  # rows
+    hx = np.fft.irfft2(H * (2j * math.pi * fr[None, :]), (n, n))  # columns
+    nrm = np.stack([-hx, -hy, np.ones_like(hx)], -1)
+    nrm /= np.linalg.norm(nrm, axis=-1, keepdims=True)
+    slope = np.hypot(hx, hy)
+    return nrm.astype(np.float32), {
+        "impacts_per_m2_s": round(rate, 1),
+        "rings_in_tile": k,
+        "tile_m": tile_m,
+        "rms_slope": round(float(np.sqrt(np.mean(slope**2))), 4),
+        "p99_slope": round(float(np.percentile(slope, 99)), 4),
+    }
+
+
+def tyre_track_mask(wheel: np.ndarray, dryness: float) -> np.ndarray:
+    """Dryness (0 = wet film, 1 = dry) of the tyre tracks from the wheel-path map."""
+    from highway_road_wear import _smoothstep
+
+    w = wheel / max(float(wheel.max()), 1e-6)
+    return (dryness * _smoothstep(*TRACK_EDGES, w)).astype(np.float32)
 
 
 # ------------------------------------------------------------------ pbrt materials
@@ -308,6 +410,28 @@ def apply_materials(
             _write_spd(spd_dir / f"wetd_{name}.spd", d[:, 0], body_albedo(d[:, 1], N_WATER))
     spd_re = re.compile(r'"spd/(' + "|".join(WET_SPDS) + r')\.spd"')
     road_mats = set(ROAD_MATERIALS)
+    tracks = getattr(args, "tyre_tracks", 0.0) if wear is not None else 0.0
+    dry_copy: list[str] = []
+    if tracks > 0:  # dry road materials kept under "dry:" names for the tyre tracks
+        for i, j in _blocks(lines):
+            m = re.match(r'(Texture|MakeNamedMaterial) "([^"]+)"', lines[i])
+            if m and (m.group(2) == "asphalt" or m.group(2).startswith("rw:") and not m.group(2).startswith("rw:rpm")):
+                dry_copy += [re.sub(r'"(rw:[^"]*|asphalt)"', r'"dry:\1"', ln) for ln in lines[i:j]]
+    ripple_png, ripple_meta = None, None
+    if ripples_on(args) and wear is not None and (args.puddles or lvl == "flooded"):
+        from highway_road_wear import _write_normal_png
+
+        nrm, ripple_meta = ripple_field(args.rain_mmh, wear.tile_m, np.random.default_rng([wear.seed, 0x21991E]))
+        f = wear.tex_dir / f"ripples_{args.rain_mmh:g}mmh_s{wear.seed}.png"
+        _write_normal_png(f, nrm)
+        ripple_png = os.path.relpath(f, wear.out_dir)
+        ripple_meta.update(
+            on=["puddles"] * bool(args.puddles) + ["film"] * (lvl == "flooded"),
+            model="Poisson raindrop impacts (Marshall-Palmer x terminal velocity, D >= "
+            f"{RIPPLE_DMIN_MM} mm); capillary-gravity ring packets, c = {RIPPLE_SPEED_M_S} m/s, "
+            f"lambda = {RIPPLE_WAVELENGTH_M * 1e3:g} mm, decay {RIPPLE_DECAY_S} s (nominal); "
+            "frozen snapshot normal map",
+        )
     out: list[str] = []
     for i, j in _blocks(lines):
         blk = lines[i:j]
@@ -333,7 +457,28 @@ def apply_materials(
             blk[0] = _set_param(blk[0], "float thickness", f"[{THICKNESS}]")
             if lvl != "damp":  # the water surface hides the texture's micro-normals
                 blk = [ln for ln in blk if '"string normalmap"' not in ln]
+            if ripple_png is not None and lvl == "flooded":
+                blk.append(f'    "string normalmap" "{ripple_png}"')
         out += blk
+        if tracks > 0 and kind == "MakeNamedMaterial" and name == "asphalt":
+            out[-len(blk)] = out[-len(blk)].replace('"asphalt"', '"wet:film"', 1)
+            f = wear.tex_dir / f"tracks_{wear.level}_s{wear.seed}_{tracks:g}.exr"
+            from highway_road_wear import write_float_exr
+
+            mask = tyre_track_mask(wear.wheel_map, tracks)
+            write_float_exr(f, mask)
+            out += [
+                *dry_copy,
+                f'Texture "wet:track" "float" "imagemap" "string filename" "{os.path.relpath(f, wear.out_dir)}" '
+                + _wear_mapping(wear),
+                'MakeNamedMaterial "asphalt" "string type" "mix" "string materials" ["wet:film" "dry:asphalt"]'
+                ' "texture amount" "wet:track"',
+            ]
+            track_meta = {
+                "dryness": tracks,
+                "dry_area_fraction": round(float(mask.mean()), 4),
+                "model": "wheel-path map (tools/highway_road_wear.py) -> mix of the wet film and the dry road",
+            }
     meta: dict = {
         "level": lvl,
         "model": "Lekner & Dorf 1988 water-film darkening + smooth dielectric water surface (n = 1.333), "
@@ -362,8 +507,21 @@ def apply_materials(
             "standard": "EN 1436:2018 RW (wet recovery, = ASTM E2177) / RR (rain, = ASTM E2176)",
         }
     if args.puddles:
-        out, meta["puddles"] = _puddle_lines(out, wear, lvl)
+        out, meta["puddles"] = _puddle_lines(out, wear, lvl, ripple_png)
+    if tracks > 0:
+        meta["tyre_tracks"] = track_meta
+    if ripple_meta is not None:
+        meta["ripples"] = ripple_meta
     return out, meta
+
+
+def _wear_mapping(wear) -> str:
+    g = wear.geom
+    w_m = float(g["x1"] - g["x0"])
+    return (
+        f'"string mapping" "uv" "float uscale" [{wear.tile_m / w_m:.8g}] '
+        f'"float vscale" [{-wear.tile_m / g["period"]:.8g}] "float udelta" [{-g["x0"] / w_m:.8g}]'
+    )
 
 
 def puddle_mask(wheel: np.ndarray, level: float, rng: np.random.Generator, texel_zx=(0.02, 0.02)) -> np.ndarray:
@@ -376,19 +534,14 @@ def puddle_mask(wheel: np.ndarray, level: float, rng: np.random.Generator, texel
     return np.clip(_smoothstep(level - 0.04, level + 0.04, depth), 0.0, 1.0).astype(np.float32)
 
 
-def _puddle_lines(lines: list[str], wear, lvl: str) -> tuple[list[str], dict]:
+def _puddle_lines(lines: list[str], wear, lvl: str, ripple_png: str | None = None) -> tuple[list[str], dict]:
     from highway_road_wear import write_float_exr
 
     rng = np.random.default_rng([wear.seed, 0x9DD1E])
     mask = puddle_mask(wear.wheel_map, PUDDLE_LEVEL[lvl], rng, wear.texel_zx)
     f = wear.tex_dir / f"puddle_{wear.level}_s{wear.seed}_{lvl}.exr"
     write_float_exr(f, mask)
-    g = wear.geom
-    w_m = float(g["x1"] - g["x0"])
-    planar = (
-        f'"string mapping" "uv" "float uscale" [{wear.tile_m / w_m:.8g}] '
-        f'"float vscale" [{-wear.tile_m / g["period"]:.8g}] "float udelta" [{-g["x0"] / w_m:.8g}]'
-    )
+    planar = _wear_mapping(wear)
     refl = (
         '"texture reflectance" "rw:A:refl"'
         if any(ln.startswith('Texture "rw:A:refl"') for ln in lines)
@@ -398,6 +551,7 @@ def _puddle_lines(lines: list[str], wear, lvl: str) -> tuple[list[str], dict]:
         f'Texture "wet:puddle" "float" "imagemap" "string filename" "{os.path.relpath(f, wear.out_dir)}" {planar}',
         f'MakeNamedMaterial "wet:puddle" "string type" "coateddiffuse" {refl}',
         f'    "float roughness" [0] "float eta" [{N_WATER}] "float thickness" [{THICKNESS}]',
+        *([f'    "string normalmap" "{ripple_png}"'] if ripple_png else []),
         'MakeNamedMaterial "asphalt" "string type" "mix" "string materials" ["wet:film" "wet:puddle"]'
         ' "texture amount" "wet:puddle"',
     ]
@@ -411,7 +565,8 @@ def _puddle_lines(lines: list[str], wear, lvl: str) -> tuple[list[str], dict]:
     return out, {
         "area_fraction": round(float(mask.mean()), 4),
         "level": PUDDLE_LEVEL[lvl],
-        "model": "wheel-path rut map (tools/highway_road_wear.py) above a water level; flat water, flush",
+        "model": "wheel-path rut map (tools/highway_road_wear.py) above a water level; flat water, flush"
+        + ("; raindrop ripples" if ripple_png else ""),
     }
 
 
