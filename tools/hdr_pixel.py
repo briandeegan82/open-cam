@@ -309,19 +309,24 @@ def _fourier_shift(a: np.ndarray, dx: float, dy: float) -> np.ndarray:
     return np.fft.ifft2(np.fft.fft2(p, axes=(0, 1)) * ph, axes=(0, 1)).real[:h, :w]
 
 
-def spd_centroid_shift(signal_e: np.ndarray, dx: float, dy: float, bayer_pattern: str | None = None) -> np.ndarray:
+def spd_centroid_shift(
+    signal_e: np.ndarray, dx: float, dy: float, bayer_pattern: str | None = None, cfa_layout=None
+) -> np.ndarray:
     """The optical signal sampled at the small photodiode's centroid, offset (dx, dy) pixels from the large one.
 
-    A Bayer mosaic is shifted per colour plane (each plane by (dx/2, dy/2) of its 2-px pitch), so colours do not
-    mix; the planes are aliased, so this is approximate above their Nyquist. Negative ringing is clipped."""
+    A mosaic (Bayer, or a generic ``cfa_layout`` with an r x c tile) is shifted one tile site at a time, each
+    sub-lattice by (dx/c, dy/r) of its pitch, so colours do not mix; the sub-lattices are aliased, so this is
+    approximate above their Nyquist. Negative ringing is clipped."""
     a = np.asarray(signal_e, dtype=np.float64)
     if not (dx or dy) or a.ndim < 2 or min(a.shape[:2]) < 2:
         return a
-    if bayer_pattern and a.ndim == 2:
+    period = cfa_layout.period if cfa_layout is not None else (2, 2) if bayer_pattern else None
+    if period and a.ndim == 2:
+        pr, pc = period
         out = np.empty_like(a)
-        for i in (0, 1):
-            for j in (0, 1):
-                out[i::2, j::2] = _fourier_shift(a[i::2, j::2], dx / 2.0, dy / 2.0)
+        for i in range(pr):
+            for j in range(pc):
+                out[i::pr, j::pc] = _fourier_shift(a[i::pr, j::pc], dx / pc, dy / pr)
     else:
         out = _fourier_shift(a, dx, dy)
     return np.maximum(out, 0.0)
@@ -569,7 +574,9 @@ def simulate_captures(
                 raise ValueError(f"capture {c.name!r} electrons shape {sig.shape} != {shape}")
         elif c.pd == "spd" and any(spd_shift):
             # The SPD sits off-centre in the pixel, so it samples the optical image at an offset centroid.
-            sig = spd_centroid_shift(signal_e, *spd_shift, bayer_pattern) * response_map(c, shape, bayer_pattern)
+            sig = spd_centroid_shift(signal_e, *spd_shift, bayer_pattern, cfa_layout) * response_map(
+                c, shape, bayer_pattern, cfa_layout
+            )
         else:
             sig = signal_e * response_map(c, shape, bayer_pattern, cfa_layout)
         if so.get("spd_crosstalk_fraction") and c.pd == "spd":

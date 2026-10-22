@@ -193,9 +193,9 @@ noise:
 * **SPD centroid offset.** The small photodiode sits off-centre in the pixel, so it samples the
   optical image at a point offset by (`spd_centroid_offset_x_px`, `_y_px`) from the large one
   (Deegan 2014). The SPD signal is the input image shifted by that amount, using a band-limited
-  Fourier shift with mirrored borders, so the shift adds no blur. A Bayer mosaic is shifted one
-  colour plane at a time, so colours don't mix; this is approximate above each plane's Nyquist
-  frequency. Where the merge switches from LPD to SPD, an edge or texture jumps by the offset,
+  Fourier shift with mirrored borders, so the shift adds no blur. A mosaic (Bayer or a generic
+  `cfa.layout` such as RCCB) is shifted one tile site at a time, so colours don't mix; this is
+  approximate above each sub-lattice's Nyquist frequency. Where the merge switches from LPD to SPD, an edge or texture jumps by the offset,
   which distorts slanted-edge MTF measurements across the transition. A per-capture SPD input
   (`capture_electrons_npz`) is taken as already rendered from the SPD position and is not shifted.
   The smaller SPD aperture (its pixel-aperture MTF) is not modelled.
