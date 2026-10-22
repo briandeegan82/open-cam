@@ -639,14 +639,18 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
 
     # ---- spectra
     wl = np.arange(args.spectral_lambda_min, args.spectral_lambda_max + 1e-9, args.step_nm)
-    for name in SURFACES:
+
+    def surface_reflectance(name: str, wl: np.ndarray) -> np.ndarray:
         r = reflectance(name, wl)
-        if swir.enabled(args) and name in swir.VEGETATION:
-            r = swir.vegetation(name, wl, r)
-        write_spd(spd / f"{name}.spd", wl, r)
+        if not swir.enabled(args):
+            return r
+        return swir.vegetation(name, wl, r) if name in swir.VEGETATION else swir.surface(name, wl, r)
+
+    for name in SURFACES:
+        write_spd(spd / f"{name}.spd", wl, surface_reflectance(name, wl))
     var = variety.resolve(args, CAR_MODELS, args.cam_lane)
     variety.activate(var)
-    variety.write_paints(var, spd, wl, reflectance, write_spd)
+    variety.write_paints(var, spd, wl, surface_reflectance, write_spd)
     mats = hmat.Materials(args, out_dir, wl, write_spd)
     mats.write_spectra()
 

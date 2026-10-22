@@ -102,6 +102,20 @@ USGS_SPECTRA = {
     "galvanized": _USGS_A + "GalvanizedSheetMetal_GDS334_ASDFRa_AREF.txt",
     "black_plastic": _USGS_A + "Plastic_ABS_GDS341_BlackPipe_ASDFRa_AREF.txt",
 }
+#: analytic surface -> USGS splib07a record whose shape above 830 nm stands in for it in the SWIR
+#: (tools/highway_swir.py). Pigmented polymers / painted metal as proxies for paints and sheeting.
+USGS_SWIR_PROXIES = {
+    "white_vinyl": _USGS_A + "Plastic_Vinyl_GDS372_White_ASDFRa_AREF.txt",
+    "yellow_hdpe": _USGS_A + "Plastic_HDPE_GDS386_Yelopaqu_ASDFRa_AREF.txt",
+    "red_vinyl": _USGS_A + "Plastic_Vinyl_GDS398_Red_Toy_ASDFRa_AREF.txt",
+    "blue_pipe": _USGS_A + "Plastic_Pipe_GDS344_Blue_ASDFRa_AREF.txt",
+    "green_painted_aluminium": _USGS_A + "Painted_Aluminum_GDS333_LgGr_ASDFRa_AREF.txt",
+    "black_hdpe": _USGS_A + "Plastic_HDPE_GDS351_BlkSheet_ASDFRa_AREF.txt",
+    "black_ldpe": _USGS_A + "Plastic_LDPE_GDS405_Black_ASDFRa_AREF.txt",
+    "brushed_aluminium": _USGS_A + "Aluminum_brushed_293K_ASDFRa_AREF.txt",
+    "grey_hdpe": _USGS_A + "Plastic_HDPE_GDS373_Grey_Bag_ASDFRa_AREF.txt",
+    "weathered_cedar": _USGS_A + "Cedar_Shake_GDS361_HiWeather_ASDFRa_AREF.txt",
+}
 #: builder SPD file overwritten by each USGS spectrum (the rest are new files).
 USGS_REPLACES = {"asphalt": "asphalt_aged", "concrete": "concrete", "galvanized": "galvanized"}
 
@@ -222,7 +236,7 @@ def fetch(repo: Path = REPO, rgl: tuple[str, ...] | None = None, usgs: bool = Tr
     for name in RGL_MATERIALS if rgl is None else rgl:
         _download(RGL_URL.format(name), root / "rgl" / f"{name}.bsdf", RGL_MATERIALS[name][0])
     if usgs:
-        members = [USGS_WAVELENGTHS, *USGS_SPECTRA.values()]
+        members = [USGS_WAVELENGTHS, *USGS_SPECTRA.values(), *USGS_SWIR_PROXIES.values()]
         if not all((root / "usgs" / Path(m).name).is_file() for m in members):
             zpath = root / "usgs" / "splib07a_ASCII.zip"
             _download(USGS_ZIP_URL, zpath, USGS_ZIP_SHA256)
@@ -268,10 +282,11 @@ def read_rgl_tensor(path: Path) -> dict[str, np.ndarray]:
 def read_usgs(key: str, wl: np.ndarray, repo: Path = REPO) -> np.ndarray:
     """USGS splib07a reflectance resampled to ``wl`` [nm] (bad channels dropped)."""
     root = cache_dir(repo) / "usgs"
-    if not (root / Path(USGS_SPECTRA[key]).name).is_file():
+    rec = Path(USGS_SPECTRA.get(key) or USGS_SWIR_PROXIES[key]).name
+    if not (root / rec).is_file():
         fetch(repo, rgl=(), usgs=True, cr=False)
     lam = np.loadtxt(root / Path(USGS_WAVELENGTHS).name, skiprows=1) * 1000.0
-    val = np.loadtxt(root / Path(USGS_SPECTRA[key]).name, skiprows=1)
+    val = np.loadtxt(root / rec, skiprows=1)
     ok = (val > -1.0) & (val < 2.0)
     return np.interp(np.asarray(wl, float), lam[ok], val[ok])
 

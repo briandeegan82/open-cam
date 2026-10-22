@@ -149,10 +149,19 @@ def write_spectra(args, spd: Path, wl: np.ndarray, write_spd, reflectance) -> di
         "vru_frame": reflectance("carpaint_red", wl),
         "vru_rim": np.full_like(wl, 0.6),
     }
+    import highway_swir as swir
+
+    skin_note = "held constant > 730 nm"
+    if swir.enabled(args):
+        import nir_skin
+
+        curves["vru_skin"] = swir.splice(wl, curves["vru_skin"], wl, nir_skin.skin_reflectance(wl), swir.JOIN_NM)
+        curves["vru_frame"] = swir.surface("carpaint_red", wl, curves["vru_frame"])
+        skin_note = f"tools/nir_skin.py tissue-model shape above {swir.JOIN_NM:g} nm (nominal, not measured)"
     for k, v in curves.items():
         write_spd(spd / f"{k}.spd", wl, v)
     return {
-        "skin": f"ColorChecker 02 light skin, melanin tau {args.vru_skin_tau:g} (held constant > 730 nm)",
+        "skin": f"ColorChecker 02 light skin, melanin tau {args.vru_skin_tau:g} ({skin_note})",
         "top": f"USGS splib07a {top}",
         "trousers": f"USGS splib07a {trousers}",
         "shoes": "USGS splib07a 16_hdpe_black",
