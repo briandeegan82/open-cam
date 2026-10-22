@@ -19,6 +19,13 @@ BAY = 3.0
 STOREY = 3.0
 RECESS = 0.4  # lot box sits this far behind the kit wall plane
 INTERIOR = 0.35  # room-back quad behind each window / glazed door
+PLINTH = 0.8  # procedural facades: 0.8 m plinth + 3.2 m storeys (build_urban_scene.facade_lines)
+MATCH_STOREY = 3.2
+
+
+def lot_height(storeys: int, storey: float | None) -> float:
+    """Kit wall height of a lot: 3 m kit storeys, or the procedural plinth + ``storey`` storeys."""
+    return STOREY * storeys if storey is None else PLINTH + storey * storeys
 
 
 def _n(v: float) -> str:
@@ -70,19 +77,74 @@ def trim(P: dict, prefix: str) -> str | None:
     return c[0] if c else None
 
 
-def material_lines(aid: str, info: dict, raw: Path, out_dir: Path) -> list[str]:
-    """Texture colours as diffuse reflectance (sRGB maps, not measured spectra); glass is a thin dielectric."""
+def metal_maps(raw: Path) -> dict[str, tuple[float, Path]]:
+    """glTF material name -> (metallicFactor, metallic-roughness texture) for materials that can be
+    metallic. The metallic value per texel is factor x the texture's blue channel (glTF 2.0)."""
+    import json
+    import struct
+
+    out: dict[str, tuple[float, Path]] = {}
+    for f in sorted(raw.rglob("*.gltf")) + sorted(raw.rglob("*.glb")):
+        if f.suffix == ".glb":
+            b = f.read_bytes()
+            j = json.loads(b[20 : 20 + struct.unpack("<I", b[12:16])[0]])
+        else:
+            j = json.loads(f.read_text())
+        for m in j.get("materials", []):
+            pbr = m.get("pbrMetallicRoughness", {})
+            fac = float(pbr.get("metallicFactor", 1.0))
+            t = pbr.get("metallicRoughnessTexture")
+            if fac > 0 and t is not None:
+                uri = j["images"][j["textures"][t["index"]]["source"]].get("uri")
+                if uri:
+                    out[m["name"]] = (fac, f.parent / uri)
+        break
+    return out
+
+
+def _metal_mask(arm: Path, fac: float, dst: Path) -> float:
+    """Write factor x blue channel as an 8-bit grey PNG; returns the mean glTF roughness (green) of
+    the metallic texels (0 if none)."""
+    from PIL import Image
+
+    a = np.asarray(Image.open(arm).convert("RGB"), dtype=np.float64) / 255.0
+    metal = np.clip(fac * a[..., 2], 0.0, 1.0)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    Image.fromarray(np.round(metal * 255).astype(np.uint8), mode="L").save(dst)
+    sel = metal >= 0.5
+    return float(a[..., 1][sel].mean()) if sel.any() else 0.0
+
+
+def material_lines(aid: str, info: dict, raw: Path, out_dir: Path, metals: bool = False) -> list[str]:
+    """Texture colours as diffuse reflectance (sRGB maps, not measured spectra); glass is a thin dielectric.
+
+    ``metals``: where the glTF metallic map says metal, a pbrt ``mix`` picks a conductor whose
+    normal-incidence reflectance is the base-colour map (pbrt's artist-style "reflectance"
+    conductor; GGX alpha = roughness^2 as in glTF, the mean over the metallic texels); elsewhere
+    the diffuse material."""
     L = []
+    mm = metal_maps(raw) if metals else {}
     for k, m in enumerate(info["materials"]):
         mn = f"{aid}:{k}"
         if m.get("alpha_mode") == "BLEND" or "glass" in m["name"].lower():
             L.append(f'MakeNamedMaterial "{mn}" "string type" "thindielectric" "float eta" [1.52]')
         elif m.get("base_color_texture"):
             rel = os.path.relpath(raw / m["base_color_texture"], out_dir)
-            L += [
-                f'Texture "{mn}:c" "spectrum" "imagemap" "string filename" "{rel}" "string encoding" "sRGB"',
-                f'MakeNamedMaterial "{mn}" "string type" "diffuse" "texture reflectance" "{mn}:c"',
-            ]
+            L.append(f'Texture "{mn}:c" "spectrum" "imagemap" "string filename" "{rel}" "string encoding" "sRGB"')
+            mask = out_dir / "textures" / f"{aid}_{k}_metal.png"
+            rough = _metal_mask(mm[m["name"]][1], mm[m["name"]][0], mask) if m["name"] in mm else 0.0
+            if m["name"] in mm and rough > 0:
+                mrel = os.path.relpath(mask, out_dir)
+                L += [
+                    f'Texture "{mn}:metal" "float" "imagemap" "string filename" "{mrel}" "string encoding" "linear"',
+                    f'MakeNamedMaterial "{mn}:d" "string type" "diffuse" "texture reflectance" "{mn}:c"',
+                    f'MakeNamedMaterial "{mn}:m" "string type" "conductor" "texture reflectance" "{mn}:c" '
+                    f'"float roughness" [{_n(rough**2)}] "bool remaproughness" false',
+                    f'MakeNamedMaterial "{mn}" "string type" "mix" "string materials" ["{mn}:d" "{mn}:m"] '
+                    f'"texture amount" "{mn}:metal"',
+                ]
+            else:
+                L.append(f'MakeNamedMaterial "{mn}" "string type" "diffuse" "texture reflectance" "{mn}:c"')
         else:
             L.append(f'MakeNamedMaterial "{mn}" "string type" "diffuse" "rgb reflectance" [0.5 0.5 0.5]')
     return L
@@ -101,22 +163,25 @@ def frame(s: int, x_face: float, zb: float, wb: float):
     return (-90.0, zb + wb) if s > 0 else (90.0, zb)
 
 
-def instance(aid: str, node: str, part: dict, x: float, y: float, z: float, yaw: float, sx: float) -> list[str]:
+def instance(
+    aid: str, node: str, part: dict, x: float, y: float, z: float, yaw: float, sx: float, sy: float = 1.0
+) -> list[str]:
     o = part["origin"]
     return [
         "AttributeBegin",
         f"Translate {_n(x)} {_n(y)} {_n(z)}",
         f"Rotate {_n(yaw)} 0 1 0",
-        f"Scale {_n(sx)} 1 1",
+        f"Scale {_n(sx)} {_n(sy)} 1",
         f"Translate {_n(-o[0])} {_n(-o[1])} {_n(-o[2])}",
         f'ObjectInstance "{aid}:{node}"',
         "AttributeEnd",
     ]
 
 
-def room_quad(part: dict, s: int, x_face: float, y: float, z_anchor: float, sx: float) -> np.ndarray:
+def room_quad(part: dict, s: int, x_face: float, y: float, z_anchor: float, sx: float, sy: float = 1.0) -> np.ndarray:
     """Room-back quad behind an insert's opening (world points, facing the street)."""
     (lx0, ly0), (lx1, ly1) = part["lo"][:2], part["hi"][:2]
+    ly0, ly1 = sy * ly0, sy * ly1
     zs = [z_anchor + sx * lx0, z_anchor + sx * lx1] if s > 0 else [z_anchor - sx * lx0, z_anchor - sx * lx1]
     za, zc = min(zs), max(zs)
     x = x_face + s * INTERIOR
@@ -132,8 +197,16 @@ def street_fronts(
     lit: float,
     out_dir: Path,
     window_luminance: float,
+    storey: float | None = None,
+    metals: bool = False,
 ) -> tuple[list[str], list[dict], dict]:
-    """Kit street fronts on every lot; returns pbrt lines, per-lot metadata and window counts."""
+    """Kit street fronts on every lot; returns pbrt lines, per-lot metadata and window counts.
+
+    ``storey``: None keeps the kit's 3 m storeys. A height (3.2 m) matches the procedural facades:
+    upper storeys are the 3 m panels stretched to ``storey``, and the ground floor is
+    ``PLINTH + storey`` tall, with the kit's base course under the ground-floor windows and a
+    plain wall strip above the door. A lot with ``xform = (yaw_deg, z)`` is built in the
+    main-street frame and placed by ``Translate 0 0 z`` + ``Rotate yaw_deg 0 1 0`` (cross street)."""
     rng = np.random.default_rng([seed, 12])
     kp = {}
     for aid, (info, raw) in kits.items():
@@ -149,6 +222,8 @@ def street_fronts(
             "cornice": trim(P, "cornice"),
             "crown": trim(P, "crown"),
             "pier": next((n for n in sorted(P) if n.startswith("wall_pier_standard")), None),
+            "base": trim(P, "base"),
+            "plain": next((n for n in sorted(P) if n.startswith("wall_standard_standard")), None),
         }
     kp = {a: k for a, k in kp.items() if k["win"] and k["door"]}
     if not kp:
@@ -168,32 +243,85 @@ def street_fronts(
         n = max(1, int(round(w / BAY)))
         wb = w / n
         sx = wb / BAY
+        lot_inst: list[str] = []
+        lot_rooms: list[tuple[str, np.ndarray]] = []
+
+        def put(
+            node: str, y: float, za: float, yaw: float, sy: float = 1.0, _a=aid, _K=K, _i=lot_inst, _x=x_face, _sx=sx
+        ) -> None:
+            _i.extend(instance(_a, node, _K["P"][node], _x, y, za, yaw, _sx, sy))
+            used[_a].add(node)
+
         for f in range(lot["storeys"]):
-            y = STOREY * f
+            if storey is None:
+                y, top, sy = STOREY * f, STOREY * (f + 1), 1.0
+            else:
+                y = 0.0 if f == 0 else PLINTH + storey * f
+                top, sy = PLINTH + storey * (f + 1), storey / STOREY
             for b in range(n):
                 wall, ins = (door if b == n // 2 else gwin) if f == 0 else up
                 yaw, za = frame(s, x_face, lot["z0"] + b * wb, wb)
+                y_ins = y
+                if storey is not None and f == 0:
+                    if b == n // 2:  # door from the pavement, plain wall strip above it
+                        if K["plain"]:
+                            put(K["plain"], storey, za, yaw, PLINTH / STOREY)
+                    else:  # base course under the ground-floor window
+                        if K["base"]:
+                            base_h = float(K["P"][K["base"]]["hi"][1] - K["P"][K["base"]]["lo"][1])
+                            put(K["base"], 0.0, za, yaw, PLINTH / base_h)
+                        y_ins = PLINTH
                 for node in (wall, ins):
-                    inst += instance(aid, node, K["P"][node], x_face, y, za, yaw, sx)
-                    used[aid].add(node)
+                    put(node, y_ins, za, yaw, sy)
                 on = dark and rng.random() < lit
-                rooms["window_lit" if on else "window_dark"].append(room_quad(K["P"][ins], s, x_face, y, za, sx))
-                for tr, ty in ((K["cornice"], y + STOREY) if f < lot["storeys"] - 1 else (K["crown"], y + STOREY),):
-                    if tr:
-                        inst += instance(aid, tr, K["P"][tr], x_face, ty, za, yaw, sx)
-                        used[aid].add(tr)
+                lot_rooms.append(
+                    ("window_lit" if on else "window_dark", room_quad(K["P"][ins], s, x_face, y_ins, za, sx, sy))
+                )
+                tr = K["cornice"] if f < lot["storeys"] - 1 else K["crown"]
+                if tr:
+                    put(tr, top, za, yaw)
             if K["pier"]:
                 for zp in (lot["z0"], lot["z1"]):
-                    inst += instance(aid, K["pier"], K["P"][K["pier"]], x_face, y, zp, frame(s, x_face, 0, 0)[0], 1.0)
+                    psy = sy if storey is None or f else (PLINTH + storey) / STOREY
+                    lot_inst.extend(
+                        instance(aid, K["pier"], K["P"][K["pier"]], x_face, y, zp, frame(s, x_face, 0, 0)[0], 1.0, psy)
+                    )
                 used[aid].add(K["pier"])
+        xf = lot.get("xform")
+        if xf:
+            yaw_l, tz = xf
+            c, sn = np.cos(np.radians(yaw_l)), np.sin(np.radians(yaw_l))
+            lot_inst = [
+                "AttributeBegin",
+                f"Translate 0 0 {_n(tz)}",
+                f"Rotate {_n(yaw_l)} 0 1 0",
+                *lot_inst,
+                "AttributeEnd",
+            ]
+            lot_rooms = [
+                (nm, np.stack([q[:, 0] * c + q[:, 2] * sn, q[:, 1], -q[:, 0] * sn + q[:, 2] * c + tz], 1))
+                for nm, q in lot_rooms
+            ]
+        inst += lot_inst
+        for nm, q in lot_rooms:
+            rooms[nm].append(q)
         meta.append(
-            {"lot": k, "kit": aid, "upper": up[0], "door": door[0], "ground": gwin[0], "bays": n, "bay_m": round(wb, 3)}
+            {
+                "lot": k,
+                "kit": aid,
+                "upper": up[0],
+                "door": door[0],
+                "ground": gwin[0],
+                "bays": n,
+                "bay_m": round(wb, 3),
+                **({"street": "cross"} if xf else {}),
+            }
         )
     L = ["# ---- facade kits (Poly Haven CC0)"]
     for aid, K in kp.items():
         if not used[aid]:
             continue
-        L += material_lines(aid, K["info"], K["raw"], out_dir)
+        L += material_lines(aid, K["info"], K["raw"], out_dir, metals)
         for node in sorted(used[aid]):
             L += object_lines(aid, node, K["P"][node], K["prep"], out_dir)
     L += inst

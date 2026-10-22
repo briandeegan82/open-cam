@@ -136,6 +136,25 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         help="Street fronts: procedural boxes with window quads, or assembled Poly Haven CC0 apartment/factory kits.",
     )
     ap.add_argument(
+        "--kit-storeys",
+        choices=("match", "kit"),
+        default="match",
+        help="Kits: match the procedural 0.8 m plinth + 3.2 m storeys (panels stretched, base course, "
+        "strip above the door), or the kit's own 3 m storeys.",
+    )
+    ap.add_argument(
+        "--kit-cross-street",
+        choices=("on", "off"),
+        default="on",
+        help="Kits: also build kit lots along the cross street (off: the plain procedural corner blocks).",
+    )
+    ap.add_argument(
+        "--kit-metals",
+        choices=("conductor", "diffuse"),
+        default="conductor",
+        help="Kits: metallic texels (glTF metallic map) as a textured conductor, or everything diffuse.",
+    )
+    ap.add_argument(
         "--facade-textures",
         choices=("none", "mixed"),
         default="none",
@@ -205,6 +224,37 @@ def corner_blocks() -> list[tuple[float, float, float, float]]:
     """Building footprints (x0, x1, z0, z1) on the four corners behind the sidewalks."""
     zn, zf = Z_INT - BUILD_X, Z_INT + BUILD_X
     return [(-X_FAR, -BUILD_X, Z0, zn), (BUILD_X, X_FAR, Z0, zn), (-X_FAR, -BUILD_X, zf, Z1), (BUILD_X, X_FAR, zf, Z1)]
+
+
+CROSS_KIT_Z = (14.0, 60.0)  # cross-street kit lots: from behind the corner lot's depth to the block end
+
+
+def cross_street_lots(seed: int) -> list[dict]:
+    """Kit lots facing the cross street on the four corner blocks (own RNG, so the rest is unchanged).
+
+    Each is built in the main-street frame (side ``s``, face at x = s BUILD_X, bays along +z) and
+    placed by ``xform``: Translate 0 0 Z_INT, Rotate 90 sx about y maps local (x, z) to world
+    (sx z, Z_INT - sx x); with s = -sx sz the face lands at z = Z_INT + sz BUILD_X."""
+    rng = np.random.default_rng([seed, 13])
+    lots = []
+    for sx in (-1, 1):
+        for sz in (-1, 1):
+            z, z1 = BUILD_X + CROSS_KIT_Z[0], BUILD_X + CROSS_KIT_Z[1]
+            while z < z1 - 4.0:
+                w = float(min(rng.uniform(8.0, 16.0), z1 - z))
+                lots.append(
+                    {
+                        "side": -sx * sz,
+                        "z0": z,
+                        "z1": z + w,
+                        "storeys": int(rng.integers(3, 7)),
+                        "depth": 14.0,
+                        "xform": (90.0 * sx, Z_INT),
+                        "corner": (sx, sz),
+                    }
+                )
+                z += w
+    return lots
 
 
 def building_lots(rng: np.random.Generator) -> list[dict]:
@@ -281,7 +331,13 @@ def facade_texture_lines(
 
 
 def facade_lines(
-    lots: list[dict], rng: np.random.Generator, dark: bool, lit: float, tex: list | None = None, kit: bool = False
+    lots: list[dict],
+    rng: np.random.Generator,
+    dark: bool,
+    lit: float,
+    tex: list | None = None,
+    kit: bool = False,
+    kit_storey: float | None = None,
 ) -> tuple[list[str], dict]:
     """Lot boxes plus a window grid on the street face (lit windows emit at dusk/night)."""
     L = ["# ---- facades (procedural)"]
@@ -294,7 +350,7 @@ def facade_lines(
         cx = x_face + s * lot["depth"] / 2
         depth = lot["depth"]
         if kit:  # box behind the kit wall plane, kit storey height
-            h, depth = fk.STOREY * lot["storeys"] + 0.3, lot["depth"] - fk.RECESS
+            h, depth = fk.lot_height(lot["storeys"], kit_storey) + 0.3, lot["depth"] - fk.RECESS
             cx = x_face + s * (fk.RECESS + depth / 2)
         mat = ("facade_render", "facade_brick", "concrete")[k % 3]
         cz, sz = (lot["z0"] + lot["z1"]) / 2, lot["z1"] - lot["z0"]
@@ -747,15 +803,28 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
 
     lots = building_lots(rng)
     kit_lines, kit_meta, kit_win = [], [], {}
+    kit_storey = None if getattr(args, "kit_storeys", "kit") == "kit" else fk.MATCH_STOREY
+    cross_kit = []
     if args.facade_style == "kits":
         kits = {aid: a for aid in fk.KITS if (a := asset(aid)) is not None}
         if kits:
+            if getattr(args, "kit_cross_street", "off") == "on":
+                cross_kit = cross_street_lots(args.seed)
             kit_lines, kit_meta, kit_win = fk.street_fronts(
-                lots, kits, BUILD_X, args.seed, dark, args.lit_windows, out_dir, WINDOW_LUMINANCE
+                lots + cross_kit,
+                kits,
+                BUILD_X,
+                args.seed,
+                dark,
+                args.lit_windows,
+                out_dir,
+                WINDOW_LUMINANCE,
+                storey=kit_storey,
+                metals=getattr(args, "kit_metals", "diffuse") == "conductor",
             )
     tl, tex, tex_meta = facade_texture_lines(args, asset, out_dir, len(lots), amanifest["assets"])
     L += tl
-    fl, facade_meta = facade_lines(lots, rng, dark, args.lit_windows, tex, kit=bool(kit_meta))
+    fl, facade_meta = facade_lines(lots, rng, dark, args.lit_windows, tex, kit=bool(kit_meta), kit_storey=kit_storey)
     L += fl + kit_lines
     if tex:
         facade_meta = {**facade_meta, "textures": tex_meta}
@@ -766,9 +835,29 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         for sz in (-1, 1):
             zc = Z_INT + sz * (HALF + WALK_W + 25.0)
             inset = fk.RECESS if kit_meta else 0.0  # keep the kit recess behind the wall plane clear
-            cross_lots.append(
-                box(sx * (BUILD_X + 30.0 + inset / 2), 0.0, zc, 60.0 - inset, 12.0 + 4.0 * rng.random(), 50.0)
-            )
+            h = 12.0 + 4.0 * rng.random()
+            if kit_meta and cross_kit:  # set back behind the cross-street kit lots
+                d0 = CROSS_KIT_Z[0]
+                zc = Z_INT + sz * (BUILD_X + d0 + (50.0 - d0) / 2)
+                cross_lots.append(box(sx * (BUILD_X + 30.0 + inset / 2), 0.0, zc, 60.0 - inset, h, 50.0 - d0))
+                continue
+            cross_lots.append(box(sx * (BUILD_X + 30.0 + inset / 2), 0.0, zc, 60.0 - inset, h, 50.0))
+    for lot in cross_kit if kit_meta else []:  # lot boxes behind the cross-street kit walls
+        s, (sx, _sz) = lot["side"], lot["corner"]
+        bx = s * (BUILD_X + fk.RECESS + (lot["depth"] - fk.RECESS) / 2)
+        p, tt = box(
+            bx,
+            0.0,
+            (lot["z0"] + lot["z1"]) / 2,
+            lot["depth"] - fk.RECESS,
+            fk.lot_height(lot["storeys"], kit_storey) + 0.3,
+            lot["z1"] - lot["z0"],
+        )
+        a = np.radians(90.0 * sx)
+        p = np.stack(
+            [p[:, 0] * np.cos(a) + p[:, 2] * np.sin(a), p[:, 1], -p[:, 0] * np.sin(a) + p[:, 2] * np.cos(a) + Z_INT], 1
+        )
+        cross_lots.append((p, tt))
     L += ['NamedMaterial "facade_render"', *[m for b in cross_lots for m in mesh(*b)], ""]
 
     emitters: list[dict] = []

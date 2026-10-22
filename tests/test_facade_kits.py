@@ -89,7 +89,9 @@ def test_kits_build_keeps_cars_and_emitters_and_lights_rooms_at_night(tmp_path):
     a, ma = _build(tmp_path / "a")
     b, mb = _build(tmp_path / "b", "--facade-style", "kits")
     kits = mb["facades"]["kits"]
-    assert len(kits) == mb["facades"]["lots"] and {k["kit"] for k in kits} == set(fk.KITS)
+    main = [k for k in kits if k.get("street") != "cross"]
+    assert len(main) == mb["facades"]["lots"] and {k["kit"] for k in kits} == set(fk.KITS)
+    assert len(kits) - len(main) == len(urban.cross_street_lots(0))  # default --kit-cross-street on
     assert all(abs(k["bay_m"] - fk.BAY) < 0.75 for k in kits)
     assert mb["cars"] == ma["cars"] and mb["emitters"] == ma["emitters"]
     assert mb["facades"]["windows_lit"] > 0 and mb["facades"]["windows_dark"] > 0
@@ -112,3 +114,41 @@ def test_kit_recess_is_not_covered_by_lot_or_back_block_boxes(tmp_path):
             seen += ax.size
             assert not np.any((ax > urban.BUILD_X - 0.01) & (ax < urban.BUILD_X + fk.RECESS - 0.01))
     assert seen > 0
+
+
+def test_cross_street_lots_face_the_cross_street():
+    import math
+
+    for lot in urban.cross_street_lots(7):
+        sx, sz = lot["corner"]
+        yaw, tz = lot["xform"]
+        a = math.radians(yaw)
+        for zl in (lot["z0"], lot["z1"]):
+            xl = lot["side"] * urban.BUILD_X  # wall plane in the main-street frame
+            wx, wz = xl * math.cos(a) + zl * math.sin(a), -xl * math.sin(a) + zl * math.cos(a) + tz
+            assert wz == pytest.approx(urban.Z_INT + sz * urban.BUILD_X)
+            assert sx * wx >= urban.BUILD_X + urban.CROSS_KIT_Z[0] - 1e-9
+
+
+def test_lot_height_matches_procedural_facades():
+    assert fk.lot_height(4, None) == pytest.approx(12.0)
+    assert fk.lot_height(4, fk.MATCH_STOREY) == pytest.approx(0.8 + 3.2 * 4)  # facade_lines' h
+
+
+@pytest.mark.skipif(not HAVE, reason="facade kits not prepared (tools/fetch_highway_assets.py)")
+def test_kit_storeys_and_metals_options(tmp_path):
+    new, _ = _build(tmp_path / "n", "--facade-style", "kits")
+    old, _ = _build(
+        tmp_path / "o",
+        "--facade-style",
+        "kits",
+        "--kit-storeys",
+        "kit",
+        "--kit-cross-street",
+        "off",
+        "--kit-metals",
+        "diffuse",
+    )
+    assert re.search(r"Scale [0-9.]+ 1\.0667 1", new) and not re.search(r"Scale [0-9.]+ 1\.0667", old)
+    assert '"string type" "conductor"' in new and '"string type" "mix"' in new and "conductor" not in old
+    assert new.count("ObjectInstance") > old.count("ObjectInstance")  # cross-street fronts
