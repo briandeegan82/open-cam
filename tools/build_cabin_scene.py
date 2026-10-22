@@ -72,6 +72,20 @@ def mat(name: str, refl: np.ndarray) -> str:
     return f'MakeNamedMaterial "{name}" "string type" "diffuse" "spectrum reflectance" {_spd(WL, refl)}'
 
 
+def lens_slab_transmittance(cos_theta: float, eta: float = 1.5) -> float:
+    """Thin-slab transmittance 1 - R_slab, incoherent multiple reflections (pbrt ThinDielectricBxDF)."""
+    c = cos_theta
+    s2 = max(0.0, 1 - c * c) / eta**2
+    if s2 >= 1:
+        return 0.0
+    ct = math.sqrt(1 - s2)
+    rs = ((c - eta * ct) / (c + eta * ct)) ** 2
+    rp = ((eta * c - ct) / (eta * c + ct)) ** 2
+    r = 0.5 * (rs + rp)
+    t = 1 - r
+    return 1 - (r + t * t * r / (1 - r * r))
+
+
 def box(c, s) -> str:
     x, y, z = c
     a, b, d = (v / 2 for v in s)
@@ -171,7 +185,11 @@ def build(args) -> dict:
             if args.cornea_roughness > 0
             else ""
         ),
-        'MakeNamedMaterial "lens" "string type" "dielectric" "float eta" [1.5]',
+        (
+            'MakeNamedMaterial "lens" "string type" "thindielectric" "float eta" [1.5] "bool passthrough" true'
+            if args.glasses_model == "thin"
+            else 'MakeNamedMaterial "lens" "string type" "dielectric" "float eta" [1.5]'
+        ),
         "AttributeBegin",
         'NamedMaterial "skin"',
         f"Translate {HEAD[0]:g} {HEAD[1]:g} {HEAD[2]:g} Scale {HEAD_AXES[0]} {HEAD_AXES[1]} {HEAD_AXES[2]}",
@@ -239,7 +257,16 @@ def build(args) -> dict:
         L.append('AttributeBegin NamedMaterial "lens"')
         for e in eyes:
             c = np.array(e["eye_centre"]) + np.array([0, 0, -0.02])
-            L.append(box(tuple(c), (0.05, 0.035, 0.002)))
+            if args.glasses_model == "thin":  # one surface stands for both faces of the 2 mm lens
+                x, y, z = c
+                pts = " ".join(
+                    f"{u:.5g}"
+                    for i, j in ((-1, -1), (1, -1), (1, 1), (-1, 1))
+                    for u in (x + i * 0.025, y + j * 0.0175, z)
+                )
+                L.append(f'Shape "trianglemesh" "integer indices" [0 1 2 0 2 3] "point3 P" [{pts}]')
+            else:
+                L.append(box(tuple(c), (0.05, 0.035, 0.002)))
         L.append("AttributeEnd")
     (out / "cabin.pbrt").write_text("\n".join(L) + "\n")
     manifest = {
@@ -261,6 +288,8 @@ def build(args) -> dict:
             "gaze_pitch_deg": args.gaze_pitch_deg,
             "pupil_mm": args.pupil_mm,
             "glasses": args.glasses,
+            "glasses_model": args.glasses_model if args.glasses else None,
+            "lens_transmittance_normal": round(lens_slab_transmittance(1.0), 4) if args.glasses else None,
             "cornea_roughness_alpha": args.cornea_roughness,
             "eyes": eyes,
         },
@@ -294,7 +323,15 @@ def parse_args(argv=None) -> argparse.Namespace:
     ap.add_argument("--gaze-yaw-deg", type=float, default=0.0)
     ap.add_argument("--gaze-pitch-deg", type=float, default=0.0)
     ap.add_argument("--pupil-mm", type=float, default=6.0, help="Pupil diameter (night: ~6 mm).")
-    ap.add_argument("--glasses", action="store_true")
+    ap.add_argument("--glasses", action="store_true", help="Flat n = 1.5 spectacle lenses, 20 mm in front of the eyes.")
+    ap.add_argument(
+        "--glasses-model",
+        choices=("thin", "slab"),
+        default="thin",
+        help="thin: one thin-dielectric surface that light, including shadow rays, passes with the "
+        "two-face Fresnel transmittance (pbrt patch 0017); slab: the old 2 mm dielectric box, which "
+        "blocks shadow rays (eyes dark and noisy).",
+    )
     ap.add_argument(
         "--cornea-roughness",
         type=float,

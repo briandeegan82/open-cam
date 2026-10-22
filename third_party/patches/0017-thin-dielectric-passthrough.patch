@@ -1,0 +1,135 @@
+--- a/src/pbrt/materials.h
++++ b/src/pbrt/materials.h
+@@ -239,8 +239,25 @@
+         return ThinDielectricBxDF(sampledEta);
+     }
+ 
+-    ThinDielectricMaterial(Spectrum eta, FloatTexture displacement, Image *normalMap)
+-        : displacement(displacement), normalMap(normalMap), eta(eta) {}
++    ThinDielectricMaterial(Spectrum eta, FloatTexture displacement, Image *normalMap,
++                           bool passthrough = false)
++        : displacement(displacement), normalMap(normalMap), eta(eta),
++          passthrough(passthrough) {}
++
++    // open-cam: "bool passthrough" (spectacle lens). The volpath integrator treats
++    // transmission as a null interface (unscattered, so MIS state is kept) and shadow
++    // rays pass it with the slab transmittance 1 - R(cos theta).
++    PBRT_CPU_GPU bool Passthrough() const { return passthrough; }
++    PBRT_CPU_GPU Float SlabReflectance(Float cosTheta,
++                                       const SampledWavelengths &lambda) const {
++        Float e = eta(lambda[0]);
++        if (e == 0)
++            e = 1;
++        Float R = FrDielectric(cosTheta, e), T = 1 - R;
++        if (R < 1)
++            R += Sqr(T) * R / (1 - Sqr(R));
++        return R;
++    }
+ 
+     static const char *Name() { return "ThinDielectricMaterial"; }
+ 
+@@ -266,6 +283,7 @@
+     FloatTexture displacement;
+     Image *normalMap;
+     Spectrum eta;
++    bool passthrough = false;
+ };
+ 
+ // MixMaterial Definition
+--- a/src/pbrt/materials.cpp
++++ b/src/pbrt/materials.cpp
+@@ -93,7 +93,10 @@
+ 
+     FloatTexture displacement = parameters.GetFloatTextureOrNull("displacement", alloc);
+ 
+-    return alloc.new_object<ThinDielectricMaterial>(eta, displacement, normalMap);
++    bool passthrough = parameters.GetOneBool("passthrough", false);
++
++    return alloc.new_object<ThinDielectricMaterial>(eta, displacement, normalMap,
++                                                    passthrough);
+ }
+ 
+ // MixMaterial Method Definitions
+--- a/src/pbrt/cpu/integrators.cpp
++++ b/src/pbrt/cpu/integrators.cpp
+@@ -44,6 +44,15 @@
+ 
+ namespace pbrt {
+ 
++// open-cam: thin-dielectric surface with "bool passthrough" (see ThinDielectricMaterial)
++static const ThinDielectricMaterial *PassthroughLens(Material m) {
++    if (!m || !m.Is<ThinDielectricMaterial>())
++        return nullptr;
++    const ThinDielectricMaterial *t = m.Cast<ThinDielectricMaterial>();
++    return t->Passthrough() ? t : nullptr;
++}
++
++
+ STAT_COUNTER("Integrator/Camera rays traced", nCameraRays);
+ 
+ // RandomWalkIntegrator Method Definitions
+@@ -334,8 +343,12 @@
+     while (true) {
+         pstd::optional<ShapeIntersection> si = Intersect(ray, 1 - ShadowEpsilon);
+         // Handle opaque surface along ray's path
+-        if (si && si->intr.material)
+-            return SampledSpectrum(0.0f);
++        if (si && si->intr.material) {
++            const ThinDielectricMaterial *lens = PassthroughLens(si->intr.material);
++            if (!lens)
++                return SampledSpectrum(0.0f);
++            Tr *= 1 - lens->SlabReflectance(AbsDot(Normalize(ray.d), si->intr.n), lambda);
++        }
+ 
+         // Update transmittance for current ray segment
+         if (ray.medium) {
+@@ -1173,6 +1186,15 @@
+             isect.SkipIntersection(&ray, si->tHit);
+             continue;
+         }
++        // Passthrough lens: transmit as a null interface with probability T, else reflect
++        Float lensR = 0;
++        if (const ThinDielectricMaterial *lens = PassthroughLens(isect.material)) {
++            lensR = lens->SlabReflectance(AbsDot(Normalize(ray.d), isect.n), lambda);
++            if (sampler.Get1D() >= lensR) {
++                isect.SkipIntersection(&ray, si->tHit);
++                continue;
++            }
++        }
+ 
+         // Initialize _visibleSurf_ at first intersection
+         if (depth == 0 && visibleSurf) {
+@@ -1222,11 +1244,16 @@
+         // Sample BSDF to get new volumetric path direction
+         Vector3f wo = isect.wo;
+         Float u = sampler.Get1D();
+-        pstd::optional<BSDFSample> bs = bsdf.Sample_f(wo, u, sampler.Get2D());
++        pstd::optional<BSDFSample> bs =
++            lensR > 0 ? bsdf.Sample_f(wo, u, sampler.Get2D(), TransportMode::Radiance,
++                                      BxDFReflTransFlags::Reflection)
++                      : bsdf.Sample_f(wo, u, sampler.Get2D());
+         if (!bs)
+             break;
+         // Update _beta_ and rescaled path probabilities for BSDF scattering
+         beta *= bs->f * AbsDot(bs->wi, isect.shading.n) / bs->pdf;
++        if (lensR > 0)
++            beta /= lensR;  // reflection was chosen with probability lensR
+         if (bs->pdfIsProportional)
+             r_l = r_u / bsdf.PDF(wo, bs->wi);
+         else
+@@ -1391,8 +1418,13 @@
+         // Trace ray through media to estimate transmittance
+         pstd::optional<ShapeIntersection> si = Intersect(lightRay, 1 - ShadowEpsilon);
+         // Handle opaque surface along ray's path
+-        if (si && si->intr.material)
+-            return SampledSpectrum(0.f);
++        if (si && si->intr.material) {
++            const ThinDielectricMaterial *lens = PassthroughLens(si->intr.material);
++            if (!lens)
++                return SampledSpectrum(0.f);
++            T_ray *= 1 - lens->SlabReflectance(AbsDot(Normalize(lightRay.d), si->intr.n),
++                                               lambda);
++        }
+ 
+         // Update transmittance for current ray segment
+         if (lightRay.medium) {

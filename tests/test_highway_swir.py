@@ -101,6 +101,68 @@ class TestBuilder(unittest.TestCase):
             w0, sun0 = read_spd(d0 / "spd" / "sun.spd")
             np.testing.assert_allclose(sun[: w0.size], sun0, rtol=1e-5)
 
+    def test_swir_surfaces_lamps_and_gas(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            m, _, d = build_offline(
+                Path(td),
+                *("--sky", "analytic", "--spectral-lambda-max", "1600", "--film-lambda-min", "900"),
+                *("--haze", "hazy", "--time-of-day", "night", "--streetlights", "hps"),
+            )
+            w, white = read_spd(d / "spd" / "paint_road_white.spd")
+            vis = w <= swir.JOIN_NM
+            np.testing.assert_allclose(white[vis], reflectance("paint_road_white", w[vis]), rtol=1e-5)
+            # C-H overtone dip of the TiO2-pigmented polymer proxy (white vinyl) below its 1.25 um value
+            self.assertLess(np.interp(1730.0 if w[-1] > 1730 else 1400.0, w, white), np.interp(1250.0, w, white))
+            self.assertIn("surfaces", m["swir"])
+            w, hps = read_spd(d / "spd" / "lamp_hps.spd")
+            self.assertEqual(w[-1], 1600.0)
+            self.assertGreater(np.interp(1138.0, w, hps), 10 * np.interp(1250.0, w, hps))
+            w, sa = read_spd(d / "spd" / "haze_sigma_a.spd")
+            self.assertGreater(np.interp(1380.0, w, sa), 20 * np.interp(1250.0, w, sa))
+            self.assertEqual(m["swir"]["path_gas_absorption"]["h2o_gm3"], swir.H2O_DEFAULT_GM3)
+
+    def test_gas_compensation_on_sun(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            m, _, d = build_offline(
+                Path(td),
+                "--sky",
+                "analytic",
+                "--spectral-lambda-max",
+                "1600",
+                "--film-lambda-min",
+                "900",
+                "--spectral-nbuckets",
+                "36",
+                "--haze",
+                "hazy",
+            )
+            comp = m["atmosphere"]["swir_gas_compensation"]
+            w, sun = read_spd(d / "spd" / "sun.spd")
+            sun0 = swir.sun_spectrum(w, hw.solar_direct_spectrum(w, m["lighting"]["sun"]["elevation_deg"]))
+            np.testing.assert_allclose(sun[w <= 830.0], sun0[w <= 830.0], rtol=1e-4)
+            k = np.exp(swir.gas_sigma_a(1380.0, swir.H2O_DEFAULT_GM3) * comp["layer_column_m"] * comp["sun_airmass"])
+            self.assertAlmostEqual(np.interp(1380.0, w, sun) / np.interp(1380.0, w, sun0), k, delta=0.02 * k)
+
+    def test_gas_sigma_a(self) -> None:
+        wl = np.array([550.0, 820.0, 1250.0, 1380.0, 1870.0])
+        sa = swir.gas_sigma_a(wl, 10.0)
+        self.assertEqual(sa[0], 0.0)
+        self.assertEqual(sa[1], 0.0)  # visible / NIR below the join untouched
+        t100 = np.exp(-100.0 * sa)
+        self.assertGreater(t100[2], 0.99)  # 1.25 um window
+        self.assertLess(t100[3], 0.9)  # 1.38 um band over 100 m of humid air
+        self.assertLess(t100[4], t100[3] + 0.1)
+        np.testing.assert_allclose(swir.gas_sigma_a(wl, 20.0), 2 * sa)
+
+    def test_skin_water_absorption_continues_past_1100_nm(self) -> None:
+        import nir_skin
+
+        mua = nir_skin.water_mua(np.array([1090.0, 1100.0, 1110.0, 1450.0]))
+        self.assertAlmostEqual(mua[2] / mua[1], 1.0, delta=0.5)  # Segelstein meets Hale & Querry
+        self.assertGreater(mua[3], 20.0)  # 1.45 um band, ~30 /cm
+        r = nir_skin.skin_reflectance(np.array([1100.0, 1450.0]))
+        self.assertLess(r[1], 0.3 * r[0])
+
     def test_default_unchanged(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             m, scene, _ = build_offline(Path(td), "--sky", "analytic")

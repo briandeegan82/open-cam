@@ -262,6 +262,53 @@ def integrator_maxdepth(p: HazeParams, base: int, override: int | None = None) -
 # ---- optical properties
 
 
+def swir_gas_sigma_a(args: argparse.Namespace, wl) -> np.ndarray:
+    """SWIR builds: gas-band absorption above 830 nm (tools/highway_swir.py); 0 otherwise."""
+    import highway_swir
+
+    if not highway_swir.enabled(args) or getattr(args, "swir_h2o_gm3", 0.0) <= 0:
+        return np.zeros(np.shape(wl))
+    return highway_swir.gas_sigma_a(wl, args.swir_h2o_gm3)
+
+
+SKY_GAS_AIRMASS = 1.66  # diffusivity factor for the sky dome
+GAS_COMPENSATION_MAX_TAU = 30.0
+
+
+def swir_gas_compensation(p: HazeParams, args: argparse.Namespace, spd_dir, elev_deg: float) -> dict:
+    """Undo the gas absorption the haze layer adds on the sun and sky paths.
+
+    The G173 sun and sky are ground-level spectra that already include the atmosphere's gas bands, so
+    ``sun.spd`` and ``sky_basis_*.spd`` are divided by the layer's gas transmittance (column x air
+    mass) and only the scene paths keep the extra absorption. Capped at exp(30) where G173 is ~0.
+    """
+    from pathlib import Path
+
+    import highway_swir
+
+    if not highway_swir.enabled(args) or getattr(args, "swir_h2o_gm3", 0.0) <= 0:
+        return {}
+    yc, rho = grid_profile(p)
+    up = yc >= 0.0
+    col = float(np.trapezoid(rho[up], yc[up]))
+    sun_m = 1.0 / math.sin(math.radians(max(elev_deg, 5.0)))
+    sky = ((f, SKY_GAS_AIRMASS) for f in sorted(Path(spd_dir).glob("sky_basis_*.spd")))
+    for f, m in [(Path(spd_dir) / "sun.spd", sun_m), *sky]:
+        if not f.is_file():
+            continue
+        d = np.loadtxt(f)
+        tau = highway_swir.gas_sigma_a(d[:, 0], args.swir_h2o_gm3) * col * m
+        v = d[:, 1] * np.exp(np.minimum(tau, GAS_COMPENSATION_MAX_TAU))
+        v = np.where(np.abs(v) < 1e-20, 0.0, v)
+        f.write_text("".join(f"{a:g} {b:.6g}\n" for a, b in zip(d[:, 0], v, strict=True)))
+    return {
+        "layer_column_m": col,
+        "sun_airmass": sun_m,
+        "sky_airmass": SKY_GAS_AIRMASS,
+        "note": "sun/sky SPDs divided by the layer gas transmittance (G173 is a ground-level spectrum)",
+    }
+
+
 def extinction_550(p: HazeParams) -> float:
     """Total extinction at 550 nm [1/m] at road level: -ln(C) / V."""
     return -math.log(VISIBILITY_CONTRAST[p.visibility_definition]) / p.visibility_m
@@ -611,6 +658,7 @@ def setup_scene(
     from colour_science import CMF_WAVELENGTH_NM, CMF_Y
 
     sa, ss, _ = coefficients(p, wl)
+    sa = sa + swir_gas_sigma_a(args, wl)
     for name, val in (("haze_sigma_a", sa), ("haze_sigma_s", ss)):
         (spd_dir / f"{name}.spd").write_text("\n".join(f"{w:.1f} {v:.6g}" for w, v in zip(wl, val)) + "\n")
     wl_mc = np.arange(400.0, 701.0, 20.0)
@@ -633,8 +681,10 @@ def setup_scene(
         road = {key: (v * k if key.endswith("_lux") else v) for key, v in road.items()}
     maxdepth = integrator_maxdepth(p, args.maxdepth, args.haze_maxdepth)
     entry = manifest_entry(p, wl)
+    gas_comp = swir_gas_compensation(p, args, spd_dir, elev)
     entry.update(
         {
+            **({"swir_gas_compensation": gas_comp} if gas_comp else {}),
             "light_reference": args.haze_light_reference,
             "light_scale_applied": k,
             "no_medium_horizontal_illuminance_lux": e_ref,
@@ -721,6 +771,7 @@ def setup_scene_night(p: HazeParams, args: argparse.Namespace, *, wl: np.ndarray
     from highway_night import LIGHT_WL
 
     sa, ss, _ = coefficients(p, wl)
+    sa = sa + swir_gas_sigma_a(args, wl)
     for name, val in (("haze_sigma_a", sa), ("haze_sigma_s", ss)):
         (spd_dir / f"{name}.spd").write_text("\n".join(f"{w:.1f} {v:.6g}" for w, v in zip(wl, val)) + "\n")
     road = road_illuminance_sources(p, sources, ground_albedo=args.haze_ground_albedo, spd_wl=LIGHT_WL)
