@@ -137,6 +137,33 @@ Validation figure (`tools/plot_lens_ghost_validation.py`): coating spectra, ghos
 (exact vs paraxial), total ghost energy vs angle, and the stray-light scene with uncoated / MgF2 /
 QHQ coatings.
 
+## Sensor stack: IR-cut filter and cover glass (`sensor_stack`, opt-in)
+
+`traced_ghosts.sensor_stack` adds plane-parallel plates between the last lens surface and the
+film. Their four faces join the two-reflection paths, so `wide_22mm` goes from 66 to 120 ghosts.
+- `cover_glass`: a 0.4 mm cover glass, n = 1.523, MgF2 on both faces, 0.5 mm in front of the die.
+- `ircf_cover_glass`: the cover glass plus a 0.3 mm IR-cut filter 0.8 mm in front of it.
+- An explicit list of plates: `thickness_mm`, `n`, `gap_after_mm`, `coating`, `semi_aperture_mm`,
+  and optionally `filter_csv`, `filter_face` and `filter_n_eff`.
+
+The geometry is nominal, not a specific sensor. The film moves by the plates' focus shift,
+sum t (1 - 1/n), so the traced primary image stays in focus. The pbrt render itself has no
+plates.
+
+The IR-cut face is a lossless interference edge filter: R = 1 - T, where T is the sensor's IRCF
+curve (`spectra/QE/interpolated/QE_IRCF.csv`). The edge moves to shorter wavelengths with
+angle, T(lambda / s), with s = sqrt(1 - (sin theta / n_eff)^2) and n_eff = 1.8. The filter
+therefore reflects most of the red and near-IR back into the lens. The sensor model already
+applies the IRCF transmittance (`ircf_csv`) to everything on the film, so each path's last pass
+through the filter face is left to it and not counted twice.
+
+Sample: `wide_22mm` at f/2.75, a flat-spectrum point source, the IRCF applied as on the sensor,
+and luminance-weighted.
+- *Ghost energy:* 0.06 % of the source with the lens only, 0.28 % with `ircf_cover_glass`.
+- *Where it goes:* most of the added ghost light is a red halo close to the source, between the
+  IR-cut face and the plates behind it and the last lens surfaces.
+- *Before the sensor's IRCF:* the ghost share at 680 nm rises from 0.17 % to 4.0 %.
+
 ## Limitations (not modelled)
 
 - Geometric optics only. No diffraction from the iris on the ghosts, and no coherent interference
@@ -148,8 +175,9 @@ QHQ coatings.
 - Bulk absorption needs a glass sidecar. Without one, glass is treated as clear.
 - Two reflections only. Four-reflection paths are about R^2 weaker (<1e-3 of two-reflection paths
   with AR coatings).
-- No barrel/mount scatter, no sensor cover glass / IR filter (approximate with `sensor_reflectance`),
-  and no veiling glare from the diffuse scene. Use `post_psf.stray_light` for that.
+- No barrel/mount scatter and no veiling glare from the diffuse scene. Use `post_psf.stray_light`
+  for that. The sensor-stack plates (below) are opt-in, their geometry is nominal, and their glass
+  has no dispersion or absorption.
 - Sources are treated as at infinity (collimated). Below-threshold scene content casts no ghosts.
 - Extended sources are sampled at `cluster_px` (default 8 px; flux-weighted centroid per block).
   Strongly magnified ghosts of an extended source therefore show faint `cluster_px`-step contours.

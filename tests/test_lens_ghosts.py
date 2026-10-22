@@ -597,3 +597,54 @@ def test_render_ghosts_independent_of_worker_count():
         out.append((ghost, rep["ghost_to_source_energy"]))
     np.testing.assert_allclose(out[0][0], out[1][0], rtol=1e-5, atol=1e-9)
     assert out[0][1] == pytest.approx(out[1][1], rel=1e-9)
+
+
+def test_sensor_stack_geometry_and_focus():
+    bare = lg.load_lens(WIDE)
+    lens = lg.load_lens(WIDE, sensor_stack="ircf_cover_glass")
+    plates = lens.surfaces[len(bare.surfaces) :]
+    assert [s.name for s in plates] == ["ircf front", "ircf rear", "cover_glass front", "cover_glass rear"]
+    assert all(not math.isfinite(s.radius) for s in plates) and plates[0].edge_filter is not None
+    assert plates[0].z > bare.surfaces[-1].z and lens.z_film - plates[-1].z == pytest.approx(0.5)
+    shift = 0.7 * (1 - 1 / 1.523)
+    assert lens.z_film - bare.z_film == pytest.approx(shift)
+    # Paraxial focus at infinity: the primary path's A element vanishes on the film with or without plates.
+    for ln in (bare, lens):
+        m = lg.paraxial_path_matrix(ln, lg.primary_path(ln))
+        assert abs(m[0, 0]) < 2e-3
+    assert len(lg.ghost_pairs(lens)) == 120 and len(lg.ghost_pairs(bare)) == 66
+    assert len(lg.lens_at_wavelength(lens, 450.0).surfaces) == len(lens.surfaces)
+
+
+def test_edge_filter_blue_shift_and_final_pass():
+    f = lg._load_edge_filter(lg.SENSOR_STACKS["ircf_cover_glass"][0])
+    lams = [550.0, 640.0, 750.0]
+    r0, r30 = lg.edge_filter_reflectance(f, lams, np.array([0.0, math.sin(math.radians(30))]))
+    assert r0[0] < 0.1 and r0[2] > 0.99 and r30[1] > r0[1]  # the edge moves to shorter wavelengths
+    # The last pass through the filter face is the sensor's ircf_csv: the primary path does not see it.
+    plain = [dict(x) for x in lg.SENSOR_STACKS["ircf_cover_glass"]]
+    plain[0].pop("filter_csv")
+    a = lg.load_lens(WIDE, sensor_stack="ircf_cover_glass")
+    b = lg.load_lens(WIDE, sensor_stack=plain)
+    b.surfaces[len(lg.load_lens(WIDE).surfaces)].coating = lc.coating_for_interface("uncoated", 1.0, 1.0)
+    d = lg.direction_from_angles(math.radians(5.0))
+    o, dd, _c, _s = lg.collimated_beam(a, d, 24)
+    k = len(lg.load_lens(WIDE).surfaces)
+    pa = lg.path_weights(a, lg.trace(a, lg.primary_path(a), o, dd), [600.0, 800.0])
+    rb = lg.trace(b, lg.primary_path(b), o, dd)
+    pb = lg.path_weights(b, rb, [600.0, 800.0])
+    _k, _kind, n1, n2, beta = next(ev for ev in rb.events if ev[0] == k)
+    r_face, _t = lc.interface_rt(np.array([[600.0, 800.0]]), beta[:, None], n1, n2, b.surfaces[k].coating)
+    np.testing.assert_allclose(pa, pb / (1.0 - r_face), rtol=1e-9)  # same path minus the filter face
+    # A ghost reflecting at the IR-cut face is strong in the near IR, weak in the pass band.
+    e = lg.ghost_energy_fractions(a, d, [550.0, 750.0], n_grid=32)["ghosts"]
+    g = e[(k, k + 1)]["energy"]
+    assert g[1] > 20 * g[0]
+
+
+def test_sensor_stack_off_by_default():
+    assert lg.DEFAULTS["sensor_stack"] is None
+    lens = lg.lens_from_config(lg.resolve_config({"lens_file": str(WIDE)}), REPO)
+    assert len(lens.surfaces) == len(lg.load_lens(WIDE).surfaces)
+    with pytest.raises(ValueError):
+        lg.resolve_sensor_stack("bogus")
