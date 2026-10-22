@@ -88,6 +88,20 @@ class TestPhaseParams(unittest.TestCase):
         p = atm.params_from_args(hw.parse_args(["--haze", "clear", "--haze-phase", "mixed"]))
         self.assertEqual(p.phase, "mixed")
 
+    def test_two_component_keeps_swir_gas_absorption(self):
+        import build_highway_scene as hw
+
+        args = hw.parse_args(["--haze", "clear", "--haze-phase", "two-component", "--spectral-lambda-max", "1700"])
+        p = atm.params_from_args(args)
+        wl = np.arange(360.0, 1701.0, 10.0)
+        gas = atm.swir_gas_sigma_a(args, wl)
+        self.assertGreater(gas.max(), 0.0)
+        with tempfile.TemporaryDirectory() as td:
+            out = atm.write_medium_spds(p, wl, Path(td), args)
+            sa = np.loadtxt(Path(td) / Path(out["sigma_a"]).name)[:, 1]
+        self.assertIn("sigma_rayleigh", out)
+        np.testing.assert_allclose(sa, atm.components(p, wl)[0] + gas, rtol=1e-5, atol=1e-12)
+
 
 @unittest.skipUnless(PBRT.is_file(), f"pbrt binary not built ({PBRT}); see docs/BUILD_PBRT.txt")
 class TestPbrtPhaseMixture(unittest.TestCase):

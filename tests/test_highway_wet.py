@@ -148,6 +148,54 @@ class TestBuilderWet(unittest.TestCase):
             self.assertNotIn("spray", ta)
             self.assertNotIn("1.333", ta)
 
+    def test_raindrop_impact_rate(self) -> None:
+        self.assertEqual(wet.impact_rate(0.0), 0.0)
+        r = [wet.impact_rate(x) for x in (1.0, 10.0, 40.0)]
+        self.assertTrue(r[0] < r[1] < r[2])
+        self.assertGreater(r[1], 1e3)
+        self.assertLess(r[1], 1e4)
+
+    def test_ripple_field(self) -> None:
+        n1, m1 = wet.ripple_field(2.0, 0.5, np.random.default_rng(1))
+        n2, m2 = wet.ripple_field(30.0, 0.5, np.random.default_rng(1))
+        self.assertEqual(n1.shape, (250, 250, 3))
+        np.testing.assert_allclose(np.linalg.norm(n2, axis=-1), 1.0, atol=1e-5)
+        self.assertGreater(float(n2[..., 2].min()), 0.9)
+        self.assertGreater(m2["rings_in_tile"], m1["rings_in_tile"])
+        self.assertGreater(m2["rms_slope"], m1["rms_slope"])
+
+    def test_rain_ripples_on_puddles(self) -> None:
+        base = ("--road-wear", "moderate", "--road-wetness", "wet", "--puddles", "--rain-mmh", "5")
+        with tempfile.TemporaryDirectory() as td:
+            m = build_without_assets(Path(td), *base)
+            txt = (Path(td) / "scene" / "highway.pbrt").read_text()
+            puddle = txt.split('MakeNamedMaterial "wet:puddle"')[1].split("MakeNamedMaterial")[0]
+            self.assertIn('"string normalmap" "textures/road_wear/ripples_5mmh_s', puddle)
+            self.assertEqual(m["road"]["wet"]["ripples"]["on"], ["puddles"])
+        with tempfile.TemporaryDirectory() as td:
+            m = build_without_assets(Path(td), *base, "--rain-ripples", "off")
+            self.assertNotIn("ripples_", (Path(td) / "scene" / "highway.pbrt").read_text())
+            self.assertNotIn("ripples", m["road"]["wet"])
+
+    def test_tyre_tracks(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            m = build_without_assets(
+                Path(td), "--road-wear", "moderate", "--road-wetness", "damp", "--tyre-tracks", "0.7"
+            )
+            txt = (Path(td) / "scene" / "highway.pbrt").read_text()
+            self.assertIn('"string materials" ["wet:film" "dry:asphalt"] "texture amount" "wet:track"', txt)
+            dry = [ln for ln in txt.splitlines() if ln.startswith('Texture "dry:rw:A:aged"')]
+            self.assertEqual(len(dry), 1)
+            self.assertIn('"spd/asphalt_aged.spd"', dry[0])
+            t = m["road"]["wet"]["tyre_tracks"]
+            self.assertGreater(t["dry_area_fraction"], 0.0)
+            self.assertLess(t["dry_area_fraction"], 0.7)
+        for extra in (("--road-wetness", "flooded"), ("--road-wetness", "wet", "--puddles")):
+            with tempfile.TemporaryDirectory() as td, self.assertRaises(SystemExit):
+                build_without_assets(Path(td), "--road-wear", "moderate", *extra, "--tyre-tracks", "0.5")
+        with tempfile.TemporaryDirectory() as td, self.assertRaises(SystemExit):
+            build_without_assets(Path(td), "--road-wear", "moderate", "--road-wetness", "wet", "--tyre-tracks", "1.5")
+
     def test_wet_day_scene(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             m = build_without_assets(Path(td), "--road-wetness", "wet", "--puddles", "--spray")

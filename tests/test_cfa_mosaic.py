@@ -296,3 +296,48 @@ def test_render_cfa_rgb_keeps_clipped_highlights_white() -> None:
         )
         hi = rgb[7, 7] - black
         assert bool(np.ptp(hi) < 1e-6 * hi.max()) is neutral
+
+
+@pytest.mark.parametrize("layout", ["RCCB", "RGBW"])
+def test_hdr_pixel_modes_run_on_generic_layouts(layout) -> None:
+    import yaml
+
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        exr = write_spectral_exr(tmp / "scene.exr", _scene(), SPECTRAL_LAMBDAS_NM)
+        chans = {c: v for c, v in _channel_qe(tmp).items()}
+        cfa = {"layout": layout, "channels": chans}
+        _, plain = _run(tmp, _cfg(tmp, exr, cfa))
+        ref_e = (np.fromfile(tmp / "noisy.raw16", dtype=np.uint16).astype(float) - 64.0) * 0.25
+        cfg_path = _cfg(tmp, exr, cfa)
+        cfg = yaml.safe_load(cfg_path.read_text())
+        cfg["hdr"] = {
+            "enabled": True,
+            "architecture": "dcg",
+            "dcg": {
+                "photodiode_full_well_e": 1e6,
+                "hcg": {"K_e_per_DN": 0.25, "sigma_e": 0.0, "full_well_e": float(0.25 * ref_e.max())},
+                "lcg": {"K_e_per_DN": 2.0, "sigma_e": 0.0, "full_well_e": 1e6, "bit_depth": 16},
+            },
+        }
+        cfg_path.write_text(yaml.safe_dump(cfg))
+        _, stats = _run(tmp, cfg_path)
+        hdr_e = np.load(tmp / "noisy_hdr" / "hdr_linear.npz")["hdr_e"].ravel()
+        meta = json.loads((tmp / "noisy_hdr" / "hdr_metadata.json").read_text())
+    assert stats["cfa"]["layout"] == plain["cfa"]["layout"]
+    h = np.asarray(meta["n_valid_readouts_histogram"])
+    assert h[1] > 0 and h[2] > 0  # both the LCG-only and the merged regime occur
+    assert np.allclose(hdr_e, ref_e, atol=1.0)  # noise-free: the merge recovers each site's charge
+
+
+def test_hdr_channel_ratios_need_rgb_channels() -> None:
+    import hdr_pixel as hp
+
+    lay = cm.resolve_layout({"layout": "RCCB", "channels": {c: {"qe_csv": "x"} for c in "RCB"}})
+    spd = hp.Collector("spd", 0.02, response_rgb=(0.02, 0.02, 0.02))
+    with pytest.raises(ValueError, match="'C'"):
+        hp.response_map(spd, (4, 4), cfa_layout=lay)
+    lay = cm.resolve_layout({"layout": "RGGB", "channels": {c: {"qe_csv": "x"} for c in "RGB"}})
+    spd = hp.Collector("spd", 0.02, response_rgb=(0.01, 0.02, 0.03))
+    ref = hp.response_map(spd, (4, 4), bayer_pattern="RGGB")
+    assert np.array_equal(hp.response_map(spd, (4, 4), cfa_layout=lay), ref)

@@ -47,9 +47,18 @@ import highway_swir as swir  # noqa: E402
 import highway_variety as variety  # noqa: E402
 import highway_vru as vru  # noqa: E402
 import highway_wet as wet  # noqa: E402
+import plant_variants  # noqa: E402
 import road_rtable as rt  # noqa: E402
 from fetch_highway_assets import cache_root, load_asset_manifest  # noqa: E402
-from highway_road_wear import WEAR_LEVELS, RoadWear, linear_normal_map  # noqa: E402
+from highway_road_wear import (  # noqa: E402
+    TILE_M,
+    TONE_TILE_M,
+    WEAR_LEVELS,
+    RoadWear,
+    detiled_maps,
+    linear_normal_map,
+    tonal_mask,
+)
 from highway_sky import (  # noqa: E402
     analytic_clear_sky,
     clear_sky_illuminance_lux,
@@ -106,9 +115,13 @@ def _pts(a: np.ndarray) -> str:
     return " ".join(_f(v) for v in np.asarray(a, dtype=np.float64).ravel())
 
 
+def _idx(a: np.ndarray) -> str:
+    return " ".join(map(str, np.asarray(a, dtype=np.int64).ravel()))
+
+
 def mesh(p: np.ndarray, tri: np.ndarray, uv: np.ndarray | None = None, n: np.ndarray | None = None) -> list[str]:
     p, tri, uv, n = variety.warp_mesh(p, tri, uv, n)
-    out = ['Shape "trianglemesh"', f'    "point3 P" [ {_pts(p)} ]', f'    "integer indices" [ {_pts(tri)} ]']
+    out = ['Shape "trianglemesh"', f'    "point3 P" [ {_pts(p)} ]', f'    "integer indices" [ {_idx(tri)} ]']
     if uv is not None:
         out.append(f'    "point2 uv" [ {_pts(uv)} ]')
     if n is not None:
@@ -160,6 +173,7 @@ def write_spd(path: Path, wl: np.ndarray, val: np.ndarray) -> None:
 
 
 # --road / --verge texture -> spectral shape (spd/<name>.spd) that its mean-1 luminance map scales.
+STRUCTURED_ROADS = {"pavingstones070", "pavingstones128"}  # regular joint pattern: no stochastic re-tiling
 ROAD_SURFACES = {
     "asphalt031": "asphalt_aged",
     "asphalt026c": "asphalt_aged",
@@ -333,8 +347,12 @@ def proxy_car(paint_spd: str, inst: str) -> list[str]:
     return out
 
 
-def vegetation_object(name: str, info: dict, raw_dir: Path, out_dir: Path) -> list[str]:
-    out = [f'ObjectBegin "{name}"']
+def vegetation_object(
+    name: str, info: dict, raw_dir: Path, out_dir: Path, plants: list[dict] | None = None
+) -> list[str]:
+    """One pbrt object for the whole file, or with ``plants`` (``plant_variants.split``) materials plus
+    one object ``<name>#<k>`` per plant."""
+    out = [] if plants else [f'ObjectBegin "{name}"']
     for k, m in enumerate(info["materials"]):
         mn = f"{name}:{k}"
         tex = m.get("base_color_texture")
@@ -359,9 +377,33 @@ def vegetation_object(name: str, info: dict, raw_dir: Path, out_dir: Path) -> li
             ]
         else:
             out.append(f'MakeNamedMaterial "{mn}" "string type" "diffuse" "spectrum reflectance" "spd/bark.spd"')
-    for sh in info["shapes"]:
-        out += [f'NamedMaterial "{name}:{sh["material"]}"', f'Shape "plymesh" "string filename" "{sh["ply_rel"]}"']
-    out.append("ObjectEnd")
+
+    def shape_lines(idx) -> list[str]:
+        lines = []
+        for sh in (info["shapes"][k] for k in idx):
+            lines += [
+                f'NamedMaterial "{name}:{sh["material"]}"',
+                f'Shape "plymesh" "string filename" "{sh["ply_rel"]}"',
+            ]
+        return lines
+
+    if not plants:
+        return out + shape_lines(range(len(info["shapes"]))) + ["ObjectEnd"]
+    for k, pl in enumerate(plants):
+        out += [f'ObjectBegin "{name}#{k}"', *shape_lines(pl["shapes"]), "ObjectEnd"]
+    return out
+
+
+def coat_vegetation(coat, lines: list[str], vid: str, scale: float) -> list[str]:
+    """Snow coat per pbrt object: a whole-file object, or each split plant ``<vid>#<k>`` on its own."""
+    if lines and lines[0].startswith("ObjectBegin"):
+        return coat.lines(lines, vid, scale)
+    k0 = next((i for i, ln in enumerate(lines) if ln.startswith("ObjectBegin")), len(lines))
+    prelude, out, k = lines[:k0], list(lines[:k0]), 0
+    while k0 < len(lines):
+        k1 = lines.index("ObjectEnd", k0) + 1
+        out += coat.lines(prelude + lines[k0:k1], f"{vid}#{k}", scale)[len(prelude) :]
+        k0, k = k1, k + 1
     return out
 
 
@@ -512,6 +554,14 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         "concrete046 is concrete pavement, pavingstones070/128 are setts and block paving.",
     )
     ap.add_argument(
+        "--road-detile",
+        choices=("auto", "off"),
+        default="auto",
+        help="Break up the texture repeat of --road when road wear is off: asphalt and concrete046 are "
+        f"re-synthesised into a {TILE_M:g} m tile (concrete without rotation, so its form marks stay aligned); "
+        f"concrete and paving also get a mean-1 {TONE_TILE_M:g} m tonal mask. off: plain texture repeat.",
+    )
+    ap.add_argument(
         "--verge",
         choices=VERGE_SURFACES,
         default="grass004",
@@ -589,14 +639,18 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
 
     # ---- spectra
     wl = np.arange(args.spectral_lambda_min, args.spectral_lambda_max + 1e-9, args.step_nm)
-    for name in SURFACES:
+
+    def surface_reflectance(name: str, wl: np.ndarray) -> np.ndarray:
         r = reflectance(name, wl)
-        if swir.enabled(args) and name in swir.VEGETATION:
-            r = swir.vegetation(name, wl, r)
-        write_spd(spd / f"{name}.spd", wl, r)
+        if not swir.enabled(args):
+            return r
+        return swir.vegetation(name, wl, r) if name in swir.VEGETATION else swir.surface(name, wl, r)
+
+    for name in SURFACES:
+        write_spd(spd / f"{name}.spd", wl, surface_reflectance(name, wl))
     var = variety.resolve(args, CAR_MODELS, args.cam_lane)
     variety.activate(var)
-    variety.write_paints(var, spd, wl, reflectance, write_spd)
+    variety.write_paints(var, spd, wl, surface_reflectance, write_spd)
     mats = hmat.Materials(args, out_dir, wl, write_spd)
     mats.write_spectra()
 
@@ -720,6 +774,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         "",
     ]
     nopts = night.resolve(args)
+    nopts["exposure_window_s"] = (0.0, fx.t_int) if fx.animated else None  # flashing indicators (PWM)
     night_lighting = None
     if args.time_of_day == "day":
         L += day_lights
@@ -765,9 +820,28 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         info, raw = road_tex
         tile = float(info["tile_size_m"])
         lum = out_dir / "textures" / f"{args.road}_lum.exr"
-        luminance_texture(raw / info["maps"]["color"], lum)
+        nmap = None
+        tone = []
+        if args.road_detile == "auto":
+            dseed = args.road_wear_seed if args.road_wear_seed is not None else 7 if args.seed is None else args.seed
+            tdir = out_dir / "textures" / "road_detile"
+            if args.road not in STRUCTURED_ROADS:  # stochastic: re-synthesise; paving keeps its joint pattern
+                lum, _, nmap = detiled_maps(f"tex_{args.road}", info, raw, tdir, dseed, rotate=asphalt_road)
+                tile = TILE_M
+            if not asphalt_road:
+                s_uv = f"{tile / TONE_TILE_M:.8g}"
+                tone = [
+                    f'Texture "asphalt:tone" "float" "imagemap" "string filename"'
+                    f' "{os.path.relpath(tonal_mask(tdir, dseed), out_dir)}" "float uscale" [{s_uv}] "float vscale" [{s_uv}]',
+                    'Texture "asphalt:lum" "float" "scale" "texture tex" "asphalt:lum0" "texture scale" "asphalt:tone"',
+                ]
+        if nmap is None:  # not re-synthesised: the texture as it is
+            luminance_texture(raw / info["maps"]["color"], lum)
+            nmap = linear_normal_map(raw / info["maps"]["normal"], out_dir / "textures")
         L += [
-            f'Texture "asphalt:lum" "float" "imagemap" "string filename" "{os.path.relpath(lum, out_dir)}"',
+            f'Texture "asphalt:lum{0 if tone else ""}" "float" "imagemap" "string filename"'
+            f' "{os.path.relpath(lum, out_dir)}"',
+            *tone,
             f'Texture "asphalt" "spectrum" "scale" "spectrum tex" "{road_spd}" "texture scale" "asphalt:lum"',
             *(
                 [
@@ -781,7 +855,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
                     *rt.material_lines("asphalt", rtable, '"texture tint" "asphalt:rtint"'),
                 ]
             ),
-            f'    "string normalmap" "{os.path.relpath(linear_normal_map(raw / info["maps"]["normal"], out_dir / "textures"), out_dir)}"',
+            f'    "string normalmap" "{os.path.relpath(nmap, out_dir)}"',
         ]
     elif rtable is not None:
         L += rt.material_lines("asphalt", rtable, '"spectrum tint" "spd/asphalt_aged_rtint.spd"')
@@ -952,7 +1026,9 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
 
     # ---- vegetation (instanced)
     rng = np.random.default_rng(7 if args.seed is None else args.seed)
+    plant_rng = np.random.default_rng((7 if args.seed is None else args.seed) + 104729)
     veg_meta = []
+    coat = snow.Coat(out_dir) if snow.coat_on(args) else None
     for vid, kind in var.species:
         if args.vegetation == "none" or (args.vegetation == "shrubs" and kind == "tree"):
             continue
@@ -963,7 +1039,14 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         prep = aroot / "prepared" / vid
         for sh in info["shapes"]:
             sh["ply_rel"] = os.path.relpath(prep / sh["ply"], out_dir)
-        L += vegetation_object(vid, info, raw, out_dir)
+        plants = plant_variants.split(vid, info, prep) if args.plant_variants == "split" else None
+        if plants is not None and len(plants) < 2:
+            plants = None
+        vobj = vegetation_object(vid, info, raw, out_dir, plants)
+        if coat is not None:  # mean instance scale below: trees 2.6-3.8, shrubs 0.8-1.4
+            vobj = coat_vegetation(coat, vobj, vid, (3.2 if kind == "tree" else 1.1) * var.species_scale(vid))
+        L += vobj
+        n_var = len(plants) if plants else 1  # one plant per placement: same plant count as the row
         n = 0
         for side, edge in ((1.0, Layout.right_paved), (-1.0, Layout.opp_paved)):
             z = 8.0 + rng.uniform(0, 10)
@@ -971,11 +1054,11 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
                 if kind == "tree":
                     d = rng.uniform(10.0, 36.0) + (z / 900.0) * 30.0
                     s = rng.uniform(2.6, 3.8)
-                    z += rng.uniform(9.0, 26.0) * var.species_spacing("tree")
+                    z += rng.uniform(9.0, 26.0) * var.species_spacing("tree") / n_var
                 else:
                     d = rng.uniform(6.5, 12.0)
                     s = rng.uniform(0.8, 1.4)
-                    z += rng.uniform(6.0, 22.0) * var.species_spacing("shrub")
+                    z += rng.uniform(6.0, 22.0) * var.species_spacing("shrub") / n_var
                 x = edge + side * d
                 y = float(terrain_height(np.array(x), np.array(z), edge, side)) - 0.15
                 L += [
@@ -983,11 +1066,16 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
                     *variety.place(x, y, z),
                     f"Rotate {_f(rng.uniform(0, 360))} 0 1 0",
                     f"Scale {_f(s * var.species_scale(vid))} {_f(s * var.species_scale(vid))} {_f(s * var.species_scale(vid))}",
-                    f'ObjectInstance "{vid}"',
-                    "AttributeEnd",
                 ]
+                if plants:
+                    k = int(plant_rng.integers(n_var))
+                    c = plants[k]["centre"]
+                    L += [f"Translate {_f(-c[0])} 0 {_f(-c[2])}", f'ObjectInstance "{vid}#{k}"']
+                else:
+                    L.append(f'ObjectInstance "{vid}"')
+                L.append("AttributeEnd")
                 n += 1
-        veg_meta.append({"asset": vid, "instances": n})
+        veg_meta.append({"asset": vid, "instances": n, "plants_in_file": n_var})
     L.append("")
 
     # ---- traffic
@@ -1020,6 +1108,8 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
                 body = variety.proxy_vehicle(model, paint_spd, inst, mesh, box) or proxy_car(paint_spd, inst)
                 yaw_model = heading
             body = mats.car_body(body, var.paints.get(paint, (paint,))[0])
+            if coat is not None:
+                body = coat.lines(body, model)
             inc = car_dir / f"{inst}.pbrt"
             inc.write_text("\n".join(body) + "\n")
             motion, motion_meta = fx.car_lines(inst, lane, speeds[k], "\n".join(body))
@@ -1081,7 +1171,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         vru_spectra = vru.write_spectra(args, spd, wl, write_spd, reflectance)
         reflex = vru.reflector_material_lines(spd, out_dir, wl) if nopts["retroreflective"] else None
         vru_lines, vru_meta = vru.scene_lines(
-            args, Layout.right_edge, variety.place, parked_car, asset, out_dir, reflex
+            args, Layout.right_edge, variety.place, parked_car, asset, out_dir, reflex, span=fx.span
         )
         vru_meta["spectra"] = vru_spectra
         vru_meta["removed_traffic"] = vru_cleared
@@ -1116,6 +1206,9 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
             "paved": [(Layout.median_l, Layout.right_paved), (Layout.opp_paved, Layout.median_l)],
             "lane_centres": [Layout.lane_center(i) for i in (*range(N_LANES), *range(-N_LANES, 0))],
             "banks": [(Layout.right_paved, 1.0), (Layout.opp_paved, -1.0)],
+            "lane_lines": [
+                inner + side * k * LANE_W for side, inner in ((1, 0.0), (-1, Layout.opp_inner)) for k in (1, 2)
+            ],
             "z0": ROAD_Z0,
             "z1": ROAD_Z1,
             "fov_deg": args.fov if args.camera != "realistic" else 90.0,
@@ -1123,12 +1216,15 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         }
         smats, sgeom, snow_meta = snow.scene_lines(args, wl, spd, out_dir, geo, eye, mesh, quads_mesh, extrude_profile)
         if args.snow != "none":
-            verge = '"string type" "diffuse" "spectrum reflectance" "spd/snow_verge.spd"'
+            kind = "snow" if args.snow_brdf == "art" else "diffuse"
+            verge = f'"string type" "{kind}" "spectrum reflectance" "spd/snow_verge.spd"'
             L = snow.replace_materials(L, {g: f'MakeNamedMaterial "{g}" {verge}' for g in ("grass", "grass_far")})
         w = L.index("WorldBegin")
         L[w + 1 : w + 1] = smats
         L += [*sgeom, ""]
         snow_meta["notes"] = snow_notes
+        if coat is not None:
+            snow_meta["coat"] = coat.meta()
     L += fx.windscreen_lines(out_dir, wl, eye)
     wet_meta = None
     if wet.enabled(args):  # last: also wets the road-wear marking materials emitted with the geometry
@@ -1209,6 +1305,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
             "surface": args.road,
             "surface_spd": ROAD_SURFACES.get(args.road, "asphalt_aged"),
             "verge": args.verge,
+            "detile": None if road_tex is None or wear is not None else args.road_detile,
             "length_m": ROAD_Z1 - ROAD_Z0,
             "wear": wear.summary if wear is not None else None,
             **({"rtable": rtable.summary()} if rtable is not None else {}),

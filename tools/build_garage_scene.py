@@ -43,6 +43,7 @@ from build_highway_scene import (  # noqa: E402
     write_spd,
 )
 from fetch_highway_assets import cache_root, load_asset_manifest  # noqa: E402
+from highway_incar import MainsRipple, write_emitter  # noqa: E402
 from highway_spectra import SURFACES, reflectance  # noqa: E402
 
 AISLE_W = 6.5
@@ -71,6 +72,9 @@ VIEWS = {
 }
 
 
+BALLAST_PERCENT_FLICKER = {"magnetic": 35.0, "electronic": 5.0}  # nominal percent flicker at 2 x mains
+
+
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     root = Path(__file__).resolve().parents[1]
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -84,6 +88,30 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     ap.add_argument("--lighting", choices=("fluorescent", "led", "mixed"), default="mixed")
     ap.add_argument("--fluorescent-type", choices=("f2", "f11"), default="f2", help="CIE F2 cool white or F11 triband.")
     ap.add_argument("--lights-off-fraction", type=float, default=0.15)
+    ap.add_argument(
+        "--mains-flicker",
+        choices=("on", "off"),
+        default="on",
+        help="Luminaire light output ripples at twice --mains-hz; each row is on one phase of a three-phase "
+        "supply. The frame average is unchanged; tools/render_time_slices.py renders the ripple.",
+    )
+    ap.add_argument("--mains-hz", type=float, choices=(50.0, 60.0), default=50.0)
+    ap.add_argument(
+        "--mains-phases",
+        type=int,
+        choices=(1, 3),
+        default=3,
+        help="3 = rows on L1/L2/L3 (their ripples largely cancel in the ambient light); 1 = all on one phase.",
+    )
+    ap.add_argument(
+        "--fluorescent-ballast",
+        choices=tuple(BALLAST_PERCENT_FLICKER),
+        default="magnetic",
+        help="magnetic = 35 %% percent flicker, electronic = 5 %% (nominal).",
+    )
+    ap.add_argument("--led-percent-flicker", type=float, default=10.0, help="LED batten driver ripple [%%], nominal.")
+    ap.add_argument("--exposure-s", type=float, default=None, help="Integration time; records the exposure.")
+    ap.add_argument("--rolling-line-time-s", type=float, default=15e-6, help="With --exposure-s.")
     ap.add_argument("--occupancy", type=float, default=0.7, help="Fraction of bays with a car.")
     ap.add_argument("--ego-body", action=argparse.BooleanOptionalAction, default=True)
     add_camera_args(ap, fov=120.0, focus_distance=2.0)
@@ -95,6 +123,10 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     args = ap.parse_args(argv)
     if not 0.0 <= args.lights_off_fraction <= 1.0 or not 0.0 <= args.occupancy <= 1.0:
         ap.error("--lights-off-fraction and --occupancy must be in [0, 1]")
+    if not 0.0 <= args.led_percent_flicker <= 100.0:
+        ap.error("--led-percent-flicker must be in [0, 100]")
+    if args.exposure_s is not None and args.exposure_s <= 0:
+        ap.error("--exposure-s must be > 0")
     return args
 
 
@@ -140,24 +172,75 @@ def luminaire_rows(lighting: str) -> list[tuple[float, str]]:
     return [(0.0, aisle), (bay_x, bay), (-bay_x, bay)]
 
 
-def luminaire_lines(args, rng: np.random.Generator) -> tuple[list[str], list[dict]]:
-    L, meta = ["# ---- ceiling luminaires"], []
+def mains_ripple(args, kind: str, row: int) -> MainsRipple | None:
+    """Light-output ripple of a luminaire in row ``row`` (phase L1/L2/L3 = row mod 3), or None."""
+    if args.mains_flicker != "on":
+        return None
+    pf = BALLAST_PERCENT_FLICKER[args.fluorescent_ballast] if kind == "fluorescent" else args.led_percent_flicker
+    # a 120 deg mains phase shift is 1 / (3 f) in time; the ripple has period 1 / (2 f)
+    return MainsRipple(2.0 * args.mains_hz, pf / 100.0, phase_s=_phase(args, row) / (3.0 * args.mains_hz))
+
+
+def _phase(args, row: int) -> int:
+    return row % 3 if getattr(args, "mains_phases", 3) == 3 else 0
+
+
+def luminaire_lines(args, rng: np.random.Generator, out_dir: Path | None = None) -> tuple[list, list, list]:
+    """Ceiling battens: pbrt lines, per-luminaire manifest entries and flicker emitters (one per row)."""
+    L, meta, emitters = ["# ---- ceiling luminaires"], [], []
     zs = np.arange(Z_BACK + 3.0, Z_END - 2.0, LUM_PITCH)
-    for x, kind in luminaire_rows(args.lighting):
+    window = (0.0, args.exposure_s) if getattr(args, "exposure_s", None) else None
+    for row, (x, kind) in enumerate(luminaire_rows(args.lighting)):
         flux, length, width = LUMINAIRE[kind]
         lum = flux / (math.pi * length * width)
         spd = f"spd/lamp_{'fl_' + args.fluorescent_type if kind == 'fluorescent' else 'led_batten'}.spd"
+        ripple = mains_ripple(args, kind, row) if out_dir is not None else None
+        peak = lum / ripple.duty if ripple else lum  # time average = nominal luminance
+        lit: list[tuple[float, float, float]] = []
         for z in zs:
             on = bool(rng.random() >= args.lights_off_fraction)
             L += ['NamedMaterial "galvanized"', *mesh(*box(x, CEIL_H - 0.08, z, width + 0.06, 0.07, length + 0.06))]
             c = (x, CEIL_H - 0.085, float(z))
-            if on:
+            if on and ripple is None:
                 L += night._quad_light(c, (width / 2, 0, 0), (0, 0, length / 2), spd, lum)
+            elif on:
+                lit.append(c)
             else:
                 p, t = quads_mesh([(x - width / 2, x + width / 2, z - length / 2, z + length / 2)], CEIL_H - 0.086)
                 L += ['NamedMaterial "diffuser_off"', *mesh(p, t)]
-            meta.append({"x": x, "z": float(z), "kind": kind, "on": on, "flux_lm": flux, "luminance_cd_m2": lum})
-    return L + [""], meta
+            meta.append(
+                {"x": x, "z": float(z), "kind": kind, "on": on, "flux_lm": flux, "luminance_cd_m2": lum, "row": row}
+            )
+        if ripple and lit:
+
+            def lines_for_level(level, lit=lit, width=width, length=length, spd=spd, peak=peak):
+                out = []
+                for c in lit:
+                    if level > 0:
+                        out += night._quad_light(c, (width / 2, 0, 0), (0, 0, length / 2), spd, peak * level)
+                    else:
+                        x0, z0 = c[0], c[2]
+                        p, t = quads_mesh([(x0 - width / 2, x0 + width / 2, z0 - length / 2, z0 + length / 2)], c[1])
+                        out += ['NamedMaterial "diffuser_off"', *mesh(p, t)]
+                return out
+
+            inc, entry = write_emitter(
+                out_dir,
+                f"luminaire_row{row}",
+                lines_for_level,
+                pwm=ripple,
+                exposure_window_s=window,
+                meta={
+                    "kind": f"luminaire_{kind}",
+                    "row_x_m": x,
+                    "mains_phase": f"L{_phase(args, row) + 1}",
+                    "peak_luminance_cd_m2": peak,
+                    "luminaires": len(lit),
+                },
+            )
+            L.append(inc)
+            emitters.append(entry)
+    return L + [""], meta, emitters
 
 
 def exit_sign_lines() -> tuple[list[str], list[dict]]:
@@ -293,7 +376,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         L += ['NamedMaterial "paint_black"', *mesh(*box(x, 0.25, z, PILLAR + 0.004, 0.25, PILLAR + 0.004))]
     L.append("")
 
-    lum, lum_meta = luminaire_lines(args, rng)
+    lum, lum_meta, lum_emitters = luminaire_lines(args, rng, out_dir)
     L += lum
     ex, ex_meta = exit_sign_lines()
     L += ex
@@ -376,10 +459,35 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         "missing_assets_fallback": fallbacks,
         "approximations": [
             "Luminaires are flat Lambertian diffusers (no housing optics); fluxes are nominal catalogue values.",
-            "Mains flicker of the fluorescent/LED drivers is not modelled.",
+            "Mains flicker: a sinusoidal ripple at twice the mains frequency with nominal percent flicker "
+            "(magnetic ballast 35 %, electronic 5 %, LED driver --led-percent-flicker); real waveforms are "
+            "not sinusoidal and lamps on the same phase ripple in step.",
             "Concrete, paint and the ego body are analytic spectra and simple boxes.",
         ],
     }
+    manifest["emitters"] = lum_emitters
+    manifest["lighting"]["mains_flicker"] = (
+        None
+        if args.mains_flicker != "on"
+        else {
+            "mains_hz": args.mains_hz,
+            "ripple_hz": 2.0 * args.mains_hz,
+            "fluorescent_ballast": args.fluorescent_ballast,
+            "percent_flicker": {
+                "fluorescent": BALLAST_PERCENT_FLICKER[args.fluorescent_ballast],
+                "led": args.led_percent_flicker,
+            },
+            "phases": "row r on phase L(r mod 3 + 1), 120 deg apart" if args.mains_phases == 3 else "all on L1",
+        }
+    )
+    if args.exposure_s:
+        manifest["exposure"] = {
+            "integration_time_s": args.exposure_s,
+            "shutter_open_s": 0.0,
+            "rolling_shutter_line_time_s": args.rolling_line_time_s,
+            "readout_rows": args.yres,
+            "row_window": "row r integrates [r * line_time, r * line_time + integration_time]",
+        }
     (out_dir / "garage_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     print(
         f"wrote {_rel(repo, scene_path)} (+ garage_manifest.json); {len(cars)}/{len(bay_meta)} bays occupied, "
