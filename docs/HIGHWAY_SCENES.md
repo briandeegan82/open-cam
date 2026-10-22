@@ -677,6 +677,17 @@ fixed order, so the same N always gives the same `highway.pbrt` and manifest:
   `python tools/fetch_highway_assets.py` (about 870 MB at 1k; the fir tree alone is 460 MB
   and 7.0 M triangles, the jacaranda 200 MB and 3.9 M; a 1280-px day frame with both peaks
   at 6 GB in pbrt).
+  Several Poly Haven files are a row of 2-7 versions of one plant: the fir tree, fir and pine
+  saplings, both Searsias, wild rooibos, shrubs 02 and 03 and the medium grass clumps.
+  `--plant-variants split` (default) splits them into separate plants
+  (`tools/plant_variants.py`: shapes are grouped by ground footprint, so each trunk stays with
+  its crown) and places one randomly chosen version, centred, at each placement. Spacing is
+  divided by the number of versions, so the plant count matches the old rows. Each version keeps
+  its own height from the file. The version choice has its own random stream; the positions,
+  scales and rotations are still seeded from `--seed`, but there are more placements, so they
+  differ from the old rows. `--plant-variants rows` writes the old scene file. Bermuda grass is
+  a sparse patch of single blades and stays whole. The manifest's `vegetation` entries record
+  `plants_in_file`.
 
 Individual flags override the seeded draw: `--curve-radius` (m, + bends right, 0 straight),
 `--clothoid-length`, `--grade` (%), `--lamp-posts/--gantry/--overpass on|off`. Every draw is
