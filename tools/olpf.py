@@ -21,9 +21,22 @@ applied as its transfer function on the sampled image. The spots sit at (0, 0), 
 as behind a real plate (the ordinary ray is undeviated), so integer splits are exact pixel shifts;
 fractional splits are a band-limited interpolation: it suppresses detail below the pixel Nyquist frequency and the CFA colour
 aliasing that comes from it, but cannot remove aliasing that pbrt already folded into the pixel
-grid above Nyquist. Not modelled: the IR-cut coating and cover-glass of the filter stack (see
-``sensor.quantum_efficiency.ircf_csv``), angle-of-incidence dependence of the walk-off, and the
-focus shift of the plate (pbrt's film position already includes whatever the lens file assumes).
+grid above Nyquist.
+
+Angle of incidence (``angle_dependence``, opt-in, quartz ``thickness_*`` filters only): off axis the
+chief ray reaches the plates at the chief-ray angle (CRA). Each plate is then traced exactly: the
+ordinary ray refracts with n_o; the extraordinary wave vector satisfies
+(k.c)^2 / n_o^2 + (|k|^2 - (k.c)^2) / n_e^2 = 1 for the plate's optic axis c, and its ray runs along
+the gradient of that surface. The split is the exit-point difference of the two rays; at normal
+incidence it reduces to t tan(rho). The image is filtered per field zone (bilinear weights over a
+``field_grid``) with that zone's two 2-D split vectors (off axis each plate also splits slightly
+across its own axis). The CRA comes from ``lens.chief_ray_angle_table`` (``cra: table``) or rises
+linearly to ``max_cra_deg`` at the frame corner (``cra: linear``).
+
+Not modelled: the IR-cut coating and cover-glass of the filter stack (see
+``sensor.quantum_efficiency.ircf_csv``), the spread of incidence angles within the lens cone (only
+the chief ray is used), and the focus shift of the plate (pbrt's film position already includes
+whatever the lens file assumes).
 """
 
 from __future__ import annotations
@@ -53,7 +66,11 @@ DEFAULTS = {
     "thickness_y_um": None,
     "axis_angle_deg": 45.0,
     "exr_pixel_pitch_um": None,
+    # Opt-in: {enabled, cra: table|linear, max_cra_deg, field_grid: [gy, gx]}.
+    "angle_dependence": None,
 }
+
+ANGLE_DEFAULTS = {"enabled": False, "cra": "linear", "max_cra_deg": 25.0, "field_grid": [5, 7]}
 
 
 def _ghosh(c: tuple[float, ...], lam_nm) -> np.ndarray:
@@ -72,6 +89,86 @@ def walkoff_tan(lam_nm, axis_angle_deg: float = 45.0) -> np.ndarray:
     r = (n_o / n_e) ** 2
     t = math.tan(math.radians(axis_angle_deg))
     return (1.0 - r) * t / (1.0 + r * t * t)
+
+
+def plate_split_um(thickness_um: float, lam_nm, axis_angle_deg: float, plate: str, sin_x: float, sin_y: float):
+    """(dx, dy) [um] of extraordinary minus ordinary exit point for a quartz plate (exact uniaxial trace).
+
+    ``plate`` "x": optic axis in the x-z plane at ``axis_angle_deg`` to the normal (z); "y": in y-z.
+    ``sin_x``, ``sin_y``: direction sines of the incident ray in air (0, 0 = normal incidence).
+    """
+    n_o, n_e = quartz_indices(lam_nm)
+    th = math.radians(axis_angle_deg)
+    cx, cy = (math.sin(th), 0.0) if plate == "x" else (0.0, math.sin(th))
+    cz = math.cos(th)
+    a, b = float(sin_x), float(sin_y)
+    q = 1.0 / n_o**2 - 1.0 / n_e**2
+    m = a * cx + b * cy
+    qa = q * cz * cz + 1.0 / n_e**2
+    qb = 2.0 * q * m * cz
+    qc = q * m * m + (a * a + b * b) / n_e**2 - 1.0
+    z = (-qb + np.sqrt(qb * qb - 4.0 * qa * qc)) / (2.0 * qa)
+    kc = m + z * cz
+    gx, gy, gz = q * kc * cx + a / n_e**2, q * kc * cy + b / n_e**2, q * kc * cz + z / n_e**2
+    zo = np.sqrt(n_o**2 - a * a - b * b)
+    return thickness_um * (gx / gz - a / zo), thickness_um * (gy / gz - b / zo)
+
+
+def _cra_deg(h_norm: float, ad: dict, lens_cfg: dict | None) -> float:
+    if str(ad.get("cra", "linear")) == "table":
+        table = np.asarray((lens_cfg or {}).get("chief_ray_angle_table") or [], dtype=np.float64)
+        if table.ndim != 2 or table.shape[1] != 2:
+            raise ValueError(
+                "olpf.angle_dependence cra: table needs lens.chief_ray_angle_table [[h_norm, cra_deg], ...]"
+            )
+        return float(np.interp(h_norm, table[:, 0], table[:, 1]))
+    return float(ad.get("max_cra_deg", 25.0)) * h_norm
+
+
+def zone_splits(cfg: dict, lam_nm: float, h: int, w: int, lens_cfg: dict | None = None) -> list[dict]:
+    """Per field-zone centre: (row, col, CRA, split px on x and y, cross-axis px) at ``lam_nm``."""
+    ad = {**ANGLE_DEFAULTS, **(cfg.get("angle_dependence") or {})}
+    gy, gx = (int(v) for v in ad["field_grid"])
+    rows = np.linspace(0.0, h - 1.0, gy) if gy > 1 else np.array([0.5 * (h - 1)])
+    cols = np.linspace(0.0, w - 1.0, gx) if gx > 1 else np.array([0.5 * (w - 1)])
+    cy0, cx0 = 0.5 * (h - 1), 0.5 * (w - 1)
+    r_corner = math.hypot(cy0, cx0) or 1.0
+    pitch = float(cfg["pixel_pitch_um"])
+    out = []
+    for r in rows:
+        for c in cols:
+            ux, uy = c - cx0, r - cy0
+            rad = math.hypot(ux, uy)
+            cra = _cra_deg(rad / r_corner, ad, lens_cfg)
+            s = math.sin(math.radians(cra))
+            sx, sy = (s * ux / rad, s * uy / rad) if rad > 0 else (0.0, 0.0)
+            ex = ey = (0.0, 0.0)
+            if cfg.get("thickness_x_um") is not None:
+                ex = plate_split_um(float(cfg["thickness_x_um"]), lam_nm, float(cfg["axis_angle_deg"]), "x", sx, sy)
+            if cfg.get("thickness_y_um") is not None:
+                ey = plate_split_um(float(cfg["thickness_y_um"]), lam_nm, float(cfg["axis_angle_deg"]), "y", sx, sy)
+            out.append(
+                {
+                    "row": float(r),
+                    "col": float(c),
+                    "cra_deg": cra,
+                    "dx_px": float(ex[0]) / pitch,
+                    "dy_px": float(ey[1]) / pitch,
+                    "d1_px": (float(ex[0]) / pitch, float(ex[1]) / pitch),
+                    "d2_px": (float(ey[0]) / pitch, float(ey[1]) / pitch),
+                    "cross_px": max(abs(float(ex[1])), abs(float(ey[0]))) / pitch,
+                }
+            )
+    return out
+
+
+def _hat(n: int, size: int) -> np.ndarray:
+    """(n, size) linear hat weights over ``size`` samples; columns sum to 1."""
+    if n == 1:
+        return np.ones((1, size))
+    x = np.arange(size, dtype=np.float64)
+    nodes = np.linspace(0.0, size - 1.0, n)
+    return np.stack([np.interp(x, nodes, np.eye(n)[k]) for k in range(n)])
 
 
 def resolve_config(sensor_cfg: dict) -> dict:
@@ -124,7 +221,25 @@ def apply_plane(img: np.ndarray, dx_px: float, dy_px: float) -> np.ndarray:
     return out[pad:-pad, pad:-pad].astype(img.dtype, copy=False)
 
 
-def apply_channels(chans: dict[str, np.ndarray], sensor_cfg: dict) -> tuple[dict[str, np.ndarray], dict]:
+def apply_plane_vec(img: np.ndarray, d1: tuple[float, float], d2: tuple[float, float]) -> np.ndarray:
+    """Four spots at 0, d1, d2, d1 + d2 (2-D split vectors in px): ``apply_plane`` for oblique splits."""
+    if not any((*d1, *d2)):
+        return img
+    a = np.asarray(img, dtype=np.float64)
+    pad = int(math.ceil(abs(d1[0]) + abs(d2[0]) + abs(d1[1]) + abs(d2[1]))) + 4
+    p = np.pad(a, pad, mode="reflect")
+    fy = np.fft.fftfreq(p.shape[0])[:, None]
+    fx = np.fft.rfftfreq(p.shape[1])[None, :]
+    h1 = np.cos(np.pi * (fx * d1[0] + fy * d1[1]))
+    h2 = np.cos(np.pi * (fx * d2[0] + fy * d2[1]))
+    shift = np.exp(-1j * np.pi * (fx * (d1[0] + d2[0]) + fy * (d1[1] + d2[1])))
+    out = np.fft.irfft2(np.fft.rfft2(p) * h1 * h2 * shift, s=p.shape)
+    return out[pad:-pad, pad:-pad]
+
+
+def apply_channels(
+    chans: dict[str, np.ndarray], sensor_cfg: dict, lens_cfg: dict | None = None
+) -> tuple[dict[str, np.ndarray], dict]:
     """Apply ``sensor.olpf`` to every image channel (S0.<lambda>nm at its wavelength, others at 550 nm).
 
     Negative undershoot of the band-limited interpolation at hard edges (a few % for fractional splits)
@@ -135,14 +250,33 @@ def apply_channels(chans: dict[str, np.ndarray], sensor_cfg: dict) -> tuple[dict
     cfg = resolve_config(sensor_cfg)
     if not cfg["enabled"]:
         return chans, {"enabled": False}
+    ad = {**ANGLE_DEFAULTS, **(cfg.get("angle_dependence") or {})}
+    angular = bool(ad["enabled"])
+    if angular and (cfg.get("split_pixels") is not None or cfg.get("split_x_um") or cfg.get("split_y_um")):
+        raise ValueError("olpf.angle_dependence needs the quartz plates (thickness_x_um / thickness_y_um)")
     out, splits, clipped, total = {}, {}, 0.0, 0.0
+    zone_info = None
     for name, arr in chans.items():
         if arr.ndim != 2 or name.upper() in ("A", "ALPHA") or name.startswith(("P.", "N.", "Albedo")):
             out[name] = arr
             continue
         lam = parse_s0_wavelength_nm(name) or 550.0
-        dx, dy = float(split_px(cfg, "x", lam)[0]), float(split_px(cfg, "y", lam)[0])
-        f = apply_plane(arr, dx, dy)
+        if angular:
+            h, w = arr.shape
+            zones = zone_splits(cfg, lam, h, w, lens_cfg)
+            gy, gx = (int(v) for v in ad["field_grid"])
+            wy, wx = _hat(gy, h), _hat(gx, w)
+            f = np.zeros(arr.shape, dtype=np.float64)
+            for k, z in enumerate(zones):
+                wz = wy[k // gx][:, None] * wx[k % gx][None, :]
+                f += apply_plane_vec(arr.astype(np.float64) * wz, z["d1_px"], z["d2_px"])
+            dx = min(z["dx_px"] for z in zones)
+            dy = min(z["dy_px"] for z in zones)
+            if zone_info is None or abs(lam - 550.0) < abs(zone_info["lambda_nm"] - 550.0):
+                zone_info = {"lambda_nm": lam, "zones": zones}
+        else:
+            dx, dy = float(split_px(cfg, "x", lam)[0]), float(split_px(cfg, "y", lam)[0])
+            f = apply_plane(arr, dx, dy)
         neg = f < 0
         clipped += float(-f[neg].sum())
         total += float(np.abs(arr).sum())
@@ -161,16 +295,27 @@ def apply_channels(chans: dict[str, np.ndarray], sensor_cfg: dict) -> tuple[dict
         else None,
         "clipped_energy_fraction": clipped / total if total else 0.0,
     }
+    if zone_info is not None:
+        zs = zone_info["zones"]
+        info["angle_dependence"] = {
+            "cra": ad["cra"],
+            "field_grid": list(ad["field_grid"]),
+            "lambda_nm": zone_info["lambda_nm"],
+            "dx_px_range": [min(z["dx_px"] for z in zs), max(z["dx_px"] for z in zs)],
+            "dy_px_range": [min(z["dy_px"] for z in zs), max(z["dy_px"] for z in zs)],
+            "max_cross_px": max(z["cross_px"] for z in zs),
+            "max_cra_deg": max(z["cra_deg"] for z in zs),
+        }
     return out, info
 
 
-def apply_cube(cube: np.ndarray, lam_nm, sensor_cfg: dict) -> tuple[np.ndarray, dict]:
+def apply_cube(cube: np.ndarray, lam_nm, sensor_cfg: dict, lens_cfg: dict | None = None) -> tuple[np.ndarray, dict]:
     """``apply_channels`` for an H x W x K spectral cube with bucket wavelengths ``lam_nm``."""
     lam = np.asarray(lam_nm, dtype=np.float64).ravel()
     names = [f"S0.{x:g}nm" for x in lam]
     if not resolve_config(sensor_cfg)["enabled"]:
         return cube, {"enabled": False}
-    out, info = apply_channels({n: cube[:, :, k] for k, n in enumerate(names)}, sensor_cfg)
+    out, info = apply_channels({n: cube[:, :, k] for k, n in enumerate(names)}, sensor_cfg, lens_cfg)
     return np.stack([out[n] for n in names], axis=2), info
 
 

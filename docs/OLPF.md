@@ -57,6 +57,29 @@ filter is applied twice.
   It cannot remove luma aliasing that pbrt has already folded into the pixel grid above Nyquist.
   Doing that would need a supersampled render followed by pixel integration.
 - Light spread past the image border is lost (at most d px at the right and bottom edges).
-- Not modelled: the walk-off's dependence on angle of incidence (it varies with the chief-ray
-  angle), the IR-cut coating and cover-glass of the filter stack (the IRCF is a QE curve), and the
+- Not modelled: the spread of incidence angles inside the lens cone (only the chief ray is
+  used), the IR-cut coating and cover-glass of the filter stack (the IRCF is a QE curve), and the
   focus shift the plate causes.
+
+## Angle of incidence (`angle_dependence`, opt-in)
+
+Off axis, light reaches the plates at the chief-ray angle (CRA), and the walk-off changes. With
+`sensor.olpf.angle_dependence: {enabled: true, cra: linear|table, max_cra_deg: 25, field_grid: [5, 7]}`,
+each quartz plate is traced exactly (`olpf.plate_split_um`):
+- the ordinary ray refracts with n_o;
+- the extraordinary wave vector k satisfies `(k.c)^2/n_o^2 + (|k|^2 - (k.c)^2)/n_e^2 = 1` for the
+  plate's optic axis c, and its ray runs along the gradient of that surface;
+- the split is the difference between the two rays' exit points. At normal incidence it is
+  exactly t tan(rho).
+
+Off axis the split also gains a component across the plate's own axis, so the four spots become
+a parallelogram. The image is filtered per field zone with that zone's two 2-D split vectors,
+blended with bilinear weights over `field_grid`.
+
+The CRA comes from `lens.chief_ray_angle_table` (`cra: table`) or rises linearly to
+`max_cra_deg` at the frame corner (`cra: linear`). Only the `thickness_*` (quartz) filters have
+an angle dependence; `split_*` values are taken as given.
+
+Example: 680 µm plates at 550 nm, nominally a 1.00 px split on a 4 µm pixel. At 20° CRA the split
+along the plate's axis is 0.88 px on the side tilted toward the optic axis and 1.12 px on the
+other side. Tilting across the plate's axis adds a 0.35 px cross-axis component.
