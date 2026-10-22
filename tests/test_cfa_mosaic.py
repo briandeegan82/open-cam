@@ -163,7 +163,7 @@ def test_rggb_mosaic_and_bilinear_match_legacy_bayer() -> None:
 
 
 @pytest.mark.parametrize("layout", LAYOUTS, ids=str)
-@pytest.mark.parametrize("method", ["bilinear", "gradient"])
+@pytest.mark.parametrize("method", ["bilinear", "gradient", "edge"])
 def test_demosaic_preserves_samples_and_flat_fields(layout, method) -> None:
     lay = cm.resolve_layout({"layout": layout})
     rng = np.random.default_rng(2)
@@ -193,7 +193,8 @@ def test_gradient_demosaic_beats_bilinear_on_edges() -> None:
 
 
 @pytest.mark.parametrize("layout", LAYOUTS, ids=str)
-def test_gradient_demosaic_does_not_overshoot_hard_edges(layout) -> None:
+@pytest.mark.parametrize("method", ["gradient", "edge"])
+def test_gradient_demosaic_does_not_overshoot_hard_edges(layout, method) -> None:
     """A 2-px lamp line at 100x its background must not drive a channel below its neighbours
     (the colour difference from the bright side used to go negative -> saturated green after a CCM)."""
     lay = cm.resolve_layout({"layout": layout})
@@ -201,7 +202,7 @@ def test_gradient_demosaic_does_not_overshoot_hard_edges(layout) -> None:
     img[:, 15:17] = 1.0e4
     img[20:, :] = 1.0e4
     raw = cm.mosaic(img, lay)
-    out = cm.demosaic_gradient(raw, lay)
+    out = cm.demosaic(raw, lay, method)
     assert np.allclose(cm.mosaic(out, lay), raw)
     assert out.min() >= 100.0 - 1e-3
     assert out.max() <= 1.0e4 + 1e-3
@@ -296,6 +297,50 @@ def test_render_cfa_rgb_keeps_clipped_highlights_white() -> None:
         )
         hi = rgb[7, 7] - black
         assert bool(np.ptp(hi) < 1e-6 * hi.max()) is neutral
+
+
+def _zone_plate(n: int = 256) -> np.ndarray:
+    """Colour zone plate, 0 -> 0.175 cycles/px at the edge centres (the docs/CFA_NIR.md PSNR table)."""
+    yy, xx = np.mgrid[0:n, 0:n]
+    zp = 0.5 + 0.5 * np.cos(np.pi * 0.35 * ((xx - n / 2) ** 2 + (yy - n / 2) ** 2) / n)
+    return np.stack([zp, 0.8 * zp + 0.1, 0.6 * zp + 0.2], -1)
+
+
+def _channels(rgb: np.ndarray, names) -> np.ndarray:
+    r, g, b = rgb[..., 0], rgb[..., 1], rgb[..., 2]
+    d = {"R": r, "G": g, "B": b, "W": r + g + b, "C": r + g + b, "Ye": r + g, "Cy": g + b, "Mg": r + b}
+    return np.stack([d[c] for c in names], -1)
+
+
+@pytest.mark.parametrize("layout", ["RGGB", "RCCB", "RYYCY", "RGBW_4X4"])
+def test_edge_demosaic_beats_gradient_on_a_zone_plate(layout) -> None:
+    lay = cm.resolve_layout({"layout": layout})
+    full = _channels(_zone_plate(), lay.channels)
+    raw = cm.mosaic(full, lay)
+
+    def mse(m):
+        return float(np.mean((cm.demosaic(raw, lay, m) - full)[8:-8, 8:-8] ** 2))
+
+    assert cm.edge_applies(lay)
+    assert mse("edge") < 0.8 * mse("gradient")
+
+
+def test_edge_falls_back_without_a_dense_guide() -> None:
+    lay = cm.resolve_layout({"layout": "RGBW"})
+    raw = np.random.default_rng(3).random((16, 16))
+    assert not cm.edge_applies(lay)
+    np.testing.assert_array_equal(cm.demosaic(raw, lay, "edge"), cm.demosaic_gradient(raw, lay))
+
+
+def test_quad_bayer_remosaic_method() -> None:
+    q = cm.resolve_layout({"layout": "QUAD_BAYER"})
+    full = _channels(_zone_plate(64), q.channels)
+    raw = cm.mosaic(full, q)
+    for m in ("gradient", "edge"):
+        r, rl = cm.remosaic_to_bayer(raw, q, method=m)
+        same = cm.mosaic(np.ones((64, 64, 3)), rl) * 0 + (cm.mosaic(full, q) == cm.mosaic(full, rl))
+        # sites whose colour is unchanged keep the measured value
+        np.testing.assert_allclose(r[same.astype(bool)], raw[same.astype(bool)], rtol=1e-6)
 
 
 @pytest.mark.parametrize("layout", ["RCCB", "RGBW"])

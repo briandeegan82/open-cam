@@ -18,7 +18,7 @@ cfa:
     B: {qe_csv: spectra/QE/nir/QE_blue_noircf.csv}
     W: {qe_csv: spectra/QE/nir/QE_mono_noircf.csv}
   ircf: false            # no IR-cut filter: sensor.quantum_efficiency.ircf_csv is not applied
-  demosaic: gradient     # gradient | bilinear | false
+  demosaic: gradient     # gradient | edge | bilinear | false
   binning: none          # none | charge | digital (2x2 same-colour sums, for Quad Bayer)
   ccm: colorchecker_spectral   # or exr_reference, or an explicit C x 3 matrix
   spatial_crosstalk:

@@ -25,13 +25,48 @@ build (`PBRT_LAMBDA_MAX_NM`) pbrt keeps its stock 360-830 nm range.
   generic mode.
 * **Quad Bayer**: `cfa.binning: charge` (2x2 same-colour charge sum before read noise: one read,
   4x full well) or `digital` (sum after readout: 4 reads, 2x read noise); `remosaic_to_bayer`
-  re-arranges full-resolution Quad Bayer into an RGGB mosaic (nearest same-colour site).
+  re-arranges full-resolution Quad Bayer into an RGGB mosaic: a full-resolution demosaic
+  (`method`, default `gradient`; `edge` below), resampled on the RGGB tile. Sites whose colour
+  doesn't change keep their measured value. It is a reference remosaic, not a vendor algorithm.
 * **Demosaic**: `cfa.demosaic: bilinear` (normalised convolution per channel; measured samples
   are preserved exactly) or `gradient` (Adams-Hamilton / Cok-style: interpolate the
   densest "guide" channel, then colour differences to it). References: B. E. Bayer, US 3,971,065
   (1976); D. R. Cok, US 4,642,678 (1987); J. E. Adams & J. F. Hamilton, US 5,629,734 (1997);
   B. K. Gunturk et al., "Demosaicking: color filter array interpolation", IEEE Signal Process.
-  Mag. 22(1), 44-54 (2005).
+  Mag. 22(1), 44-54 (2005). Opt-in `edge` (`demosaic_edge`) combines two steps:
+  * *Guide:* horizontal and vertical estimates of the guide, each with the Hamilton-Adams
+    second-order term from the site's own channel (guide at ±a and own channel at ±2a; a = 2 for
+    Quad Bayer's 2x2 clusters). They are blended with `1/(eps + E)^2` weights, where E is the
+    same-channel gradient energy over a 5x5 window (the RCD / Menon-style directional decision;
+    D. Menon, S. Andriani, G. Calvagno, IEEE TIP 16(1), 132-141, 2007).
+  * *Other channels:* residual interpolation (D. Kiku, Y. Monno, M. Tanaka, M. Okutomi,
+    "Residual interpolation for color image demosaicking", ICIP 2013, 2304-2308). A masked
+    guided filter fitted on each channel's own sites gives a tentative image, and the residuals
+    on those sites are interpolated and added back.
+
+  Both steps are clamped to the local range of the measured samples, as `gradient` is, and
+  measured samples and flat fields are kept exactly. Layouts without a guide on at least half
+  the sites (2x2 `RGBW`, `CYGM`) fall back to `gradient` (`edge_applies`), because `edge`
+  measured worse on them.
+
+  PSNR [dB], all channels, 8 px border excluded. The test images are a 256x256 crop of a pbrt
+  highway render (three wavelength bands, σ = 0.6 px blur) and a colour zone plate. Non-RGB
+  channels are synthesised as sums of the R, G and B bands (W = C = R+G+B, Ye = R+G, Cy = G+B,
+  Mg = R+B), so these are the interpolation errors of the method only, with no noise:
+
+  | layout | highway bilinear / gradient / edge | zone plate bilinear / gradient / edge |
+  |---|---|---|
+  | RGGB | 43.4 / 45.8 / 47.3 | 24.3 / 29.8 / 32.1 |
+  | RCCB | 48.3 / 49.2 / 52.0 | 29.7 / 30.8 / 37.7 |
+  | RGBW_4X4 | 46.1 / 48.4 / 49.7 | 25.5 / 28.7 / 30.7 |
+  | RYYCY | 44.7 / 47.2 / 48.9 | 25.8 / 29.6 / 35.3 |
+  | QUAD_BAYER | 38.6 / 39.2 / 39.3 | 16.9 / 17.7 / 17.9 |
+  | RGBW, CYGM | same as gradient (fallback) | same as gradient (fallback) |
+
+  Quad Bayer gains only ~0.1-0.2 dB, and the remosaic to RGGB goes from 39.9 to 40.0 dB on the
+  highway crop. A dedicated Quad Bayer remosaic, e.g. one that uses the binned image at low
+  frequencies, is not implemented. `edge` takes about 2x the time of `gradient` (0.04 s for
+  256x256).
 * **Colour**: a C x 3 channel -> linear sRGB matrix (`cfa.ccm`): `colorchecker_spectral`
   (default: least squares on the 24 ColorChecker reflectances x illuminant x channel QE, white
   preserved; reuses `ccm_fit` / `color_science` targets) or `exr_reference` (fit on the rendered
