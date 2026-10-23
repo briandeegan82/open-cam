@@ -124,3 +124,10 @@ def test_mains_flicker_time_slices(tmp_path):
         assert sum(s.weight for s in sl if s.y0 == y0) == pytest.approx(1.0)
     text = rts.slice_scene_text(scene, sl[0], m["emitters"])
     assert m["emitters"][0]["states"][sl[0].states[ids[0]]] in text
+
+
+def test_regularize_is_opt_in(tmp_path):
+    for d, a in (("plain", ()), ("reg", ("--regularize",))):
+        (tmp_path / d).mkdir()
+        scene = _build(tmp_path / d, *a)[0]
+        assert ('"bool regularize" true' in scene) == bool(a)

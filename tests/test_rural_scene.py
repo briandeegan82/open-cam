@@ -69,3 +69,10 @@ def test_rejects_day_and_streetlights():
         rural.parse_args(["--time-of-day", "day"])
     with pytest.raises(SystemExit):
         rural.parse_args(["--streetlights", "hps"])
+
+
+def test_regularize_is_opt_in(tmp_path):
+    for d, a in (("plain", ()), ("reg", ("--regularize",))):
+        (tmp_path / d).mkdir()
+        scene = _build(tmp_path / d, *a)[0]
+        assert ('"bool regularize" true' in scene) == bool(a)

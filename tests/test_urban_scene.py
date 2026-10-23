@@ -72,3 +72,10 @@ def test_rejects_highway_only_options(tmp_path):
         urban.parse_args(["--puddles"])
     with pytest.raises(SystemExit):
         urban.parse_args(["--lit-windows", "2"])
+
+
+def test_regularize_is_opt_in(tmp_path):
+    for d, a in (("plain", ()), ("reg", ("--regularize",))):
+        (tmp_path / d).mkdir()
+        scene = _build(tmp_path / d, *a)[0]
+        assert ('"bool regularize" true' in scene) == bool(a)
