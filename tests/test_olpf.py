@@ -37,29 +37,45 @@ def test_integer_split_is_two_shifted_copies():
     np.testing.assert_allclose(out[4:-4, 4:-4], ref[4:-4, 4:-4], atol=1e-10)
 
 
+def _box_otf(f, d):
+    n, fr = np.floor(d), d - np.floor(d)
+    return np.abs(0.5 * (1 + (1 - fr) * np.exp(-2j * np.pi * f * n) + fr * np.exp(-2j * np.pi * f * (n + 1))))
+
+
+@pytest.mark.parametrize("interp", ["box", "fourier"])
 @pytest.mark.parametrize("d", [0.6, 1.0, 1.5])
-def test_slanted_edge_mtf_is_cosine(d):
+def test_slanted_edge_mtf(d, interp):
     img = sfr.synthetic_slanted_edge(128, 128, 5.0)
     base = sfr.slanted_edge_sfr(img)
-    res = sfr.slanted_edge_sfr(olpf.apply_plane(img, d, 0.0))
+    res = sfr.slanted_edge_sfr(olpf.apply_plane(img, d, 0.0, interp))
     f = base.frequency_cy_per_px
     k = (f > 0.02) & (f < 0.45)
     ratio = np.interp(f[k], res.frequency_cy_per_px, res.mtf) / base.mtf[k]
-    np.testing.assert_allclose(ratio, np.abs(np.cos(np.pi * f[k] * d)), atol=0.03)
+    want = np.abs(np.cos(np.pi * f[k] * d)) if interp == "fourier" else _box_otf(f[k], d)
+    np.testing.assert_allclose(ratio, want, atol=0.03)
     padded = np.pad(img, 8)  # dark border: no light leaves the frame
-    assert olpf.apply_plane(padded, d, 0.0).sum() == pytest.approx(
-        padded.sum(), rel=1e-9 if float(d).is_integer() else 1e-4
+    assert olpf.apply_plane(padded, d, 0.0, interp).sum() == pytest.approx(
+        padded.sum(), rel=1e-9 if float(d).is_integer() or interp == "box" else 1e-4
     )
+
+
+def test_integer_split_box_matches_fourier():
+    img = np.random.default_rng(2).random((40, 50))
+    np.testing.assert_allclose(olpf.apply_plane(img, 1.0, 2.0), olpf.apply_plane(img, 1.0, 2.0, "fourier"), atol=1e-9)
 
 
 def test_bright_source_does_not_ring():
     img = np.ones((80, 80))
     yy, xx = np.mgrid[:80, :80]
     img[(yy - 40) ** 2 + (xx - 40) ** 2 <= 36] = 2000.0
-    out = olpf.apply_plane(img, 1.0, 1.0)
-    assert out.min() >= 1.0 - 1e-9
-    np.testing.assert_allclose(out[41, 55:], 1.0, atol=1e-9)
-    np.testing.assert_allclose(out[55:, 41], 1.0, atol=1e-9)
+    for d in (1.0, 0.87):  # box weights: fractional splits don't ring either (fourier rang across the frame)
+        out = olpf.apply_plane(img, d, d)
+        assert out.min() >= 1.0 - 1e-9
+        np.testing.assert_allclose(out[41, 55:], 1.0, atol=1e-9)
+        np.testing.assert_allclose(out[55:, 41], 1.0, atol=1e-9)
+    vec = olpf.apply_plane_vec(img, (0.9, 0.3), (-0.2, 1.1))
+    assert vec.min() >= 1.0 - 1e-9 and vec.sum() == pytest.approx(img.sum(), rel=1e-6)
+    assert olpf.apply_plane(img, 0.87, 0.87, "fourier").min() < 0.0  # the band-limited version rings
 
 
 def test_split_resolution_and_validation():

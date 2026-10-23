@@ -295,18 +295,23 @@ def _pink_rows(rng: np.random.Generator, n: int, std: float) -> np.ndarray:
     return std * x / max(float(x.std()), 1e-12)
 
 
-def _fourier_shift(a: np.ndarray, dx: float, dy: float) -> np.ndarray:
-    """``out[y, x] = a[y + dy, x + dx]`` for sub-pixel (dx, dy): band-limited (Fourier) shift on axes 0, 1.
+def _box_shift(a: np.ndarray, dx: float, dy: float) -> np.ndarray:
+    """``out[y, x] = a[y + dy, x + dx]`` for sub-pixel (dx, dy) on axes 0, 1, edge-padded.
 
-    The image is mirrored to twice its size first, so the periodic FFT sees no jump at the borders."""
+    Box-cell (bilinear) weights: exact when the image is constant over each sample's cell, and never
+    rings, unlike a band-limited shift of a sub-lattice that is aliased (a window or lamp edge 1000x
+    brighter than its surround rang over the whole SPD image)."""
     h, w = a.shape[:2]
-    p = np.pad(a, [(0, h), (0, w)] + [(0, 0)] * (a.ndim - 2), mode="symmetric")
-    fy = np.fft.fftfreq(p.shape[0])[:, None]
-    fx = np.fft.fftfreq(p.shape[1])[None, :]
-    ph = np.exp(2j * np.pi * (fx * dx + fy * dy))
-    if a.ndim > 2:
-        ph = ph.reshape(ph.shape + (1,) * (a.ndim - 2))
-    return np.fft.ifft2(np.fft.fft2(p, axes=(0, 1)) * ph, axes=(0, 1)).real[:h, :w]
+    ix, iy = math.floor(dx), math.floor(dy)
+    fx, fy = dx - ix, dy - iy
+    pad = max(abs(ix), abs(iy)) + 2
+    p = np.pad(a, [(pad, pad), (pad, pad)] + [(0, 0)] * (a.ndim - 2), mode="edge")
+    out = np.zeros(a.shape, dtype=np.float64)
+    for oy, wy in ((iy, 1.0 - fy), (iy + 1, fy)):
+        for ox, wx in ((ix, 1.0 - fx), (ix + 1, fx)):
+            if wy * wx:
+                out += wy * wx * p[pad + oy : pad + oy + h, pad + ox : pad + ox + w]
+    return out
 
 
 def spd_centroid_shift(
@@ -315,8 +320,8 @@ def spd_centroid_shift(
     """The optical signal sampled at the small photodiode's centroid, offset (dx, dy) pixels from the large one.
 
     A mosaic (Bayer, or a generic ``cfa_layout`` with an r x c tile) is shifted one tile site at a time, each
-    sub-lattice by (dx/c, dy/r) of its pitch, so colours do not mix; the sub-lattices are aliased, so this is
-    approximate above their Nyquist. Negative ringing is clipped."""
+    sub-lattice by (dx/c, dy/r) of its pitch with box-cell weights (``_box_shift``), so colours do not
+    mix and bright edges do not ring; this slightly blurs detail near each sub-lattice's Nyquist."""
     a = np.asarray(signal_e, dtype=np.float64)
     if not (dx or dy) or a.ndim < 2 or min(a.shape[:2]) < 2:
         return a
@@ -326,9 +331,9 @@ def spd_centroid_shift(
         out = np.empty_like(a)
         for i in range(pr):
             for j in range(pc):
-                out[i::pr, j::pc] = _fourier_shift(a[i::pr, j::pc], dx / pc, dy / pr)
+                out[i::pr, j::pc] = _box_shift(a[i::pr, j::pc], dx / pc, dy / pr)
     else:
-        out = _fourier_shift(a, dx, dy)
+        out = _box_shift(a, dx, dy)
     return np.maximum(out, 0.0)
 
 
