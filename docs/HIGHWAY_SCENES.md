@@ -51,6 +51,34 @@ Useful options: `--sky {kloofendal_43d_clear,kloofendal_48d_partly_cloudy,syferf
 `--allow-missing-assets` builds without any downloads (proxy cars, analytic sky, untextured
 surfaces); the tests use it.
 
+### Path regularization (`--regularize`, off by default)
+
+The highway, urban, rural, garage and tunnel builders write pbrt's unbiased path tracer by default.
+`--regularize` restores the former default, `"bool regularize" true`: after the first non-specular
+bounce, every GGX lobe with alpha below 0.3 is roughened (2x, clamped to 0.1-0.3). Light that reaches a
+diffuse surface via a smooth one (water on a wet road, glass, clear coat) is then less noisy, but it is
+blurred and biased, and more samples do not remove the bias. It is the same effect as on the IQ-lab
+glass-sphere caustic ([IQ_LAB_DIORAMA.md](IQ_LAB_DIORAMA.md)).
+
+Measured at 384x216 with default options plus those listed: crop mean with `--regularize` divided by
+the crop mean without it, each the average of two seeds (± is half the seed-to-seed difference),
+brightest 0.5 % of pixels excluded:
+
+| scene | crop | spp | regularized / unbiased |
+|---|---|---:|---:|
+| rural, night, `--road-wetness wet` | tree canopy pixels, lit partly by lamp light reflected off the water | 16384 | 0.930 ± 0.005 |
+| rural, night, `--road-wetness dry` | same pixels | 16384 | 1.000 (identical) |
+| urban, day, `--road-wetness wet` | road and parked cars, lower right | 8192 | 0.972 ± 0.000 |
+| highway, day, `--windscreen` | road seen through the windscreen, lower left | 8192 | 1.019 ± 0.001 |
+| highway, day, `--road-wetness wet` | traffic cars | 8192 | 1.004 ± 0.000 |
+| tunnel, `inside_out` | tube ceiling | 8192 | 0.999 ± 0.000 |
+| highway / urban, night, wet | traffic and parked cars | 16384 | 0.996 ± 0.024 / 1.009 ± 0.017 (noise-limited) |
+
+Whole frames (1024 spp, same exclusion) change by at most 1.2 % (highway night, wet), and the garage and
+the tunnel `outside_in` view show no 1/64-frame tile that differs by more than the seed-to-seed noise.
+Unbiased renders converge more slowly where these paths matter (night scenes on wet roads especially),
+so raise `--pixelsamples` there rather than switch regularization back on.
+
 ## Radiometry
 
 - Sun: `distant` light with a spectral direct-normal SPD (5778 K envelope x Rayleigh, aerosol,

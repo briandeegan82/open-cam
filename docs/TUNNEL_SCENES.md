@@ -20,6 +20,9 @@ venv/bin/python tools/run_tunnel_hdr_test.py --out-dir out/iq_lab/tunnel_hdr   #
 The scene needs no downloaded assets. The targets are the highway builder's box proxy cars, and
 the sky is the analytic CIE clear sky.
 
+The integrator is pbrt's unbiased path tracer; `--regularize` turns on pbrt's path regularization
+(biased, see [HIGHWAY_SCENES.md](HIGHWAY_SCENES.md#path-regularization---regularize-off-by-default)).
+
 Sky sampling: inside the tube nearly every sky direction pbrt picks is blocked, so daylight from the
 portals is very noisy. By default (`--sky-portal-guide 0.5`) the sky light carries the two portal
 rectangles (`"point3 guideportals"`, pbrt patch `0010-infinite-light-guide-portals.patch`). For points
