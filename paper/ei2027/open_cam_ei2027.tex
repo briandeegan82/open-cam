@@ -13,8 +13,8 @@
 %% Numbers produced by scripts/fig_mtf.py (figures/mtf_summary.json).
 \newcommand{\mtfFoc}{0.257}
 \newcommand{\mtfDefTwo}{0.328}
-\newcommand{\mtfDefFive}{0.340}
-\newcommand{\mtfNyqDefTwo}{0.191}
+\newcommand{\mtfDefFive}{0.339}
+\newcommand{\mtfNyqDefTwo}{0.190}
 \newcommand{\mtfNyqFoc}{0.267}
 \newcommand{\mtfNyqLensFoc}{0.42}
 \newcommand{\mtfBandFoc}{0.18--0.27}
@@ -102,7 +102,7 @@ $z = (\mathrm{DN}-(b+\mu_e/K))/\sigma_{\mathrm{pred}}$ against the analytic EMVA
 \section{Results}
 All results below were produced on a CPU build of pbrt-v4 with the scripts in \texttt{paper/ei2027/scripts/}; the exact commands are listed in the accompanying README. Renders are 960$\times$640.
 
-\textbf{End-to-end ColorChecker.} We rendered the ColorChecker with the geometry and lens of \texttt{config/pipeline.yaml} (realistic 22\,mm wide-angle prescription, 8.756\,mm aperture, focus 4\,m, 1024 samples per pixel, 64 buckets over 360--830\,nm) under CIE D65 and CIE A, and ran it through the \texttt{iphone\_8} recipe (1.4\,\textmu m pixels, GBRG, Malvar demosaic, $K=9.906$\,e$^-$/DN, 9500\,e$^-$ full well, 10-bit) at 500\,lux and 0.12\,s, the pipeline defaults. With the realistic camera the effective f-number from the prescription is f/2.51. The white patch yields 364/821/439\,e$^-$ (R/G/B) under D65. Fig.~\ref{fig:cc} shows the demosaiced output with grey-world preview white balance; the gains change from 2.19/1.00/1.83 (D65) to 1.27/1.00/3.21 (A), a direct consequence of integrating each illuminant's spectrum against the camera QE rather than of an RGB tint. Against a noise-free reference, \texttt{validate\_demosaic\_linear.py} reports a Malvar demosaic error of 0.114\,DN MAE and 0.389\,DN RMSE.
+\textbf{End-to-end ColorChecker.} We rendered the ColorChecker with the geometry and lens of \texttt{config/pipeline.yaml} (realistic 22\,mm wide-angle prescription, 8.756\,mm aperture, focus 4\,m, 1024 samples per pixel, 64 buckets over 360--830\,nm) under CIE D65 and CIE A, and ran it through the \texttt{iphone\_8} recipe (1.4\,\textmu m pixels, GBRG, Malvar demosaic, $K=9.906$\,e$^-$/DN, 9500\,e$^-$ full well, 10-bit) at 500\,lux and 0.12\,s, the pipeline defaults. With the realistic camera the radiometry uses the traced on-axis working f-number of the prescription at this aperture, f/2.79, rather than the nominal focal length over aperture diameter (f/2.51). The white patch yields 3.0/6.8/3.6\,ke$^-$ (R/G/B) under D65. Fig.~\ref{fig:cc} shows the demosaiced output with grey-world preview white balance; the gains change from 2.18/1.00/1.84 (D65) to 1.26/1.00/3.23 (A), a direct consequence of integrating each illuminant's spectrum against the camera QE rather than of an RGB tint. Against a noise-free reference, \texttt{validate\_demosaic\_linear.py} reports a Malvar demosaic error of 2.6\,DN MAE and 5.7\,DN RMSE on the 10-bit output, whose white-patch green signal is about 680\,DN.
 
 \begin{figure*}[t]
 \centering
