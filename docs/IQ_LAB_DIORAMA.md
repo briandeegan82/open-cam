@@ -61,3 +61,26 @@ surfaces at equal time, so it is not a general replacement for `volpath` here. T
 adds colour noise over RGB-film SPPM: it samples 360-830 nm uniformly (RGB films importance-sample
 the visible range) and every pixel shares the iteration's four wavelengths. Fewer iterations with
 more photons (64 x 2M) was worse everywhere.
+
+## Caustics: photon split inside the path tracer (opt-in)
+
+`--caustics photons` keeps `volpath` for the whole image and hands only the caustic light to
+photons (pbrt patch 0021). The builder writes two scenes with the same camera, film and seed handling:
+
+- `iq_diorama.pbrt`: `volpath` with `"bool skipcaustics" true`. It drops the light paths
+  E (S|G)* D S+ L: after the first diffuse vertex D bounces non-specularly, emission reached through
+  one or more specular (glass, mirror) bounces only is not added. Everything else, including direct
+  light at D, MIS, glossy paths and everything after a second non-specular bounce, is unchanged.
+- `iq_diorama_caustics.pbrt`: `sppm` with `"bool causticsonly" true`. Visible points are made only at
+  the first diffuse surface, camera paths add no emission or direct light, and only photons whose
+  bounces after leaving the light were all specular are gathered (L S+ D).
+
+The two passes cover disjoint paths, so `python tools/combine_caustics.py OUT_DIR --render` runs both
+and sums them into the usual film output. Textures, edges and direct lighting are path traced as
+before; only the caustic is a photon estimate, blurred by the gather radius (`--caustic-radius`,
+default 5 mm, shrinking every pass as in SPPM; `--caustic-photons`, `--caustic-iterations`). The
+`volpath` pass drops `"regularize"`, which would otherwise blur the caustic paths.
+
+Limits: CPU only (the wavefront/GPU integrator ignores both flags); caustics through participating
+media and BSSRDFs stay with the path tracer; passthrough dielectrics (patches 0017/0020) are skipped as
+null surfaces by `volpath` but refract the photons, so scenes with them don't split exactly.
