@@ -54,6 +54,7 @@ sys.path.insert(0, str(TOOLS))
 
 import apply_emva_noise  # noqa: E402
 import cfa_mosaic as cm  # noqa: E402
+import combine_caustics  # noqa: E402
 import lens_ghosts  # noqa: E402
 import lens_prescription as lp  # noqa: E402
 import lens_scatter  # noqa: E402
@@ -308,22 +309,18 @@ def render_scene(scene: str, optics: dict, out: Path, xres: int, yres: int, spp:
         sc = meta["scenes"][0]
         scene_file, film = out / sc["scene"], sc["film_output"]
     t0 = time.time()
-    _pbrt(scene_file)
+    if scene == "diorama":
+        combine_caustics.render(out, PBRT)  # two passes with the default caustic photon split
+    else:
+        _pbrt(scene_file)
     res = {"exr": out / film, "meta": meta, "render_s": time.time() - t0, "rois": {}, "shape": (yres, xres)}
     if scene == "flare" and stray_light and optics["camera"] == "realistic":
         res["exr_pbrt"] = res["exr"]
         res["exr"], res["stray_light"] = add_lens_stray_light(res["exr"], optics, SCENES["flare"][2])
     if scene == "diorama":
-        # Second render with another sampler seed: the twin capture then differs in MC noise too,
+        # Second, independent render (pbrt --seed 1): the twin capture then differs in MC noise too,
         # so the texture metric's noise PSD removes render noise as well as sensor noise.
-        # Second, independent render: an in-scene sampler seed (equivalent to pbrt --seed 1).
-        twin = out / f"{Path(film).stem}_seed1{Path(film).suffix}"
-        seeded = scene_file.with_name(scene_file.stem + "_seed1.pbrt")
-        text, n = re.subn(r'(Sampler "\w+")', r'\1 "integer seed" [1]', scene_file.read_text(), count=1)
-        if n != 1:
-            raise RuntimeError(f"no Sampler in {scene_file}")
-        seeded.write_text(text)
-        _pbrt(seeded, "--outfile", twin.name)
+        twin = combine_caustics.render(out, PBRT, ["--seed", "1"], tag="_seed1")
         res["exr_twin"] = twin
     if scene in ("diorama", "skin") and optics["camera"] == "realistic":
         P = gbuffer_world_positions(scene_file, xres, yres)

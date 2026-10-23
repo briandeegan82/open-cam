@@ -110,7 +110,7 @@ def test_sppm_spectral_film_matches_volpath(tmp_path):
     """Spectral SPPM (pbrt patch 0009) writes the volpath EXR layout and agrees per bucket."""
     out = {}
     for name, extra in (
-        ("volpath", ["--pixelsamples", "64"]),
+        ("volpath", ["--pixelsamples", "64", "--caustics", "path"]),
         ("sppm", ["--integrator", "sppm", "--pixelsamples", "256", "--sppm-photons", "20000"]),
     ):
         d = tmp_path / name
@@ -159,6 +159,30 @@ def test_caustic_split_scenes(tmp_path):
             dio.write_diorama(dio.build_parser().parse_args([*args, *bad]))
 
 
+def test_caustic_modes(tmp_path):
+    def build(*extra):
+        d = tmp_path / str(len(list(tmp_path.iterdir())))
+        args = dio.build_parser().parse_args(["--out-dir", str(d), "--xres", "60", "--yres", "40", *extra])
+        meta = dio.write_diorama(args)
+        return meta, (d / "iq_diorama.pbrt").read_text(), (d / "iq_diorama_caustics.pbrt").is_file()
+
+    meta, scene, caustics = build()
+    assert meta["caustics"] == "photons" and caustics and '"bool skipcaustics" true' in scene
+    assert meta["caustic_split"]["caustic_photons"] == 60 * 40
+    for extra, mode in (
+        (["--film", "rgb"], "path"),
+        (["--caustics", "path"], "path"),
+        (["--integrator", "sppm"], "path"),
+    ):
+        meta, scene, caustics = build(*extra)
+        assert meta["caustics"] == mode and not caustics and "caustic_split" not in meta
+        assert "regularize" not in scene and "skipcaustics" not in scene
+    meta, scene, caustics = build("--caustics", "regularized")
+    assert 'Integrator "volpath" "integer maxdepth" [6] "bool regularize" true\n' in scene and not caustics
+    with pytest.raises(ValueError):
+        build("--caustics", "regularized", "--integrator", "sppm")
+
+
 @pytest.mark.skipif(not PBRT.is_file(), reason="pbrt binary not built")
 def test_caustic_split_sums_to_volpath(tmp_path):
     """volpath "skipcaustics" + sppm "causticsonly" (patch 0021) = plain volpath, per bucket."""
@@ -166,11 +190,9 @@ def test_caustic_split_sums_to_volpath(tmp_path):
 
     base = ["--xres", "60", "--yres", "40", "--spectral-nbuckets", "8"]
     ref = tmp_path / "ref"
-    meta = dio.write_diorama(dio.build_parser().parse_args(["--out-dir", str(ref), *base, "--pixelsamples", "256"]))
-    scene = ref / "iq_diorama.pbrt"
-    scene.write_text(scene.read_text().replace(' "bool regularize" true', ""))
-    subprocess.run([str(PBRT), "--quiet", "--seed", "1", scene.name], cwd=ref, check=True, timeout=600)
-    vol, vb = _spectral_exr(ref / meta["film_output"])
+    ref_args = ["--out-dir", str(ref), *base, "--pixelsamples", "256", "--caustics", "path"]
+    dio.write_diorama(dio.build_parser().parse_args(ref_args))
+    vol, vb = _spectral_exr(combine_caustics.render(ref, PBRT, ["--seed", "1"]))
     split = tmp_path / "split"
     args = [
         "--out-dir",
@@ -184,8 +206,8 @@ def test_caustic_split_sums_to_volpath(tmp_path):
         "20000",
     ]
     dio.write_diorama(dio.build_parser().parse_args(args))
-    combine_caustics.render(split, PBRT, ["--seed", "2"])
-    tot, sb = _spectral_exr(split / "iq_diorama_spectral.exr")
+    tot, sb = _spectral_exr(combine_caustics.render(split, PBRT, ["--seed", "2"]))
+    assert combine_caustics.render(split, PBRT, ["--seed", "3"], tag="_seed3").name == "iq_diorama_spectral_seed3.exr"
     caus, _ = _spectral_exr(split / "iq_diorama_spectral_caustics.exr")
     assert sb == vb and all(np.isfinite(tot[c]).all() for c in tot)
     assert sum(caus[c].mean() for c in sb) > 0

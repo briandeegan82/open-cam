@@ -166,14 +166,21 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--sppm-radius", type=float, default=0.02, help="initial SPPM gather radius [m]")
     ap.add_argument(
         "--caustics",
-        choices=("path", "photons"),
-        default="path",
-        help='photons = split render (pbrt patch 0021): volpath with "skipcaustics" renders everything except '
-        "caustics (light reaching the first diffuse surface via specular glass/mirror bounces only), and "
-        'iq_diorama_caustics.pbrt (sppm "causticsonly") renders just those; tools/combine_caustics.py sums '
-        "them into the film output. Edges and textures stay path traced.",
+        choices=("auto", "photons", "path", "regularized"),
+        default="auto",
+        help="auto (default) = photons with --integrator volpath and --film spectral, else path. photons = split "
+        'render (pbrt patch 0021): volpath with "skipcaustics" renders everything except caustics (light reaching '
+        "the first diffuse surface via specular glass/mirror bounces only), and iq_diorama_caustics.pbrt (sppm "
+        '"causticsonly") renders just those; tools/combine_caustics.py sums them into the film output. path = '
+        'plain volpath (unbiased, grainy caustic; use for --wavefront/GPU). regularized = volpath "regularize" '
+        "(the pre-split default: less caustic noise but the caustic core comes out ~12 %% dim).",
     )
-    ap.add_argument("--caustic-photons", type=int, default=500000, help="caustic photons per iteration")
+    ap.add_argument(
+        "--caustic-photons",
+        type=int,
+        default=None,
+        help="caustic photons per iteration (default min(500000, xres*yres))",
+    )
     ap.add_argument("--caustic-radius", type=float, default=0.005, help="initial caustic gather radius [m]")
     ap.add_argument(
         "--caustic-iterations", type=int, default=None, help="caustic photon passes (default --pixelsamples)"
@@ -185,10 +192,24 @@ def build_parser() -> argparse.ArgumentParser:
     return ap
 
 
+def caustic_mode(args: argparse.Namespace) -> str:
+    """Resolved ``--caustics``: ``photons``, ``path`` or ``regularized``."""
+    mode = getattr(args, "caustics", "auto")
+    if mode == "auto":
+        return "photons" if args.integrator == "volpath" and args.film == "spectral" else "path"
+    return mode
+
+
+def caustic_photons(args: argparse.Namespace) -> int:
+    n = args.caustic_photons
+    return int(n) if n is not None else min(500000, int(args.xres) * int(args.yres))
+
+
 def integrator_line(args: argparse.Namespace) -> str:
-    if getattr(args, "caustics", "path") == "photons":
-        if args.integrator != "volpath":
-            raise ValueError("--caustics photons needs --integrator volpath")
+    mode = caustic_mode(args)
+    if mode in ("photons", "regularized") and args.integrator != "volpath":
+        raise ValueError(f"--caustics {mode} needs --integrator volpath")
+    if mode == "photons":
         # no "regularize": it would blur the caustic paths the photon pass now renders
         return f'Integrator "volpath" "integer maxdepth" [{int(args.maxdepth)}] "bool skipcaustics" true'
     if args.integrator == "sppm":
@@ -198,15 +219,16 @@ def integrator_line(args: argparse.Namespace) -> str:
             f'Integrator "sppm" "integer maxdepth" [{int(args.maxdepth)}] '
             f'"integer photonsperiteration" [{int(args.sppm_photons)}] "float radius" [{args.sppm_radius:.6g}]'
         )
-    return f'Integrator "volpath" "integer maxdepth" [{int(args.maxdepth)}] "bool regularize" true'
+    reg = ' "bool regularize" true' if mode == "regularized" else ""
+    return f'Integrator "volpath" "integer maxdepth" [{int(args.maxdepth)}]{reg}'
 
 
 def caustic_integrator_line(args: argparse.Namespace) -> str:
-    if args.caustic_photons <= 0 or args.caustic_radius <= 0:
+    if caustic_photons(args) <= 0 or args.caustic_radius <= 0:
         raise ValueError("--caustic-photons and --caustic-radius must be positive")
     return (
         f'Integrator "sppm" "integer maxdepth" [{int(args.maxdepth)}] "bool causticsonly" true '
-        f'"integer photonsperiteration" [{int(args.caustic_photons)}] "float radius" [{args.caustic_radius:.6g}]'
+        f'"integer photonsperiteration" [{caustic_photons(args)}] "float radius" [{args.caustic_radius:.6g}]'
     )
 
 
@@ -219,7 +241,7 @@ def write_diorama(args: argparse.Namespace) -> dict:
     proj = Projector(args)
     wl = np.arange(360.0, 831.0, 5.0)
     film = f"iq_diorama_{args.film}.exr"
-    split = args.caustics == "photons"
+    split = caustic_mode(args) == "photons"
     if split and args.film != "spectral":
         raise ValueError("--caustics photons needs --film spectral")
     render_film = film.replace(".exr", "_nocaustics.exr") if split else film
@@ -254,7 +276,14 @@ def write_diorama(args: argparse.Namespace) -> dict:
         f'"bool twosided" true\n    Material "diffuse" "rgb reflectance" [0 0 0]\n'
         '    Shape "bilinearmesh" "point3 P" [ -1 2.4 -0.8  1 2.4 -0.8  -1 2.4 1.5  1 2.4 1.5 ]\nAttributeEnd',
     ]
-    meta: dict = {"film_output": film, "cards": {}, "colorchecker": [], "skin": [], "spheres": []}
+    meta: dict = {
+        "film_output": film,
+        "caustics": caustic_mode(args),
+        "cards": {},
+        "colorchecker": [],
+        "skin": [],
+        "spheres": [],
+    }
     cc = load_colorchecker(REPO, wl)
     x = _patch_grid(lines, meta["colorchecker"], proj, out, "cc", cc.reflectance, wl, 6, -0.82, 0.042, 0.006)
     skin_refl = [p["reflectance"] for p in skin_chart.patches(wl)]
@@ -320,7 +349,7 @@ def write_diorama(args: argparse.Namespace) -> dict:
             "caustic_scene": "iq_diorama_caustics.pbrt",
             "caustic_output": caustic_film,
             "caustic_iterations": iters,
-            "caustic_photons": int(args.caustic_photons),
+            "caustic_photons": caustic_photons(args),
             "caustic_radius_m": float(args.caustic_radius),
         }
     (out / "diorama.json").write_text(json.dumps(meta, indent=2))

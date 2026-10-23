@@ -62,9 +62,23 @@ adds colour noise over RGB-film SPPM: it samples 360-830 nm uniformly (RGB films
 the visible range) and every pixel shares the iteration's four wavelengths. Fewer iterations with
 more photons (64 x 2M) was worse everywhere.
 
-## Caustics: photon split inside the path tracer (opt-in)
+## Caustics: photon split inside the path tracer (default)
 
-`--caustics photons` keeps `volpath` for the whole image and hands only the caustic light to
+`--caustics` (default `auto`) chooses how the caustic under the glass and metal spheres is rendered:
+
+| mode | used for | integrator |
+|---|---|---|
+| `photons` | `auto` with `--integrator volpath --film spectral` | split: `volpath "skipcaustics"` + `sppm "causticsonly"` (below) |
+| `path` | `auto` otherwise (RGB film, `--integrator sppm`); use it for `--wavefront`/GPU | plain `volpath` |
+| `regularized` | the pre-split default, for comparison with older renders | `volpath "regularize"` |
+
+`regularize` roughens every GGX lobe below 0.3 (to 2x, clamped to 0.1-0.3) after the first non-specular
+bounce, so the smooth spheres act as rough ones for the floor's caustic. That cuts caustic noise but
+biases it: in a 16384 spp crop of the 960 x 640 `wide_22mm` lab render the caustic core is 33.9 with
+`regularize`, 38.6 without and 38.2 with the photon split, while the floor and walls agree within 0.2 %.
+More samples don't remove the 12 % deficit, so the default no longer uses it.
+
+The photon split keeps `volpath` for the whole image and hands only the caustic light to
 photons (pbrt patch 0021). The builder writes two scenes with the same camera, film and seed handling:
 
 - `iq_diorama.pbrt`: `volpath` with `"bool skipcaustics" true`. It drops the light paths
@@ -76,11 +90,17 @@ photons (pbrt patch 0021). The builder writes two scenes with the same camera, f
   bounces after leaving the light were all specular are gathered (L S+ D).
 
 The two passes cover disjoint paths, so `python tools/combine_caustics.py OUT_DIR --render` runs both
-and sums them into the usual film output. Textures, edges and direct lighting are path traced as
+and sums them into the usual film output (rendering `iq_diorama.pbrt` alone gives
+`iq_diorama_spectral_nocaustics.exr`, the image without the caustic). It also renders unsplit scenes in one
+pass, and `--tag _seed1 --seed 1` writes an independent render beside the main one; the recipe
+scorecard uses it for both diorama renders. Textures, edges and direct lighting are path traced as
 before; only the caustic is a photon estimate, blurred by the gather radius (`--caustic-radius`,
-default 5 mm, shrinking every pass as in SPPM; `--caustic-photons`, `--caustic-iterations`). The
-`volpath` pass drops `"regularize"`, which would otherwise blur the caustic paths.
+default 5 mm, shrinking every pass as in SPPM; `--caustic-photons`, default min(500k, pixels);
+`--caustic-iterations`, default `--pixelsamples`). On the full lab render the photon pass adds about
+27 % to the render time and halves the caustic noise (12.1 % to 6.8 % at 1024 spp); floor noise and
+slanted-edge MTF50 are unchanged.
 
-Limits: CPU only (the wavefront/GPU integrator ignores both flags); caustics through participating
+Limits: CPU only (the wavefront/GPU integrator ignores both flags, so a split scene rendered there would
+count the caustic twice; build with `--caustics path`); caustics through participating
 media and BSSRDFs stay with the path tracer; passthrough dielectrics (patches 0017/0020) are skipped as
 null surfaces by `volpath` but refract the photons, so scenes with them don't split exactly.
