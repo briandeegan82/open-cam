@@ -1,0 +1,177 @@
+--- a/src/pbrt/lights.h
++++ b/src/pbrt/lights.h
+@@ -386,6 +386,8 @@
+     }
+ 
+     pstd::optional<LightBounds> Bounds() const;
++    // open-cam: peak-intensity beam-cone bounds (see BVHLightSampler)
++    pstd::optional<LightBounds> PeakBounds() const;
+ 
+     std::string ToString() const;
+ 
+--- a/src/pbrt/lights.cpp
++++ b/src/pbrt/lights.cpp
+@@ -580,6 +580,58 @@
+                        std::cos(Pi / 2), false);
+ }
+ 
++pstd::optional<LightBounds> GoniometricLight::PeakBounds() const {
++    // open-cam: bounds for the "bvh" light sampler's beam tree: the peak intensity, not the mean, over a cone around the
++    // intensity-weighted beam axis that holds every emitting texel. The mean made the BVH
++    // light sampler pick a beam-peaked lamp far too rarely where its beam dominates
++    // (fireflies). Importance only sets the sampling pmf, so this is unbiased provided it is
++    // nonzero wherever the lamp emits, which both cone forms below guarantee.
++    Point2i res = image.Resolution();
++    auto texelDir = [&](int x, int y) {
++        return EqualAreaSquareToSphere(Point2f((x + 0.5f) / res.x, (y + 0.5f) / res.y));
++    };
++    Float maxY = 0;
++    Vector3f axis(0, 0, 0);
++    for (int y = 0; y < res.y; ++y)
++        for (int x = 0; x < res.x; ++x) {
++            Float v = image.GetChannel({x, y}, 0);
++            maxY = std::max(maxY, v);
++            if (v > 0)
++                axis += v * texelDir(x, y);
++        }
++    Float phi = scale * Iemit->MaxValue() * 4 * Pi * maxY;
++    Point3f p = renderFromLight(Point3f(0, 0, 0));
++    if (LengthSquared(axis) == 0)
++        return LightBounds(Bounds3f(p, p), Vector3f(0, 0, 1), phi, std::cos(Pi),
++                           std::cos(Pi / 2), false);
++    axis = Normalize(axis);
++    Float cosMax = 1;
++    for (int y = 0; y < res.y; ++y)
++        for (int x = 0; x < res.x; ++x)
++            if (image.GetChannel({x, y}, 0) > 0)
++                cosMax = std::min(cosMax, Dot(axis, texelDir(x, y)));
++    // emitting half-angle plus two texel widths for the nearest-texel lookup
++    Float margin = 2 * std::sqrt(4 * Pi / (res.x * res.y));
++    Float thetaMax = std::min<Float>(SafeACos(cosMax) + margin, Pi);
++    // Two valid forms: (a) flat over the emitting cone, zero outside; (b) flat out to
++    // thetaMax - pi/2, then the BVH's cosine falloff. Keep the one with less total
++    // importance over the sphere (solid angle, weighted by the falloff for (b)).
++    Float flatSA = 2 * Pi * (1 - std::cos(thetaMax));
++    Float thetaO = std::max<Float>(thetaMax - Pi / 2, 0);
++    Float cosSA = 2 * Pi * (1 - std::cos(thetaO));
++    constexpr int nSteps = 256;
++    for (int i = 0; i < nSteps; ++i) {
++        Float t = thetaO + (i + 0.5f) * (Pi / 2) / nSteps;
++        if (t < Pi)
++            cosSA += 2 * Pi * std::cos(t - thetaO) * std::sin(t) * (Pi / 2) / nSteps;
++    }
++    Vector3f w = Normalize(renderFromLight(axis));
++    if (flatSA <= cosSA)
++        return LightBounds(Bounds3f(p, p), w, phi, std::cos(thetaMax), std::cos(margin),
++                           false);
++    return LightBounds(Bounds3f(p, p), w, phi, std::cos(thetaO), std::cos(Pi / 2), false);
++}
++
+ PBRT_CPU_GPU pstd::optional<LightLeSample> GoniometricLight::SampleLe(Point2f u1, Point2f u2,
+                                                          SampledWavelengths &lambda,
+                                                          Float time) const {
+--- a/src/pbrt/lightsamplers.h
++++ b/src/pbrt/lightsamplers.h
+@@ -260,10 +260,37 @@
+ class BVHLightSampler {
+   public:
+     // BVHLightSampler Public Methods
+-    BVHLightSampler(pstd::span<const Light> lights, Allocator alloc);
++    // open-cam: with beamMix, goniometric lamps also get a second BVH built from their
++    // peak-intensity beam-cone bounds (GoniometricLight::PeakBounds) and lights are drawn
++    // from a 50/50 mixture of the two trees. The mean-intensity bounds alone make a
++    // beam-peaked headlamp rare exactly where its beam dominates (fireflies); the peak
++    // bounds alone over-sample it outside the beam. The mixture pmf is at least half of
++    // either, and both are nonzero wherever a lamp emits, so the estimate stays unbiased.
++    BVHLightSampler(pstd::span<const Light> lights, Allocator alloc, bool beamMix = true,
++                    bool peakBeams = false);
+ 
+     PBRT_CPU_GPU
+     pstd::optional<SampledLight> Sample(const LightSampleContext &ctx, Float u) const {
++        if (!beam)
++            return SampleOne(ctx, u);
++        pstd::optional<SampledLight> s =
++            u < 0.5f ? SampleOne(ctx, 2 * u)
++                     : beam->SampleOne(ctx, std::min<Float>(2 * u - 1, OneMinusEpsilon));
++        if (!s)
++            return {};
++        s->p = 0.5f * (PMFOne(ctx, s->light) + beam->PMFOne(ctx, s->light));
++        return s;
++    }
++
++    PBRT_CPU_GPU
++    Float PMF(const LightSampleContext &ctx, Light light) const {
++        if (!beam)
++            return PMFOne(ctx, light);
++        return 0.5f * (PMFOne(ctx, light) + beam->PMFOne(ctx, light));
++    }
++
++    PBRT_CPU_GPU
++    pstd::optional<SampledLight> SampleOne(const LightSampleContext &ctx, Float u) const {
+         // Compute infinite light sampling probability _pInfinite_
+         Float pInfinite = Float(infiniteLights.size()) /
+                           Float(infiniteLights.size() + (nodes.empty() ? 0 : 1));
+@@ -320,7 +347,7 @@
+     }
+ 
+     PBRT_CPU_GPU
+-    Float PMF(const LightSampleContext &ctx, Light light) const {
++    Float PMFOne(const LightSampleContext &ctx, Light light) const {
+         // Handle infinite _light_ PMF computation
+         if (!lightToBitTrail.HasKey(light))
+             return 1.f / (infiniteLights.size() + (nodes.empty() ? 0 : 1));
+@@ -401,6 +428,7 @@
+     Bounds3f allLightBounds;
+     pstd::vector<LightBVHNode> nodes;
+     HashMap<Light, uint32_t> lightToBitTrail;
++    BVHLightSampler *beam = nullptr;
+ };
+ 
+ // ExhaustiveLightSampler Definition
+--- a/src/pbrt/lightsamplers.cpp
++++ b/src/pbrt/lightsamplers.cpp
+@@ -52,6 +52,8 @@
+         return alloc.new_object<PowerLightSampler>(lights, alloc);
+     else if (name == "bvh")
+         return alloc.new_object<BVHLightSampler>(lights, alloc);
++    else if (name == "bvhmean")  // open-cam: stock pbrt BVH (mean-intensity bounds only)
++        return alloc.new_object<BVHLightSampler>(lights, alloc, false);
+     else if (name == "exhaustive")
+         return alloc.new_object<ExhaustiveLightSampler>(lights, alloc);
+     else {
+@@ -106,7 +108,8 @@
+ STAT_INT_DISTRIBUTION("Integrator/Lights sampled per lookup", nLightsSampled);
+ 
+ // BVHLightSampler Method Definitions
+-BVHLightSampler::BVHLightSampler(pstd::span<const Light> lights, Allocator alloc)
++BVHLightSampler::BVHLightSampler(pstd::span<const Light> lights, Allocator alloc,
++                                 bool beamMix, bool peakBeams)
+     : lights(lights.begin(), lights.end(), alloc),
+       infiniteLights(alloc),
+       nodes(alloc),
+@@ -116,7 +119,10 @@
+     for (size_t i = 0; i < lights.size(); ++i) {
+         // Store $i$th light in either _infiniteLights_ or _bvhLights_
+         Light light = lights[i];
+-        pstd::optional<LightBounds> lightBounds = light.Bounds();
++        pstd::optional<LightBounds> lightBounds =
++            peakBeams && light.Is<GoniometricLight>()
++                ? light.Cast<GoniometricLight>()->PeakBounds()
++                : light.Bounds();
+         if (!lightBounds)
+             infiniteLights.push_back(light);
+         else if (lightBounds->phi > 0) {
+@@ -130,6 +136,13 @@
+                      lightToBitTrail.capacity() * sizeof(uint32_t) +
+                      lights.size() * sizeof(Light) +
+                      infiniteLights.size() * sizeof(Light);
++
++    if (beamMix && !peakBeams)
++        for (Light light : lights)
++            if (light.Is<GoniometricLight>()) {
++                beam = alloc.new_object<BVHLightSampler>(lights, alloc, false, true);
++                break;
++            }
+ }
+ 
+ std::pair<int, LightBounds> BVHLightSampler::buildBVH(
