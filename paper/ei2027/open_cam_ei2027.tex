@@ -192,12 +192,12 @@ Tunnel, ceiling (8192) & $0.999\pm0.000$ \\
 \end{table}
 
 \subsection{Driving scenes}
-The same pipeline renders procedural road scenes. Figure~\ref{fig:driving} shows a highway with the sun-and-sky daylight model, a wet road with puddles and tyre spray, a homogeneous fog medium of 80\,m meteorological visibility, and a wet road at night, all rendered on the unregularized path tracer. These renders demonstrate the scene and weather models; we have not validated them against measured road imagery.
+The same pipeline renders procedural road scenes. Figure~\ref{fig:driving} shows a highway with the sun-and-sky daylight model, a wet road with puddles and tyre spray, the dry scene in the short-wave infrared (SWIR), and a wet road at night, all rendered on the unregularized path tracer. For the SWIR panel the sun follows the ASTM G173 direct spectrum, including its water-vapour bands, vegetation follows a measured USGS leaf spectrum above 800\,nm, and the film integrates an ideal 900--1600\,nm passband; this needs a pbrt-v4 build with an extended wavelength range. These renders demonstrate the scene and weather models; we have not validated them against measured road imagery.
 
 \begin{figure*}[t]
 \centering
 \includegraphics[width=\textwidth]{figures/fig_driving.jpg}
-\caption{Highway scenes, 960$\times$540, pbrt-v4 spectral film (16 buckets, 360--830\,nm), unregularized path tracer, 256 samples per pixel for (a) and (b), 4096 for (c) and 1024 for (d), converted by the default research-camera recipe and shown as its noisy demosaiced sRGB preview. Exposure is set separately for each panel (99th percentile at 80\% of full well), so brightness is not comparable between panels. The coloured speckle on the lead car in (d) is Monte Carlo noise in the pbrt-v4 output from headlamp light reflected by the wet road and car glass, which the unregularized path tracer renders without bias but with high variance.}
+\caption{Highway scenes, 960$\times$540, unregularized path tracer, 256 samples per pixel for (a)--(c) and 1024 for (d). (a), (b), (d): pbrt-v4 spectral film with 16 buckets over 360--830\,nm, converted by the default research-camera recipe and shown as its noisy demosaiced sRGB preview. (c): 36 buckets over 900--1600\,nm, converted by a representative 15\,\textmu m InGaAs recipe and shown as its noisy greyscale preview. Exposure is set separately for each panel (99th percentile at 80\% of full well), so brightness is not comparable between panels. The coloured speckle on the lead car in (d) is Monte Carlo noise in the pbrt-v4 output from headlamp light reflected by the wet road and car glass, which the unregularized path tracer renders without bias but with high variance.}
 \label{fig:driving}
 \end{figure*}
 

@@ -1,8 +1,8 @@
-"""Driving-scene figure: four highway renders from render_driving.sh through the default recipe.
+"""Driving-scene figure: four highway renders from render_driving.sh through the sensor model.
 
-Each spectral EXR goes through tools/apply_emva_noise.py (default research camera, per-render
-auto-exposure: 99th percentile at 80 % of full well); the panels are its noisy demosaiced sRGB
-previews. Run from the repository root after render_driving.sh:
+Each spectral EXR goes through tools/apply_emva_noise.py (per-render auto-exposure: 99th percentile
+at 80 % of full well). Visible panels use the default research camera and show its noisy demosaiced
+sRGB preview; the SWIR panel uses the representative InGaAs recipe and shows its noisy grey preview. Run from the repository root after render_driving.sh:
     venv/bin/python paper/ei2027/scripts/fig_driving.py
 """
 
@@ -22,17 +22,18 @@ import matplotlib.pyplot as plt
 REPO = Path(__file__).resolve().parents[3]
 BUILD = REPO / "paper" / "ei2027" / "build" / "driving"
 OUT = REPO / "paper" / "ei2027" / "figures"
+# name: (title, recipe, preview PNG)
 PANELS = {
-    "day_dry": "(a) day, dry",
-    "day_wet": "(b) day, wet road, puddles, spray",
-    "fog_80m": "(c) day, fog (80 m visibility)",
-    "night_wet": "(d) night, wet road, puddles",
+    "day_dry": ("(a) day, dry, visible", "default", "noisy_demosaic_rgb8.png"),
+    "day_wet": ("(b) day, wet road, puddles, spray, visible", "default", "noisy_demosaic_rgb8.png"),
+    "swir_900_1600": ("(c) day, dry, SWIR 900-1600 nm", "swir_ingaas_vga_15um", "noisy_rgb8.png"),
+    "night_wet": ("(d) night, wet road, puddles, visible", "default", "noisy_demosaic_rgb8.png"),
 }
 
 
 def main() -> None:
     stats = {}
-    for name in PANELS:
+    for name, (_, recipe, _) in PANELS.items():
         d = BUILD / name
         subprocess.run(
             [
@@ -41,7 +42,7 @@ def main() -> None:
                 "--repo-root",
                 str(REPO),
                 "--camera-model-config",
-                str(REPO / "config" / "camera_recipes" / "default.yaml"),
+                str(REPO / "config" / "camera_recipes" / f"{recipe}.yaml"),
                 "--linear-exr",
                 str(d / "out" / "highway_spectral.exr"),
                 "--scene-manifest-json",
@@ -61,10 +62,12 @@ def main() -> None:
             stdout=subprocess.DEVNULL,
         )
         s = json.loads((d / "raw_png" / "run_stats.json").read_text())
-        stats[name] = {k: s.get(k) for k in ("exposure_scale_e_per_unit", "signal_e_mean_mono", "demosaic")}
+        stats[name] = {"recipe": recipe} | {
+            k: s.get(k) for k in ("exposure_scale_e_per_unit", "signal_e_mean_mono", "demosaic")
+        }
     fig, axes = plt.subplots(2, 2, figsize=(7.0, 2.25 * 2))
-    for ax, (name, title) in zip(axes.ravel(), PANELS.items(), strict=True):
-        ax.imshow(mpimg.imread(BUILD / name / "raw_png" / "noisy_demosaic_rgb8.png"))
+    for ax, (name, (title, _, png)) in zip(axes.ravel(), PANELS.items(), strict=True):
+        ax.imshow(mpimg.imread(BUILD / name / "raw_png" / png), cmap="gray")
         ax.set_title(title, fontsize=8)
         ax.axis("off")
     fig.tight_layout(pad=0.2, h_pad=0.4, w_pad=0.3)
