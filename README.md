@@ -2,6 +2,25 @@
 
 Open Cam is a physically motivated camera simulation pipeline. It renders a ColorChecker scene with PBRT, converts spectral radiance into sensor electrons, and applies EMVA-style sensor noise and optional CFA/demosaic to generate RAW and preview outputs.
 
+<table>
+  <tr>
+    <td width="50%"><img src="docs/images/readme_iq_lab.jpg" alt="IQ-lab diorama render"></td>
+    <td width="50%"><img src="docs/images/readme_highway_day.jpg" alt="Highway scene, day"></td>
+  </tr>
+  <tr>
+    <td>Image-quality lab diorama: 1024 spp spectral render through the realistic wide_22mm lens (dispersion, traced ghosts, lens scatter), photon-split caustics under the glass sphere, then an illustrative split-pixel HDR sensor with shot and read noise. See <a href="docs/IQ_LAB_DIORAMA.md">docs/IQ_LAB_DIORAMA.md</a>.</td>
+    <td>Highway scene, day (<code>tools/build_highway_scene.py</code>): procedural motorway with traffic, gantry signs, barriers, vegetation, sun and sky. See <a href="docs/HIGHWAY_SCENES.md">docs/HIGHWAY_SCENES.md</a>.</td>
+  </tr>
+  <tr>
+    <td><img src="docs/figures/wet_road_panel.png" alt="Dry vs wet road, day and night"></td>
+    <td><img src="docs/images/highway_vis_vs_swir_900_1600.jpg" alt="Highway in visible vs SWIR"></td>
+  </tr>
+  <tr>
+    <td>Dry vs wet road with puddles and spray, day and night, at the same exposure per row.</td>
+    <td>The same highway in the visible and in SWIR (900–1600 nm).</td>
+  </tr>
+</table>
+
 ## What You Get
 
 - Spectral or RGB PBRT render (`.exr`)
