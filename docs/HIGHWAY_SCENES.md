@@ -79,6 +79,34 @@ the tunnel `outside_in` view show no 1/64-frame tile that differs by more than t
 Unbiased renders converge more slowly where these paths matter (night scenes on wet roads especially),
 so raise `--pixelsamples` there rather than switch regularization back on.
 
+### Light sampling of headlamps and street lights (pbrt patch 0022)
+
+pbrt's BVH light sampler picks one light per shading point with probability proportional to a bound on
+its contribution. Stock pbrt bounds a goniometric lamp as an isotropic source of its *mean* intensity,
+which for a low beam (peak 30 kcd, mean 32 cd) is about 1/950 of the hot spot. Where the beam
+dominates, such as the lead car in front of the ego headlamps, the lamp was therefore picked rarely and
+its light arrived as bright isolated pixels. More path depth, more layer samples on the car paint, or the
+caustic photon split do not change it; the spikes are in the light choice.
+
+Patch 0022 builds a second light tree in which each goniometric lamp is bounded by its *peak* intensity
+inside a cone around its beam axis that holds every emitting direction. The default `"bvh"` sampler
+draws from a 50/50 mixture of the two trees, so the chance of picking any light is at least half of what
+either tree alone gives. The peak tree on its own makes the street-lit road noisier, because it over-
+samples headlamps outside their beam. The mixture changes only sampling probabilities, so the expected
+image is unchanged. Scenes without goniometric lamps use the stock tree only and render exactly as
+before. `"string lightsampler" "bvhmean"` selects the stock sampler.
+
+Highway night, wet road, lead-car crop, 256 spp, raw pbrt EXR, 4 seeds; per-pixel noise is the
+seed-to-seed RMS difference over the region mean:
+
+| region | mean, stock / patch | per-pixel noise, stock / patch |
+|---|---:|---:|
+| lead car | 87.5 ± 2.4 / 88.3 ± 0.6 | 454 % / 66 % |
+| road lit by street lights | 2.24 / 2.24 | 25 % / 31 % |
+| road right of the car | 0.29 / 0.29 | 141 % / 16 % |
+| sign gantry | 0.39 ± 0.04 / 0.32 ± 0.00 | 356 % / 136 % |
+| whole crop | 16.32 ± 0.35 / 16.44 ± 0.07 | 912 % / 144 % |
+
 ## Radiometry
 
 - Sun: `distant` light with a spectral direct-normal SPD (5778 K envelope x Rayleigh, aerosol,
