@@ -145,7 +145,7 @@ SENSOR_STACKS = {
             "gap_after_mm": 0.8,
             "coating": "mgf2",
             "filter_face": "front",
-            "filter_csv": "spectra/QE/interpolated/QE_IRCF.csv",
+            "filter_csv": "spectra/QE/ircf/QE_IRCF_hybrid_coating.csv",
             "filter_n_eff": 1.8,
         },
         {"name": "cover_glass", "thickness_mm": 0.4, "n": 1.523, "gap_after_mm": 0.5, "coating": "mgf2"},

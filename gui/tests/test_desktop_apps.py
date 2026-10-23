@@ -125,12 +125,12 @@ def test_isp_cfa_scenarios_load_the_named_qe_curves(dpg_context):
     app = _built(IspApp)
     app._on_scenario_click(user_data="rccb")
     assert app.camera_recipe_id == "default_rccb"
-    assert app.qe_paths["green"].endswith("QE_cyan.csv")
+    assert app.qe_paths["green"].endswith(("QE_cyan.csv", "QE_cyan_noircf.csv"))
     app._on_scenario_click(user_data="cmy")
     assert app.camera_recipe_id == "default_cmy"
-    assert app.qe_paths["green"].endswith("QE_magenta.csv")
-    assert app.qe_paths["red"].endswith("QE_cyan.csv")
-    assert app.qe_paths["blue"].endswith("QE_yellow.csv")
+    assert app.qe_paths["green"].endswith(("QE_magenta.csv", "QE_magenta_noircf.csv"))
+    assert app.qe_paths["red"].endswith(("QE_cyan.csv", "QE_cyan_noircf.csv"))
+    assert app.qe_paths["blue"].endswith(("QE_yellow.csv", "QE_yellow_noircf.csv"))
 
 
 def test_iq_lab_shows_result_metrics_and_rois(dpg_context):

@@ -26,10 +26,10 @@ PATCH_PX = 28
 DEFAULT_WAVELENGTH_NM = np.arange(380.0, 731.0, 1.0)
 
 DEFAULT_QE_PATHS = {
-    "red": "spectra/QE/interpolated/QE_red.csv",
-    "green": "spectra/QE/interpolated/QE_green.csv",
-    "blue": "spectra/QE/interpolated/QE_blue.csv",
-    "ircf": "spectra/QE/interpolated/QE_IRCF.csv",
+    "red": "spectra/QE/nir/QE_red_noircf.csv",
+    "green": "spectra/QE/nir/QE_green_noircf.csv",
+    "blue": "spectra/QE/nir/QE_blue_noircf.csv",
+    "ircf": "spectra/QE/ircf/QE_IRCF_hybrid.csv",
 }
 
 STAGES = ("mosaic", "demosaic", "white_balance", "ccm", "srgb")
