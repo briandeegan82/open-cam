@@ -96,16 +96,25 @@ samples headlamps outside their beam. The mixture changes only sampling probabil
 image is unchanged. Scenes without goniometric lamps use the stock tree only and render exactly as
 before. `"string lightsampler" "bvhmean"` selects the stock sampler.
 
-Highway night, wet road, lead-car crop, 256 spp, raw pbrt EXR, 4 seeds; per-pixel noise is the
+Highway night, wet road (EI 2027 driving figure, panel d), lead-car crop, default `maxdepth` 8, 256 spp,
+raw pbrt EXR, 4 seeds. Means are the 4-seed average (± its standard error), per-pixel noise the
 seed-to-seed RMS difference over the region mean:
 
 | region | mean, stock / patch | per-pixel noise, stock / patch |
 |---|---:|---:|
-| lead car | 87.5 ± 2.4 / 88.3 ± 0.6 | 454 % / 66 % |
-| road lit by street lights | 2.24 / 2.24 | 25 % / 31 % |
-| road right of the car | 0.29 / 0.29 | 141 % / 16 % |
-| sign gantry | 0.39 ± 0.04 / 0.32 ± 0.00 | 356 % / 136 % |
-| whole crop | 16.32 ± 0.35 / 16.44 ± 0.07 | 912 % / 144 % |
+| lead car | 88.1 ± 2.5 / 88.8 ± 0.6 | 451 % / 68 % |
+| road lit by street lights | 2.25 / 2.25 | 26 % / 31 % |
+| road right of the car | 0.30 / 0.30 | 134 % / 75 % |
+| sign gantry | 0.44 ± 0.05 / 0.39 ± 0.02 | 369 % / 140 % |
+| road just in front of the car | 0.57 ± 0.04 / 0.86 ± 0.07 | 1026 % / 540 % |
+| whole crop | 16.67 ± 0.36 / 16.79 ± 0.08 | 894 % / 147 % |
+
+The road just in front of the lead car is lit mostly by headlamp light reflected off the car, which
+the stock sampler reaches only through rare, very bright samples, so its mean converges slowly and from
+below. At 16384 spp that region is 0.848 ± 0.029 (8 seeds) with the stock sampler and 0.928 ± 0.009
+(4 seeds) with the patch. At 1024 spp it therefore gets brighter with the patch and shows some residual
+sparkle that the stock render mostly lacked. The patch costs about 25 % more render time on this scene,
+so at equal render time the lead car's per-pixel variance is still about 35x lower.
 
 ## Radiometry
 
