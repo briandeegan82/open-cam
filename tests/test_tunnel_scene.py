@@ -373,3 +373,11 @@ def test_zone_lengths_from_design_speed(tmp_path):
     assert m["photometry"]["design_speed_kmh"] == 100.0
     with pytest.raises(SystemExit):
         bts.zone_lengths_for_speed(0.0)
+
+
+def test_regularize_is_opt_in(tmp_path):
+    for d, a in (("plain", ()), ("reg", ("--regularize",))):
+        _build(tmp_path / d, *a)
+        for view in ("inside_out", "outside_in"):
+            scene = (tmp_path / d / f"tunnel_{view}.pbrt").read_text()
+            assert ('"bool regularize" true' in scene) == bool(a)

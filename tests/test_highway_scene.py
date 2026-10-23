@@ -348,3 +348,11 @@ class TestHighwayBackdrop(unittest.TestCase):
         vis = rho[(wl >= 400) & (wl <= 680)]  # red edge starts at ~700 nm
         self.assertLess(vis.max(), 0.07)
         self.assertGreater(rho[wl == 850][0], 4 * vis.mean())  # red edge
+
+
+def test_regularize_is_opt_in(tmp_path):
+    for d, a in (("plain", ()), ("reg", ("--regularize",))):
+        (tmp_path / d).mkdir()
+        build_without_assets(tmp_path / d, *a)
+        scene = (tmp_path / d / "scene" / "highway.pbrt").read_text()
+        assert ('"bool regularize" true' in scene) == bool(a)
