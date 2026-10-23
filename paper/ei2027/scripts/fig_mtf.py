@@ -27,6 +27,7 @@ import numpy as np
 REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO / "tools"))
 
+from camera_model import load_camera_model  # noqa: E402
 from exr_multispectral import spectral_buckets_from_exr, trapezoid_weights_nm  # noqa: E402
 from qe_curves import read_csv_curve  # noqa: E402
 from sensor_radiometry import integrate_spectral_planes, spectral_electron_weights  # noqa: E402
@@ -34,7 +35,11 @@ from sfr_analysis import DEFAULT_OVERSAMPLING, slanted_edge_sfr  # noqa: E402
 
 BUILD = REPO / "paper" / "ei2027" / "build"
 OUT = REPO / "paper" / "ei2027" / "figures"
-QE = REPO / "spectra" / "QE" / "interpolated"
+# Green channel of the default research camera (bare-silicon QE x hybrid IR-cut filter).
+_QE = load_camera_model(REPO / "config" / "camera_recipes" / "default.yaml")["sensor"]["quantum_efficiency"]
+GREEN_QE, IRCF = _QE["green_csv"], _QE["ircf_csv"]
+# Control render with glass dispersion off; reported in mtf_summary.json, not plotted.
+CONTROL = ("f2_focused_nodisp", "f/2, in focus, no dispersion")
 CASES = [
     ("f2_focused", "f/2, in focus (3.2 m)"),
     ("f2_defocus", "f/2, focus 2.6 m"),
@@ -78,9 +83,10 @@ def curve_on(lam: np.ndarray, path: Path) -> np.ndarray:
 def main() -> None:
     results = {}
     fig, axes = plt.subplots(1, 2, figsize=(7.0, 2.6))
-    for name, label in CASES:
+    cases = CASES + ([CONTROL] if (BUILD / f"edge_{CONTROL[0]}.exr").exists() else [])
+    for name, label in cases:
         planes, lam = spectral_buckets_from_exr(BUILD / f"edge_{name}.exr")
-        qe_g = curve_on(lam, QE / "QE_green.csv") * curve_on(lam, QE / "QE_IRCF.csv")
+        qe_g = curve_on(lam, REPO / GREEN_QE) * curve_on(lam, REPO / IRCF)
         wts = spectral_electron_weights(lam, qe_g[:, None], trapezoid_weights_nm(lam), 1.0, 1.0)
         green = integrate_spectral_planes(planes, wts)[..., 0]
         res = edge_sfr(edge_roi(green))
@@ -102,6 +108,8 @@ def main() -> None:
             "band_nm": band_nm.tolist(),
             "mtf50_per_band_cy_per_px": per_band,
         }
+        if name == CONTROL[0]:
+            continue
         sel = res["frequency"] <= 1.0
         axes[0].plot(res["frequency"][sel], res["mtf"][sel], lw=1, label=label)
         axes[1].plot(band_nm, per_band, "o-", ms=2, lw=0.8, label=label)
