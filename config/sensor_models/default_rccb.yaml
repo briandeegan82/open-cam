@@ -2,7 +2,7 @@
 schema_version: 1
 sensor:
   quantum_efficiency:
-    green_csv: spectra/QE/interpolated/QE_cyan.csv
+    green_csv: spectra/QE/nir/QE_cyan_noircf.csv
 source:
   qe_variant: default_rccb
   qe_variant_note: 'True periodic CFA via cfa.layout (per-channel spectral QE). quantum_efficiency keeps the legacy 3-channel proxy for RGB-only tools; set cfa.layout: null and cfa.demosaic: malvar for the old proxy behaviour. Old note: RCCB approximated as RGB channels: R, C->G, B'

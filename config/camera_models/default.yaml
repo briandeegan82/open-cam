@@ -17,10 +17,11 @@ lens:
       halo_strength: 0.04
 sensor:
   quantum_efficiency:
-    red_csv: spectra/QE/interpolated/QE_red.csv
-    green_csv: spectra/QE/interpolated/QE_green.csv
-    blue_csv: spectra/QE/interpolated/QE_blue.csv
-    ircf_csv: spectra/QE/interpolated/QE_IRCF.csv
+    red_csv: spectra/QE/nir/QE_red_noircf.csv
+    green_csv: spectra/QE/nir/QE_green_noircf.csv
+    blue_csv: spectra/QE/nir/QE_blue_noircf.csv
+    ircf_csv: spectra/QE/ircf/QE_IRCF_hybrid.csv
+    ircf_coating_csv: spectra/QE/ircf/QE_IRCF_hybrid_coating.csv
   pixel_pitch_um: 1.4
   integration_time_s: 0.01
   f_number: 2.0

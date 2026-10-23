@@ -16,7 +16,7 @@ sensor:
     red_csv: spectra/QE/cameras/canon_eos_90d/QE_red.csv
     green_csv: spectra/QE/cameras/canon_eos_90d/QE_green.csv
     blue_csv: spectra/QE/cameras/canon_eos_90d/QE_blue.csv
-    ircf_csv: spectra/QE/interpolated/QE_IRCF.csv
+    ircf_csv: null  # the measured response already includes this camera's IR-cut filter
   pixel_pitch_um: 3.9
   integration_time_s: 0.01
   f_number: 2.0

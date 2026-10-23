@@ -16,7 +16,7 @@ sensor:
     red_csv: spectra/QE/cameras/xiaomi_mi_8/QE_red.csv
     green_csv: spectra/QE/cameras/xiaomi_mi_8/QE_green.csv
     blue_csv: spectra/QE/cameras/xiaomi_mi_8/QE_blue.csv
-    ircf_csv: spectra/QE/interpolated/QE_IRCF.csv
+    ircf_csv: null  # the measured response already includes this camera's IR-cut filter
   pixel_pitch_um: 1.4
   integration_time_s: 0.01
   f_number: 2.0

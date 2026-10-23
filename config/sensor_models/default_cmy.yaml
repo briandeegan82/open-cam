@@ -2,9 +2,9 @@
 schema_version: 1
 sensor:
   quantum_efficiency:
-    red_csv: spectra/QE/interpolated/QE_cyan.csv
-    green_csv: spectra/QE/interpolated/QE_magenta.csv
-    blue_csv: spectra/QE/interpolated/QE_yellow.csv
+    red_csv: spectra/QE/nir/QE_cyan_noircf.csv
+    green_csv: spectra/QE/nir/QE_magenta_noircf.csv
+    blue_csv: spectra/QE/nir/QE_yellow_noircf.csv
 source:
   qe_variant: default_cmy
   qe_variant_note: 'True periodic CFA via cfa.layout (per-channel spectral QE). quantum_efficiency keeps the legacy 3-channel proxy for RGB-only tools; set cfa.layout: null and cfa.demosaic: malvar for the old proxy behaviour. Old note: CMY approximated as RGB channels: C->R, M->G, Y->B'
