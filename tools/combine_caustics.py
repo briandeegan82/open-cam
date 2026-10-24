@@ -60,6 +60,11 @@ def render(scene_dir: Path, pbrt: Path, extra: list[str] = (), tag: str = "") ->
         if split
         else [("iq_diorama.pbrt", meta["film_output"])]
     )
+    if split and any(a in ("--gpu", "--wavefront") for a in extra):
+        raise ValueError(
+            "the wavefront/GPU integrator ignores skipcaustics/causticsonly, so a split scene would "
+            "count the caustic twice; rebuild with --caustics path"
+        )
     for scene, output in passes:
         outfile = ["--outfile", tagged(output, tag)] if tag else []
         subprocess.run([str(pbrt), "--quiet", *extra, *outfile, scene], cwd=scene_dir, check=True)
