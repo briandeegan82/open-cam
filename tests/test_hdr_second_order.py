@@ -222,3 +222,20 @@ def test_column_parallel_adc_dnl_gives_each_column_its_own_table():
 
     # read noise leaves a few codes unobserved by chance; the table's missing codes are shared or not
     assert overlap(*shared) > 0.8 and overlap(*cols) < 0.5
+
+
+def test_spd_aperture_sharpens_by_the_sinc_ratio():
+    x = np.arange(256)
+    f = 0.2
+    img = 1000.0 + 500.0 * np.cos(2 * np.pi * f * x)[None, :] * np.ones((64, 1))
+    np.testing.assert_array_equal(hp.spd_aperture(img, 0.0), img)
+    out = hp.spd_aperture(img, 0.4)
+    amp = lambda a: np.abs(np.fft.rfft(a[32] - a[32].mean()))[int(f * 256)]  # noqa: E731
+    assert out.mean() == pytest.approx(img.mean(), rel=1e-3)
+    assert amp(out) / amp(img) == pytest.approx(np.sinc(0.4 * f) / np.sinc(f), rel=0.02)
+    bayer = hp.spd_aperture(img, 0.4, "RGGB")
+    # each Bayer sub-lattice is filtered at the physical frequency: same boost below its Nyquist
+    assert amp(bayer) / amp(img) == pytest.approx(amp(out) / amp(img), rel=1e-3)
+    assert bayer.mean() == pytest.approx(img.mean(), rel=1e-3)
+    with pytest.raises(ValueError):
+        _arch("default_hdr_dcg", spd_aperture_fraction=0.5)

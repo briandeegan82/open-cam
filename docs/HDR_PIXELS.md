@@ -200,7 +200,13 @@ noise:
   time, so colours don't mix. Where the merge switches from LPD to SPD, an edge or texture jumps by the offset,
   which distorts slanted-edge MTF measurements across the transition. A per-capture SPD input
   (`capture_electrons_npz`) is taken as already rendered from the SPD position and is not shifted.
-  The smaller SPD aperture (its pixel-aperture MTF) is not modelled.
+  `spd_aperture_fraction: a` (opt-in) gives the SPD its own, smaller aperture: a square photodiode
+  a × pitch wide, so its pixel-aperture MTF is sinc(a f) instead of the full pixel's sinc(f). The
+  input is already integrated over the whole pixel, so the SPD signal is filtered by the ratio
+  sinc(a f)/sinc(f) on each CFA sub-lattice, up to that sub-lattice's Nyquist. That is a mild
+  sharpening, by at most 11 % on a Bayer sub-lattice and 57 % without a mosaic. Undershoot at hard
+  edges is clipped to zero. Detail above the pixel Nyquist that pbrt has already integrated away
+  cannot come back.
 * **LOFIC soft knee.** The overflow barrier turns on gradually rather than at exactly the full
   well. The photodiode keeps a smooth minimum of the collected charge and the full well,
   `Q_pd = −k ln(e^(−Q/k) + e^(−FW/k))`, which is `k ln 2` short of FW at `Q = FW`. The rest goes to
