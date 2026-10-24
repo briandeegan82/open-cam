@@ -166,8 +166,12 @@ and luminance-weighted.
 
 ## Limitations (not modelled)
 
-- Geometric optics only. No diffraction from the iris on the ghosts, and no coherent interference
-  between ghosts (interference *inside* coatings is modelled).
+- Geometric optics, with opt-in iris diffraction: `iris_diffraction: true` with
+  `iris_diffraction_f_number: N` (the working f-number) blurs each wavelength's ghost image by a
+  Gaussian of sigma 0.42 λ N, the Airy core of the converging beam. Footprint edges then soften
+  more in red than in blue. It is an approximation: a ghost's own beam NA and the Fresnel ringing
+  of strongly defocused aperture images are not traced. There is no coherent interference between
+  ghosts (interference *inside* coatings is modelled).
 - Dispersion is opt-in (`dispersion: true`). By default every wavelength is traced at the lens
   file's n_d. With it on, each wavelength group gets its own glass indices from the
   `<lens>.glass.yaml` sidecar while the film stays at the n_d focus. The source direction and the

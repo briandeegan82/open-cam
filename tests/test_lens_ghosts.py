@@ -648,3 +648,23 @@ def test_sensor_stack_off_by_default():
     assert len(lens.surfaces) == len(lg.load_lens(WIDE).surfaces)
     with pytest.raises(ValueError):
         lg.resolve_sensor_stack("bogus")
+
+
+def test_iris_diffraction_blurs_ghosts_and_keeps_energy():
+    lens = lg.load_lens(
+        WIDE, aperture_diameter_mm=8.0, focus_distance_m=4.0, coating="uncoated", glass_absorption=False
+    )
+    base = {"enabled": True, "pupil_samples": 32, "film_diagonal_mm": 35.0}
+    cube = _point_source_cube()
+    mask = np.ones(LAMS.size, bool)
+    plain, _t, _r = lg.render_ghosts(cube, list(LAMS), mask, lens, lg.resolve_config(base, {"camera": "realistic"}))
+    cfg = lg.resolve_config(
+        {**base, "iris_diffraction": True, "iris_diffraction_f_number": 2000.0}, {"camera": "realistic"}
+    )
+    blur, _t, _r = lg.render_ghosts(cube, list(LAMS), mask, lens, cfg)
+    np.testing.assert_allclose(blur.sum((0, 1)), plain.sum((0, 1)), rtol=0.03)
+    assert blur.max() < plain.max()
+    with pytest.raises(ValueError):
+        lg.render_ghosts(
+            cube, list(LAMS), mask, lens, lg.resolve_config({**base, "iris_diffraction": True}, {"camera": "realistic"})
+        )
