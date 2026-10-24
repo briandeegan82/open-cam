@@ -1,118 +1,239 @@
 {
-  "anchor_scale_e_per_unit": 3.0406535632490794e-16,
-  "anchor_ratio_cv_over_24_patches": 4.22740906441322e-08,
-  "sigma_d_e": 2.6,
-  "full_well_e": 4800.0,
-  "cyan_proxy_over_clear_normalised_to_white": {
-    "min": 0.43196548703912896,
-    "max": 1.3439147251618073,
-    "argmin_patch": 15,
-    "argmax_patch": 13
-  },
+  "integration_time_s": 0.12,
+  "lux": 50.0,
+  "low_lux": 10.0,
   "cfas": {
-    "Bayer RGGB": {
+    "default": {
+      "label": "Bayer (GBRG)",
+      "layout": [
+        [
+          "G",
+          "B"
+        ],
+        [
+          "R",
+          "G"
+        ]
+      ],
       "luma_channel": "G",
-      "mu_e_patch22_500lux": 282.47601290777806,
-      "snr_db_patch22_10lux": 4.102681482098317,
-      "white_patch_fraction_of_full_well": 0.2284395401148916,
-      "luma_over_G_D65_patch22": 1.0,
-      "luma_over_G_A_patch22": 1.0,
-      "snr_gain_db_vs_bayer_10lux": 0.0
+      "demosaic": "malvar",
+      "binning": "none",
+      "raw_shape": [
+        640,
+        960
+      ],
+      "sigma_d_e": 2.6,
+      "mu_e_neutral5_lux_D65": 136.75059999999996,
+      "mu_e_neutral5_lux_A": 105.23680000000002,
+      "mu_e_neutral5_10lux_D65": 27.485799999999998,
+      "sigma_temporal_e_10lux_measured": 5.922754149886688,
+      "snr_db_10lux_measured": 13.331693526656622,
+      "snr_db_10lux_emva": 13.43609448055037,
+      "adc_clip_e": 4803.389999999999,
+      "white_patch_luma_fraction_of_full_well": 0.11052045833333334,
+      "de00_mean_ideal_ccm": 1.0682677098839763,
+      "de00_max_ideal_ccm": 2.5100806715874864,
+      "de00_mean_pipeline_lux": 3.7284496174862944,
+      "de00_max_pipeline_lux": 8.67711977335094,
+      "luma_over_bayer_G_D65": 1.0,
+      "luma_over_bayer_G_A": 1.0,
+      "snr_gain_db_vs_bayer_10lux_measured": 0.0
     },
-    "Quad Bayer": {
+    "default_quad_bayer": {
+      "label": "Quad Bayer (2x2 charge bin)",
+      "layout": [
+        [
+          "R",
+          "G"
+        ],
+        [
+          "G",
+          "B"
+        ]
+      ],
       "luma_channel": "G",
-      "mu_e_patch22_500lux": 282.47601290777806,
-      "snr_db_patch22_10lux": 4.102681482098317,
-      "white_patch_fraction_of_full_well": 0.2284395401148916,
-      "luma_over_G_D65_patch22": 1.0,
-      "luma_over_G_A_patch22": 1.0,
-      "snr_gain_db_vs_bayer_10lux": 0.0
+      "demosaic": "gradient",
+      "binning": "charge",
+      "raw_shape": [
+        320,
+        480
+      ],
+      "sigma_d_e": 2.6,
+      "mu_e_neutral5_lux_D65": 553.2226530612245,
+      "mu_e_neutral5_lux_A": 425.6494897959183,
+      "mu_e_neutral5_10lux_D65": 108.68785714285715,
+      "sigma_temporal_e_10lux_measured": 10.061172285330471,
+      "snr_db_10lux_measured": 20.670648811817955,
+      "snr_db_10lux_emva": 20.099761765608342,
+      "adc_clip_e": 4803.389999999999,
+      "white_patch_luma_fraction_of_full_well": 0.10992345344387755,
+      "de00_mean_ideal_ccm": 1.0669191629980697,
+      "de00_max_ideal_ccm": 2.4989204890590955,
+      "de00_mean_pipeline_lux": 3.777674985351068,
+      "de00_max_pipeline_lux": 8.915048223227407,
+      "luma_over_bayer_G_D65": 4.045486111660385,
+      "luma_over_bayer_G_A": 4.044682941669818,
+      "snr_gain_db_vs_bayer_10lux_measured": 7.338955285161333
     },
-    "RGBW": {
+    "default_rgbw": {
+      "label": "RGBW 2x2",
+      "layout": [
+        [
+          "R",
+          "G"
+        ],
+        [
+          "W",
+          "B"
+        ]
+      ],
       "luma_channel": "W",
-      "mu_e_patch22_500lux": 740.6888670880076,
-      "snr_db_patch22_10lux": 10.074054332555669,
-      "white_patch_fraction_of_full_well": 0.5924896875532737,
-      "luma_over_G_D65_patch22": 2.6221301393468246,
-      "luma_over_G_A_patch22": 2.6662735082282856,
-      "snr_gain_db_vs_bayer_10lux": 5.971372850457351
+      "demosaic": "gradient",
+      "binning": "none",
+      "raw_shape": [
+        640,
+        960
+      ],
+      "sigma_d_e": 2.6,
+      "mu_e_neutral5_lux_D65": 344.35159999999996,
+      "mu_e_neutral5_lux_A": 264.66079999999994,
+      "mu_e_neutral5_10lux_D65": 69.61019999999999,
+      "sigma_temporal_e_10lux_measured": 8.792455602390037,
+      "snr_db_10lux_measured": 17.971253950660795,
+      "snr_db_10lux_emva": 18.02421835160469,
+      "adc_clip_e": 4803.389999999999,
+      "white_patch_luma_fraction_of_full_well": 0.2778569166666667,
+      "de00_mean_ideal_ccm": 0.9321930013543943,
+      "de00_max_ideal_ccm": 2.8054981770778893,
+      "de00_mean_pipeline_lux": 6.280608857305833,
+      "de00_max_pipeline_lux": 14.140947184794053,
+      "luma_over_bayer_G_D65": 2.5180993721416947,
+      "luma_over_bayer_G_A": 2.514907332796131,
+      "snr_gain_db_vs_bayer_10lux_measured": 4.6395604240041735
     },
-    "RCCB (clear=W)": {
+    "default_rgbw_4x4": {
+      "label": "RGBW 4x4",
+      "layout": [
+        [
+          "W",
+          "G",
+          "W",
+          "R"
+        ],
+        [
+          "G",
+          "W",
+          "R",
+          "W"
+        ],
+        [
+          "W",
+          "B",
+          "W",
+          "G"
+        ],
+        [
+          "B",
+          "W",
+          "G",
+          "W"
+        ]
+      ],
       "luma_channel": "W",
-      "mu_e_patch22_500lux": 740.6888670880076,
-      "snr_db_patch22_10lux": 10.074054332555669,
-      "white_patch_fraction_of_full_well": 0.5924896875532737,
-      "luma_over_G_D65_patch22": 2.6221301393468246,
-      "luma_over_G_A_patch22": 2.6662735082282856,
-      "snr_gain_db_vs_bayer_10lux": 5.971372850457351
+      "demosaic": "gradient",
+      "binning": "none",
+      "raw_shape": [
+        640,
+        960
+      ],
+      "sigma_d_e": 2.6,
+      "mu_e_neutral5_lux_D65": 347.3938,
+      "mu_e_neutral5_lux_A": 263.15559999999994,
+      "mu_e_neutral5_10lux_D65": 69.8805,
+      "sigma_temporal_e_10lux_measured": 8.387879194409035,
+      "snr_db_10lux_measured": 18.41407673549444,
+      "snr_db_10lux_emva": 18.042536780584122,
+      "adc_clip_e": 4803.389999999999,
+      "white_patch_luma_fraction_of_full_well": 0.2765562083333333,
+      "de00_mean_ideal_ccm": 0.9321930013529975,
+      "de00_max_ideal_ccm": 2.805498177072342,
+      "de00_mean_pipeline_lux": 7.237045283740113,
+      "de00_max_pipeline_lux": 22.95170354059155,
+      "luma_over_bayer_G_D65": 2.540345709634913,
+      "luma_over_bayer_G_A": 2.5006043513295717,
+      "snr_gain_db_vs_bayer_10lux_measured": 5.082383208837818
     },
-    "RCCB (repo proxy C=Cy)": {
-      "luma_channel": "Cy",
-      "mu_e_patch22_500lux": 464.97421752686097,
-      "snr_db_patch22_10lux": 7.311861393064431,
-      "white_patch_fraction_of_full_well": 0.3670670747126278,
-      "luma_over_G_D65_patch22": 1.646066201304903,
-      "luma_over_G_A_patch22": 1.1127982009122093,
-      "snr_gain_db_vs_bayer_10lux": 3.209179910966114
+    "default_rccb": {
+      "label": "RCCB",
+      "layout": [
+        [
+          "R",
+          "C"
+        ],
+        [
+          "C",
+          "B"
+        ]
+      ],
+      "luma_channel": "C",
+      "demosaic": "gradient",
+      "binning": "none",
+      "raw_shape": [
+        640,
+        960
+      ],
+      "sigma_d_e": 2.6,
+      "mu_e_neutral5_lux_D65": 347.0122,
+      "mu_e_neutral5_lux_A": 264.21559999999994,
+      "mu_e_neutral5_10lux_D65": 69.5731,
+      "sigma_temporal_e_10lux_measured": 8.766683843962891,
+      "snr_db_10lux_measured": 17.99212020247029,
+      "snr_db_10lux_emva": 18.021698096073465,
+      "adc_clip_e": 4803.389999999999,
+      "white_patch_luma_fraction_of_full_well": 0.27770454166666664,
+      "de00_mean_ideal_ccm": 1.1008429298043783,
+      "de00_max_ideal_ccm": 3.378581557815506,
+      "de00_mean_pipeline_lux": 5.557701999222758,
+      "de00_max_pipeline_lux": 13.01323179359233,
+      "luma_over_bayer_G_D65": 2.5375552282768785,
+      "luma_over_bayer_G_A": 2.5106768734891207,
+      "snr_gain_db_vs_bayer_10lux_measured": 4.660426675813667
     },
-    "RYYCy": {
+    "default_ryycy": {
+      "label": "RYYCy",
+      "layout": [
+        [
+          "R",
+          "Ye"
+        ],
+        [
+          "Ye",
+          "Cy"
+        ]
+      ],
       "luma_channel": "Ye",
-      "mu_e_patch22_500lux": 438.0213692923891,
-      "snr_db_patch22_10lux": 6.941469120656053,
-      "white_patch_fraction_of_full_well": 0.35890175127640783,
-      "luma_over_G_D65_patch22": 1.5506497871569473,
-      "luma_over_G_A_patch22": 2.123462601250592,
-      "snr_gain_db_vs_bayer_10lux": 2.8387876385577355
+      "demosaic": "gradient",
+      "binning": "none",
+      "raw_shape": [
+        640,
+        960
+      ],
+      "sigma_d_e": 2.6,
+      "mu_e_neutral5_lux_D65": 198.9938,
+      "mu_e_neutral5_lux_A": 206.32899999999998,
+      "mu_e_neutral5_10lux_D65": 39.90369999999999,
+      "sigma_temporal_e_10lux_measured": 6.859146070758369,
+      "snr_db_10lux_measured": 15.294862303030829,
+      "snr_db_10lux_emva": 15.330471621225668,
+      "adc_clip_e": 4803.389999999999,
+      "white_patch_luma_fraction_of_full_well": 0.16285795833333333,
+      "de00_mean_ideal_ccm": 1.1490750328895813,
+      "de00_max_ideal_ccm": 3.0059030807121334,
+      "de00_mean_pipeline_lux": 4.189195503133804,
+      "de00_max_pipeline_lux": 10.556350917296808,
+      "luma_over_bayer_G_D65": 1.4551585148438109,
+      "luma_over_bayer_G_A": 1.960616438356164,
+      "snr_gain_db_vs_bayer_10lux_measured": 1.9631687763742072
     }
-  },
-  "neutral_patch_means_D65": {
-    "R": [
-      684.6091092917051,
-      497.58573976138257,
-      324.62771272310084,
-      172.14692415338254,
-      74.93765835047004,
-      24.088135517397358
-    ],
-    "G": [
-      1096.5097925514797,
-      809.8341942631714,
-      529.8660081844614,
-      282.47601290777806,
-      123.95507374811707,
-      38.89373151870847
-    ],
-    "B": [
-      980.8119619391819,
-      745.6917669781249,
-      491.74544226538984,
-      263.24604560545,
-      116.62532942453632,
-      36.893114661160524
-    ],
-    "W": [
-      2843.950500255714,
-      2116.3150784545555,
-      1388.6531202862866,
-      740.6888670880076,
-      325.7635199696678,
-      103.10138105374047
-    ],
-    "Ye": [
-      1722.7284061267576,
-      1261.166058119835,
-      823.6482144115328,
-      438.0213692923891,
-      191.53999905038305,
-      60.56551710249722
-    ],
-    "Cy": [
-      1761.9219586206134,
-      1323.8109076076673,
-      869.9450407273317,
-      464.97421752686097,
-      205.2344497467072,
-      64.67907385376746
-    ]
   }
 }
