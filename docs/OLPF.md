@@ -64,9 +64,9 @@ filter is applied twice.
   It cannot remove luma aliasing that pbrt has already folded into the pixel grid above Nyquist.
   Doing that would need a supersampled render followed by pixel integration.
 - Light spread past the image border is lost (at most d px at the right and bottom edges).
-- Not modelled: the spread of incidence angles inside the lens cone (only the chief ray is
-  used), the IR-cut coating and cover-glass of the filter stack (the IRCF is a QE curve), and the
-  focus shift the plate causes.
+- Not modelled: the IR-cut coating and cover-glass of the filter stack (the IRCF is a QE curve).
+  The spread of incidence angles inside the lens cone and the plates' focus shift are opt-in
+  (`cone`, below).
 
 ## Angle of incidence (`angle_dependence`, opt-in)
 
@@ -90,3 +90,46 @@ an angle dependence; `split_*` values are taken as given.
 Example: 680 µm plates at 550 nm, nominally a 1.00 px split on a 4 µm pixel. At 20° CRA the split
 along the plate's axis is 0.88 px on the side tilted toward the optic axis and 1.12 px on the
 other side. Tilting across the plate's axis adds a 0.35 px cross-axis component.
+
+## Light cone and focus shift (`cone`, opt-in)
+
+A pixel does not receive only the chief ray, but a cone of rays with image-space numerical aperture
+1/(2N) at the working f-number N. The walk-off depends on the incidence angle, so each ray's
+extraordinary spot lands slightly differently. With
+`sensor.olpf.cone: {enabled: true, samples: 16, f_number: null, focus_compensated: true}`:
+- the split is traced (`olpf.plate_split_um`) for `samples` rays spread evenly over the pupil:
+  direction sines in a disk of radius 1/(2N) around the chief ray, sunflower pattern
+  (`olpf.pupil_sines`);
+- the three displaced spots become clouds of 3 × `samples` spots with box-pixel weights, so the
+  filter stays non-negative (`interpolation: box` only);
+- `f_number` defaults to the camera's working f-number, the same one the radiance → irradiance
+  conversion uses (the traced lens for `realistic` cameras);
+- with `angle_dependence` on, each field zone uses its own CRA as the cone axis.
+
+A plane-parallel plate also moves the focus back by t(1 − 1/n_o) for the ordinary ray (paraxial;
+480 µm for two 680 µm plates). `focus_compensated: true` (default) takes the sensor to sit at that
+shifted focus, as in a camera designed with its filter stack: the ordinary spot is the focus
+reference and only the extraordinary rays' extra spread remains. `focus_compensated: false` models a
+plate added behind a lens focused without it: every ray also lands off by its own ordinary-ray
+offset, a defocus disc of diameter about t(1 − 1/n_o)/N (43 px at f/2.8 for either example below).
+That is only meant for "filter added to a lens focused without it" studies. The conversion
+metadata reports `olpf.cone.focus_shift_um` and `defocus_disc_px`.
+
+Size of the cone effect at 550 nm. MTF is along the plate's split axis, chief ray vs the cone, from
+the spot pattern alone (no pixel aperture). The two plates are the 680 µm / 4 µm and 240 µm / 1.4 µm
+examples, both about a 1 px split:
+
+| N | CRA | e-spot spread x / y (px RMS) | MTF at 0.25 cy/px | MTF at 0.4 cy/px |
+|---|---:|---:|---:|---:|
+| 1.8 | 0° | 0.05 / 0.14 | 0.705 → 0.693 | 0.304 → 0.292 |
+| 1.8 | 25° | 0.07 / 0.15 | 0.737 → 0.713 | 0.408 → 0.371 |
+| 2.8 | 0° | 0.03 / 0.09 | 0.705 → 0.700 | 0.304 → 0.299 |
+| 2.8 | 25° | 0.04 / 0.09 | 0.737 → 0.728 | 0.408 → 0.393 |
+| 5.6 | 25° | 0.02 / 0.05 | 0.737 → 0.735 | 0.408 → 0.404 |
+
+The spread is the same for both plate examples to within 0.01 px, because it scales with the split. It
+matters mostly at fast apertures off axis, where it lowers the MTF by up to 0.04 near the filter's
+zero. The mean split hardly moves (by at most 0.012 px).
+
+Cost on a 960 × 540, 16-bucket cube: 0.3 s for the chief-ray filter, 2.4 s with `cone` (16 rays),
+9 s with `angle_dependence` alone (5 × 7 zones), 77 s with both.
