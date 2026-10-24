@@ -1,8 +1,10 @@
-"""pbrt patch 0022: the "bvh" light sampler mixes in a peak-intensity tree for goniometric lamps.
+"""pbrt patches 0022/0024: light sampling of goniometric lamps.
 
 Stock pbrt bounds a goniometric lamp by its mean intensity, so a narrow beam is picked rarely where
-it dominates and its light lands as fireflies. The mixture must keep the image mean ("bvhmean" is the
-stock sampler) and cut the per-pixel noise under the beam.
+it dominates and its light lands as fireflies. "bvhbeam" (patch 0022) mixes in a peak-intensity tree;
+the default "bvh" (patch 0024) scores each goniometric lamp by its intensity toward the shading point.
+Both must keep the image mean ("bvhmean" is the stock sampler) and cut the per-pixel noise under the
+beam, the exact scoring more than the mixture.
 """
 
 from __future__ import annotations
@@ -87,18 +89,24 @@ def _scene(tmp: Path, sampler: str, seed: int, bounces: bool = False) -> np.ndar
 
 
 def test_beam_mixture_is_unbiased_and_quieter(tmp_path: Path) -> None:
-    img = {s: [_scene(tmp_path, s, seed) for seed in (1, 2)] for s in ("bvh", "bvhmean")}
+    img = {s: [_scene(tmp_path, s, seed) for seed in (1, 2)] for s in ("bvh", "bvhbeam", "bvhmean")}
     mean = {s: np.mean(v) for s, v in img.items()}
     assert mean["bvh"] == pytest.approx(mean["bvhmean"], rel=0.03)
+    assert mean["bvhbeam"] == pytest.approx(mean["bvhmean"], rel=0.03)
     avg = np.mean(img["bvh"][0] + img["bvh"][1]) / 2
     beam = (img["bvh"][0] + img["bvh"][1]) / 2 > 3 * avg
     assert beam.mean() > 0.01
     noise = {
         s: np.sqrt(np.mean((v[0] - v[1])[beam] ** 2) / 2) / np.mean((v[0] + v[1])[beam] / 2) for s, v in img.items()
     }
-    assert noise["bvh"] < 0.7 * noise["bvhmean"], noise
+    assert noise["bvhbeam"] < 0.7 * noise["bvhmean"], noise
+    assert noise["bvh"] < 0.9 * noise["bvhbeam"], noise
 
 
 def test_beam_mixture_is_unbiased_with_bounces(tmp_path: Path) -> None:
-    mean = {s: np.mean([_scene(tmp_path, s, seed, bounces=True).mean() for seed in (1, 2)]) for s in ("bvh", "bvhmean")}
+    mean = {
+        s: np.mean([_scene(tmp_path, s, seed, bounces=True).mean() for seed in (1, 2)])
+        for s in ("bvh", "bvhbeam", "bvhmean")
+    }
     assert mean["bvh"] == pytest.approx(mean["bvhmean"], rel=0.02)
+    assert mean["bvhbeam"] == pytest.approx(mean["bvhmean"], rel=0.02)

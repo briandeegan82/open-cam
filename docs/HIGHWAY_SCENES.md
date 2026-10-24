@@ -116,6 +116,50 @@ below. At 16384 spp that region is 0.848 ± 0.029 (8 seeds) with the stock sampl
 sparkle that the stock render mostly lacked. The patch costs about 25 % more render time on this scene,
 so at equal render time the lead car's per-pixel variance is still about 35x lower.
 
+#### Exact beam scoring (pbrt patch 0024, default)
+
+With patch 0022 the number plates and rear reflectors of the lead car were still the noisiest pixels
+in the frame. About 98 % of their light comes from the two ego low beams (an ego-lamps-only render has
+4 % per-pixel noise there, the full scene 66 %), but the light tree still picked those two lamps rarely
+among the scene's 152 lights: its bounds say how bright a lamp could be, not where its beam points.
+
+Patch 0024 makes the default `"bvh"` sampler draw half of its samples from an exact scoring of the
+goniometric lamps and the other half from the stock tree:
+
+```
+p(light) = 0.5 * p_exact(light) + 0.5 * p_stock(light)
+p_exact:   w_i = I_i(direction to p) |cos theta_i| / d_i^2      for each goniometric lamp i
+           w_rest = stock-tree root importance of all other bounded lights (area lamps, ...)
+           pick lamp i with w_i / (sum w + w_rest), else descend the stock tree of the others
+```
+
+The exact half finds the lamp that actually lights the point. The stock half keeps every other light
+at no less than half its stock rate. Without it the tail lamps reflected in the wet road under the
+low beam got 4x noisier in red. Both halves are nonzero wherever a light emits, so the image converges
+to the same answer. The exact scoring costs one intensity lookup per goniometric lamp per shading point.
+It is used when a scene has 1-256 goniometric lamps; above that `"bvh"` falls back to the patch 0022
+mixture. `"bvhbeam"` selects the 0022 mixture and `"bvhmean"` the stock sampler.
+
+Same lead-car crop at 256 spp and `maxdepth` 8, 2 seeds (with patch 0023's per-pixel wavelength
+offsets). The rear-road crop is the wet road below the car, `cropwindow [0.40 0.60 0.68 0.85]`, 4 seeds.
+Per-pixel noise is the seed-to-seed RMS difference over the region mean; the camera channels are the
+raw EXR through the default camera's QE:
+
+| region | 0022 (`bvhbeam`) | 0024 (`bvh`) |
+|---|---:|---:|
+| lead car, luminance | 75 % | 27 % |
+| lead car, camera G / B-G | 167 % / 407 % | 33 % / 62 % |
+| road lit by street lights | 40 % | 32 % |
+| road just in front of the car | 706 % | 317 % |
+| whole crop | 173 % | 79 % |
+| rear road, camera R / G / B | 90 / 233 / 504 % | 50 / 107 / 187 % |
+| render time, crop / full frame | 17.5 s / 97 s | 22.2 s / 133 s |
+
+Region means agree within 1 % (rear road: 5.95 / 3.54 / 1.82 against 5.99 / 3.54 / 1.82, 4-seed
+standard error 0.01). The road just in front of the car converges to the same value: at 16384 spp
+it is 0.915 ± 0.003 (4 seeds) against 0.928 ± 0.009 with patch 0022. At equal render time (full frame +37 %) the lead car's per-pixel variance is about 5.6x lower
+than with patch 0022.
+
 ## Radiometry
 
 - Sun: `distant` light with a spectral direct-normal SPD (5778 K envelope x Rayleigh, aerosol,
