@@ -12,7 +12,10 @@ windscreen height (1.35 m, middle lane, looking down the road):
 - Ambient CG asphalt / grass colour maps (luminance only) modulate measured-shape analytic
   spectral reflectances (`tools/highway_spectra.py`); normal maps add surface relief.
 - Rolling grass terrain with instanced Poly Haven trees and shrubs (leaves use
-  `diffusetransmission` with spectral leaf reflectance/transmittance).
+  `diffusetransmission` with spectral leaf reflectance/transmittance). The leaf colour map's
+  luminance is normalised to mean 1 over the leaf texels only (`LEAF_BACKGROUND_Y`; the atlases
+  are up to 93 % black background), and pbrt patch 0025 rescales R and T together wherever
+  R + T > 1, so a bright texel cannot return more light than falls on it.
 - Sun + sky with absolute photometry (below).
 
 ## Assets

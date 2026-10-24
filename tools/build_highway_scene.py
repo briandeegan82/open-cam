@@ -187,8 +187,16 @@ ROAD_SURFACES = {
 VERGE_SURFACES = {"grass004": "grass", "gravel023": "concrete", "ground062s": "soil"}
 
 
-def luminance_texture(src: Path, dst: Path, size: int = 1024) -> None:
-    """Linear luminance of an sRGB colour map, normalised to mean 1 (float EXR, single channel)."""
+LEAF_BACKGROUND_Y = 0.01  # linear luminance below which a leaf-atlas texel is the black background
+
+
+def luminance_texture(src: Path, dst: Path, size: int = 1024, foreground_y: float | None = None) -> None:
+    """Linear luminance of an sRGB colour map, normalised to mean 1 (float EXR, single channel).
+
+    With ``foreground_y`` the mean is taken over texels with luminance >= ``foreground_y`` only, so a
+    leaf atlas whose cards are mostly black background is normalised over the leaves themselves
+    (``foreground_y=LEAF_BACKGROUND_Y``). Normalising over the whole atlas scaled the leaves of
+    ``veg_island_tree_02`` (75 % background) by 1/0.03 instead of 1/0.12."""
     if dst.is_file():
         return
     import OpenEXR
@@ -197,7 +205,8 @@ def luminance_texture(src: Path, dst: Path, size: int = 1024) -> None:
     im = np.asarray(Image.open(src).convert("RGB").resize((size, size), Image.LANCZOS), dtype=np.float64) / 255.0
     lin = np.where(im <= 0.04045, im / 12.92, ((im + 0.055) / 1.055) ** 2.4)
     y = lin @ np.array([0.2126, 0.7152, 0.0722])
-    y = y / max(float(y.mean()), 1e-9)
+    fg = y if foreground_y is None else y[y >= foreground_y]
+    y = y / max(float(fg.mean()) if fg.size else 0.0, 1e-9)
     dst.parent.mkdir(parents=True, exist_ok=True)
     header = {"compression": OpenEXR.ZIP_COMPRESSION, "type": OpenEXR.scanlineimage}
     with OpenEXR.File(header, {"Y": np.ascontiguousarray(y, dtype=np.float32)}) as f:
@@ -358,8 +367,8 @@ def vegetation_object(
         tex = m.get("base_color_texture")
         leafy = any(w in m["name"].lower() for w in ("leaf", "leaves", "shrub", "grass"))
         if tex and leafy:
-            lum = out_dir / "textures" / f"{name}_{k}_lum.exr"
-            luminance_texture(raw_dir / tex, lum, size=512)
+            lum = out_dir / "textures" / f"{name}_{k}_leaflum.exr"
+            luminance_texture(raw_dir / tex, lum, size=512, foreground_y=LEAF_BACKGROUND_Y)
             out += [
                 f'Texture "{mn}:lum" "float" "imagemap" "string filename" "{os.path.relpath(lum, out_dir)}"',
                 f'Texture "{mn}:r" "spectrum" "scale" "spectrum tex" "spd/leaf_reflectance.spd"'

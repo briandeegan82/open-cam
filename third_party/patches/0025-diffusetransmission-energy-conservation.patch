@@ -1,0 +1,25 @@
+diff --git a/src/pbrt/materials.h b/src/pbrt/materials.h
+index 148a964..945be09 100644
+--- a/src/pbrt/materials.h
++++ b/src/pbrt/materials.h
+@@ -1083,8 +1083,18 @@ class DiffuseTransmissionMaterial {
+     PBRT_CPU_GPU DiffuseTransmissionBxDF GetBxDF(TextureEvaluator texEval,
+                                                  MaterialEvalContext ctx,
+                                                  SampledWavelengths &lambda) const {
+-        SampledSpectrum r = Clamp(scale * texEval(reflectance, ctx, lambda), 0, 1);
+-        SampledSpectrum t = Clamp(scale * texEval(transmittance, ctx, lambda), 0, 1);
++        SampledSpectrum r = ClampZero(scale * texEval(reflectance, ctx, lambda));
++        SampledSpectrum t = ClampZero(scale * texEval(transmittance, ctx, lambda));
++        // Energy conservation: R + T <= 1 at every wavelength. Clamping R and T to 1 on
++        // their own lets a textured leaf return up to twice the incident energy; scale both
++        // down together instead, which keeps the R:T split.
++        for (int i = 0; i < NSpectrumSamples; ++i) {
++            Float sum = r[i] + t[i];
++            if (sum > 1) {
++                r[i] /= sum;
++                t[i] /= sum;
++            }
++        }
+         return DiffuseTransmissionBxDF(r, t);
+     }
+ 
