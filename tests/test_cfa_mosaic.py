@@ -386,3 +386,17 @@ def test_hdr_channel_ratios_need_rgb_channels() -> None:
     spd = hp.Collector("spd", 0.02, response_rgb=(0.01, 0.02, 0.03))
     ref = hp.response_map(spd, (4, 4), bayer_pattern="RGGB")
     assert np.array_equal(hp.response_map(spd, (4, 4), cfa_layout=lay), ref)
+
+
+def test_desaturate_near_clip_whitens_fringes_only():
+    import cfa_mosaic as cm
+
+    rgb = np.ones((8, 12, 3)) * np.array([0.2, 0.5, 0.9])
+    raw = np.full((8, 12), 100.0)
+    raw[:, 8:] = 1000.0  # clipped highlight on the right
+    out = cm.desaturate_near_clip(rgb, raw, 1000.0, radius=2)
+    np.testing.assert_array_equal(out[:, :5], rgb[:, :5])  # far from the clip: untouched
+    assert np.ptp(out[:, 8], axis=-1).max() < 1e-12  # at the clip: neutral
+    y = rgb[0, 0] @ np.array([0.2126, 0.7152, 0.0722])
+    np.testing.assert_allclose(out[:, 8].mean(axis=-1), y)  # luminance kept
+    assert cm.desaturate_near_clip(rgb, raw, None) is rgb
