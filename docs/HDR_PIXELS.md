@@ -210,8 +210,10 @@ noise:
   spatial seed, so it is the same in every frame. Each transition is at `k − ½ + e_k`, with
   independent `e_k ~ N(0, adc_dnl_lsb/√2)`, so the code widths have an rms of `adc_dnl_lsb`, the
   INL stays bounded at about that level, and the end points are exact. A transition that falls
-  below the previous one gives a missing code (about Φ(−1/adc_dnl_lsb) of codes). Column-parallel
-  ADCs, each with their own table, are not modelled; the smooth bow is `adc_inl_dn`.
+  below the previous one gives a missing code (about Φ(−1/adc_dnl_lsb) of codes). With
+  `adc_dnl_columns: 1` the readout is column-parallel, as in most CMOS sensors: every column's
+  ADC has its own fixed table, drawn from a per-column seed, so missing codes and wide codes differ
+  from column to column and show up as column FPN in flat fields. The smooth bow is `adc_inl_dn`.
 * **SPD offset and crosstalk** bias the merged signal wherever the SPD dominates, by
   `offset / r_spd` and `f·(r_lpd / r_spd)·μ`. Because the bias appears only above the LPD
   transition, it makes the merged response non-linear across the knee.

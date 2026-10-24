@@ -259,6 +259,7 @@ SECOND_ORDER_KEYS = (
     "spd_centroid_offset_y_px",
     "lofic_knee_e",
     "adc_dnl_lsb",
+    "adc_dnl_columns",
 )
 SIGNED_SECOND_ORDER_KEYS = ("spd_offset_e", "spd_centroid_offset_x_px", "spd_centroid_offset_y_px")
 
@@ -567,9 +568,14 @@ def simulate_captures(
                 "col_fpn_e"
             ] * spatial_rng.standard_normal((1, shape[1]))
     dnl: dict[str, np.ndarray] = {}
+    col_dnl: dict[str, int] = {}
     if so and so["adc_dnl_lsb"] > 0:
         for r in arch.readouts:  # one fixed code table per readout chain's ADC
-            dnl[r.name] = dnl_transitions(r.max_dn, so["adc_dnl_lsb"], spatial_rng)
+            if so.get("adc_dnl_columns", 0.0) > 0 and two_d:
+                # column-parallel ADCs: one fixed table per column, drawn from its own seed
+                col_dnl[r.name] = int(spatial_rng.integers(2**62))
+            else:
+                dnl[r.name] = dnl_transitions(r.max_dn, so["adc_dnl_lsb"], spatial_rng)
     spd_shift = (so.get("spd_centroid_offset_x_px", 0.0), so.get("spd_centroid_offset_y_px", 0.0)) if so else (0, 0)
     out: dict[str, np.ndarray] = {}
     for c in arch.collectors:
@@ -624,7 +630,13 @@ def simulate_captures(
                 # Bow-shaped integral non-linearity, peak adc_inl_dn at mid-scale, zero at both ends.
                 x = np.clip((dn - r.black_DN) / (r.max_dn - r.black_DN), 0.0, 1.0)
                 dn = dn + so["adc_inl_dn"] * 4.0 * x * (1.0 - x)
-            if r.name in dnl:
+            if r.name in col_dnl:
+                codes = np.empty(shape, dtype=np.float64)
+                for j in range(shape[1]):
+                    t = dnl_transitions(r.max_dn, so["adc_dnl_lsb"], np.random.default_rng([col_dnl[r.name], j]))
+                    codes[:, j] = np.searchsorted(t, dn[:, j], side="right")
+                out[r.name] = codes
+            elif r.name in dnl:
                 out[r.name] = np.searchsorted(dnl[r.name], dn, side="right").astype(np.float64)
             else:
                 out[r.name] = np.clip(np.rint(dn), 0.0, r.max_dn)

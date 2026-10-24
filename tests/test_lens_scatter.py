@@ -118,3 +118,18 @@ def test_field_zones_and_barrel_term(lens):
     expect = rho * lost / floor.size
     np.testing.assert_allclose(floor[np.isfinite(floor)], expect, rtol=1e-4)
     assert ls.DEFAULTS["field_zones"] == 1 and ls.DEFAULTS["barrel_reflectance"] == 0.0
+
+
+def test_shape_groups_scale_the_abg_shoulder_with_wavelength(lens):
+    img = np.zeros((65, 65, 2))
+    img[32, 32, :] = 1.0
+    base, _ = ls.apply_scatter(img, [450.0, 650.0], lens, 0.01)
+    same, _ = ls.apply_scatter(img, [450.0, 650.0], lens, 0.01, {"shape_groups": 0})
+    np.testing.assert_array_equal(base, same)
+    grp, _ = ls.apply_scatter(img, [450.0, 650.0], lens, 0.01, {"shape_groups": 2})
+    np.testing.assert_allclose(grp.sum(axis=(0, 1)), base.sum(axis=(0, 1)), rtol=0.01)
+    yy, xx = np.mgrid[0:65, 0:65]
+    ring = (np.hypot(yy - 32, xx - 32) > 1.5) & (np.hypot(yy - 32, xx - 32) < 6)
+    # a wider shoulder at 650 nm moves scattered light out of the core region relative to 450 nm
+    near = lambda o, k: o[:, :, k][ring].sum()  # noqa: E731
+    assert near(grp, 0) / near(base, 0) > near(grp, 1) / near(base, 1)

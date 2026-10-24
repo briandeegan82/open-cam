@@ -53,6 +53,10 @@ DEFAULTS = {
     "abg_g": 2.0,
     "abg_shoulder": 0.01,
     "reference_nm": 550.0,
+    # Opt-in: build the kernel at this many wavelength groups, with the ABg shoulder scaled by
+    # lambda / reference_nm (Rayleigh-Rice: the BSDF is a function of spatial frequency beta / lambda).
+    # 0 = one kernel shape for every wavelength.
+    "shape_groups": 0,
     # Opt-in: number of image radii with their own kernel (1 = shift-invariant, the old model).
     "field_zones": 1,
     # Opt-in: diffuse reflectance of the barrel for the truncated scatter (black anodised ~0.02-0.05).
@@ -231,26 +235,43 @@ def apply_scatter(cube: np.ndarray, lams_nm, lens, pixel_mm: float, cfg: dict | 
     nz = max(1, int(c["field_zones"]))
     radii = np.linspace(0.0, math.hypot(0.5 * (h - 1), 0.5 * (w - 1)), nz) if nz > 1 else np.zeros(1)
     slope = film_height_slope(lens) if nz > 1 else 1.0
-    zones = []
-    for r_px in radii:
-        u0 = r_px * pixel_mm / slope if nz > 1 else 0.0
-        kern, tis0, report = scatter_kernel(lens, (h, w), pixel_mm, c, u0)
-        lost = sum(s["tis"] * (1.0 - s["reaches_film"]) for s in report)
-        zones.append((kern, tis0, report, lost, u0))
+    lam0 = float(c["reference_nm"])
+    lam_k = [lams_nm[k] if lams_nm[k] is not None and np.isfinite(lams_nm[k]) else lam0 for k in range(nl)]
+    ng = max(0, int(c.get("shape_groups", 0)))
+    if ng > 0:
+        order = np.argsort(lam_k, kind="stable")
+        group_of = np.empty(nl, dtype=int)
+        for g_i, idx in enumerate(np.array_split(order, min(ng, nl))):
+            group_of[idx] = g_i
+        group_lam = [float(np.mean([lam_k[k] for k in range(nl) if group_of[k] == g_i])) for g_i in range(min(ng, nl))]
+    else:
+        group_of, group_lam = np.zeros(nl, dtype=int), [lam0]
+
+    def build(cg: dict):
+        zs = []
+        for r_px in radii:
+            u0 = r_px * pixel_mm / slope if nz > 1 else 0.0
+            kern, tis0, report = scatter_kernel(lens, (h, w), pixel_mm, cg, u0)
+            lost = sum(s["tis"] * (1.0 - s["reaches_film"]) for s in report)
+            zs.append((kern, tis0, report, lost, u0))
+        return zs
+
+    groups = [build({**c, "abg_shoulder": float(c["abg_shoulder"]) * (gl / lam0)} if ng > 0 else c) for gl in group_lam]
+    zones = build(c) if ng > 0 else groups[0]  # the report stays at reference_nm
     kshape = zones[0][0].shape
     fshape = (h + kshape[0] - 1, w + kshape[1] - 1)
-    kern_fs = [np.fft.rfft2(z[0], fshape) for z in zones]
+    group_fs = [[np.fft.rfft2(z[0], fshape) for z in zs] for zs in groups]
     weights = _zone_weights(h, w, radii) if nz > 1 else np.ones((1, h, w))
     rho_b = float(c["barrel_reflectance"])
-    lam0 = float(c["reference_nm"])
     out = np.empty_like(cube, dtype=np.float32)
     for k in range(nl):
-        lam = lams_nm[k] if lams_nm[k] is not None and np.isfinite(lams_nm[k]) else lam0
+        lam = lam_k[k]
         scale = (lam0 / lam) ** 2
         img = cube[:, :, k].astype(np.float64)
         acc = np.zeros((h, w))
         barrel = 0.0
-        for (_kern, tis0, _rep, lost, _u0), kf, wz in zip(zones, kern_fs, weights, strict=True):
+        g_k = int(group_of[k])
+        for (_kern, tis0, _rep, lost, _u0), kf, wz in zip(groups[g_k], group_fs[g_k], weights, strict=True):
             part = img * wz if nz > 1 else img
             acc += (1.0 - tis0 * scale) * part + scale * _fft_conv_same(part, kf, fshape, kshape)
             barrel += rho_b * lost * scale * float(part.sum())
