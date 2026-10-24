@@ -38,4 +38,12 @@ f2_focused 25.0 3.2
 f2_defocus 25.0 2.6
 f56_defocus 8.93 2.6
 LIST
+
+# Same f/2 in-focus edge with glass dispersion off: control for the per-band MTF50 variation.
+"${PY}" tools/build_image_quality_targets.py --out-dir "${B}/scenes/edge_f2_focused_nodisp" --target slanted_edge \
+  --camera realistic --lensfile config/lenses/dgauss.50mm.dat --aperture-diameter-mm 25.0 \
+  --focus-distance 3.2 --cam-dist 3.2 --xres 960 --yres 640 --pixelsamples "${SPP_EDGE}" \
+  --film spectral --spectral-nbuckets 32 --spectral-lambda-min 400 --spectral-lambda-max 700 --no-lens-dispersion
+"${PBRT}" --quiet --seed 1 "${B}/scenes/edge_f2_focused_nodisp/slanted_edge.pbrt"
+mv out/slanted_edge_spectral.exr "${B}/edge_f2_focused_nodisp.exr"
 echo "renders done"

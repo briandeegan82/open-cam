@@ -1,21 +1,27 @@
-"""Non-Bayer CFA study on the same pbrt-v4 spectral ColorChecker render.
+"""Generic-CFA study through the pipeline, on the pbrt-v4 spectral ColorChecker renders.
 
-open-cam's sampling/demosaic path (tools/apply_emva_noise.py) implements only
-2x2 Bayer phases; RCCB/RYYCy sensor models are RGB proxies. This script shows
-what the hyperspectral render nonetheless enables *outside* that path: any
-channel set can be integrated from the same spectral buckets with
-tools/sensor_radiometry.spectral_electron_weights, sampled on an arbitrary
-mosaic tile and compared with the analytic EMVA temporal-noise model.
-Absolute electrons are anchored to the pipeline output of
-tools/pbrt_spectral_exr_to_electrons.py (default recipe, 500 lux).
+Each recipe with a true periodic ``cfa.layout`` (docs/CFA_NIR.md) goes through
+tools/apply_emva_noise.py unchanged: electrons are integrated per channel from the spectral EXR
+(``processing.linear_exr_mode: integrate_qe``), each site keeps its own channel, and shot noise,
+PRNU/DSNU, crosstalk, charge binning, full well and ADC act per site. The Bayer reference is the
+default recipe on the same path. Reported per layout, on the raw mosaic:
 
-Run from the repository root (after render_scenes.sh and make_figures.sh steps):
+* the luminance channel's electrons on the neutral 5 patch at 50 lux, D65 and CIE A;
+* its temporal SNR at 10 lux, measured from two noise seeds (fixed-pattern terms and render noise
+  cancel in the difference), next to the EMVA prediction mu / sqrt(mu + sigma_d^2);
+* CIEDE2000 on the 24 patches after the recipe's spectral ColorChecker CCM, for the noise-free
+  spectral fit and for the demosaiced pipeline output at 50 lux.
+
+Run from the repository root after render_scenes.sh (make_figures.sh calls it):
     venv/bin/python paper/ei2027/scripts/fig_cfa.py
 """
 
 from __future__ import annotations
 
+import contextlib
+import copy
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -28,151 +34,178 @@ import numpy as np
 REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO / "tools"))
 
-from camera_model import load_camera_model  # noqa: E402
-from exr_multispectral import spectral_buckets_from_exr, trapezoid_weights_nm  # noqa: E402
-from qe_curves import read_csv_curve  # noqa: E402
-from sensor_radiometry import integrate_spectral_planes, spectral_electron_weights  # noqa: E402
+import apply_emva_noise  # noqa: E402
+import cfa_mosaic as cm  # noqa: E402
+import colour_science as cs  # noqa: E402
+import run_recipe_scorecard as rs  # noqa: E402
+from camera_model import load_camera_model, noise_config_from_camera_model  # noqa: E402
 
 BUILD = REPO / "paper" / "ei2027" / "build"
 OUT = REPO / "paper" / "ei2027" / "figures"
-QE = REPO / "spectra" / "QE" / "interpolated"
+T_INT = 0.12  # exposure_time_override_s from config/pipeline.yaml
+# 50 lux keeps every layout below ADC full scale on the white patch: the 10-bit ADC (K x 1023 ~ 4.9 ke-)
+# clips the 2x2 charge-binned quad-Bayer sum above ~100 lux at 0.12 s, although its full well is 4x.
+LUX, LOW_LUX = 50.0, 10.0
 
-# Channel name -> QE CSV (all multiplied by the default IRCF). "W" is the
-# unfiltered (mono) silicon QE, i.e. a physically clear pixel.
-CHANNELS = {"R": "QE_red", "G": "QE_green", "B": "QE_blue", "W": "QE_mono", "Ye": "QE_yellow", "Cy": "QE_cyan"}
-CFAS = {
-    "Bayer RGGB": [["R", "G"], ["G", "B"]],
-    "Quad Bayer": [["R", "R", "G", "G"], ["R", "R", "G", "G"], ["G", "G", "B", "B"], ["G", "G", "B", "B"]],
-    "RGBW": [["R", "G"], ["W", "B"]],
-    "RCCB (clear=W)": [["R", "W"], ["W", "B"]],
-    "RCCB (repo proxy C=Cy)": [["R", "Cy"], ["Cy", "B"]],
-    "RYYCy": [["R", "Ye"], ["Ye", "Cy"]],
+# recipe -> (label, luminance channel)
+RECIPES = {
+    "default": ("Bayer (GBRG)", "G"),
+    "default_quad_bayer": ("Quad Bayer (2x2 charge bin)", "G"),
+    "default_rgbw": ("RGBW 2x2", "W"),
+    "default_rgbw_4x4": ("RGBW 4x4", "W"),
+    "default_rccb": ("RCCB", "C"),
+    "default_ryycy": ("RYYCy", "Ye"),
 }
-LUMA = {
-    "Bayer RGGB": "G",
-    "Quad Bayer": "G",
-    "RGBW": "W",
-    "RCCB (clear=W)": "W",
-    "RCCB (repo proxy C=Cy)": "Cy",
-    "RYYCy": "Ye",
-}
-# Patch centres (row, col) in the 960x640 render, measured from patch edges
-# (left edges x=214+89.8*i, top edges y=143+90*j, 82 px patches).
+# Patch centres in the 960x640 render (left edges x=214+89.8*i, top edges y=143+90*j, 82 px patches).
 PATCH_CX = [255 + round(89.8 * i) for i in range(6)]
 PATCH_CY = [184 + 90 * j for j in range(4)]
 HALF = 15
-NEUTRAL = list(range(18, 24))  # patches 19..24 (white..black), 0-based
-LOW_LIGHT_SCALE = 10.0 / 500.0  # 10 lux vs the 500 lux calibration
+WHITE, NEUTRAL5 = 18, 21  # 0-based: patch 19 (white 9.5), patch 22 (neutral 5, ~19 % reflectance)
 
 
-def curve_on(lam: np.ndarray, name: str) -> np.ndarray:
-    x, y = read_csv_curve(QE / f"{name}.csv")
-    return np.interp(lam, x, y, left=0.0, right=0.0)
+def model_for(recipe: str, lux: float) -> dict:
+    model = copy.deepcopy(load_camera_model(rs.RECIPE_DIR / f"{recipe}.yaml"))
+    model.setdefault("processing", {})["linear_exr_mode"] = "integrate_qe"
+    model["sensor_forward"]["model"]["calibration"]["target_illuminance_lux"] = float(lux)
+    return model
 
 
-def channel_electrons(ill: str, anchor_scale: float | None = None) -> tuple[dict, np.ndarray, np.ndarray, float, float]:
-    planes, lam = spectral_buckets_from_exr(BUILD / f"cc_{ill}.exr")
-    ircf = curve_on(lam, "QE_IRCF")
-    names = list(CHANNELS)
-    qe = np.stack([curve_on(lam, CHANNELS[n]) * ircf for n in names], axis=1)
-    wts = spectral_electron_weights(lam, qe, trapezoid_weights_nm(lam), 1.0, 1.0)
-    rel = integrate_spectral_planes(planes, wts)
-    cv = float("nan")
-    if anchor_scale is None:
-        ref = np.load(BUILD / f"cc_{ill}_default_e.npz")["electrons_rgb"]
-        ratios = []
-        for cy in PATCH_CY:
-            for cx in PATCH_CX:
-                sl = (slice(cy - HALF, cy + HALF), slice(cx - HALF, cx + HALF))
-                ratios.append(ref[sl][..., 1].mean() / rel[sl][..., names.index("G")].mean())
-        ratios = np.array(ratios)
-        anchor_scale = float(np.median(ratios))
-        cv = float(ratios.std() / ratios.mean())
-    elec = {n: rel[..., i] * anchor_scale for i, n in enumerate(names)}
-    return elec, lam, qe, anchor_scale, cv
+def run(recipe: str, ill: str, lux: float, seed: int) -> tuple[np.ndarray, cm.CfaLayout, dict]:
+    """Raw electron mosaic of one pipeline run (fixed 0.12 s exposure, no auto-exposure)."""
+    model = model_for(recipe, lux)
+    exr = BUILD / f"cc_{ill}.exr"
+    tmp = BUILD / "cfa_runs" / f"{recipe}_{ill}_{lux:g}_{seed}"
+    tmp.mkdir(parents=True, exist_ok=True)
+    raw_out = tmp / "raw.raw16"
+    with rs._patched(model, exr, raw_out), contextlib.redirect_stdout(sys.stderr):
+        sys.argv = [
+            "apply_emva_noise.py", "--repo-root", str(REPO),
+            "--camera-model-config", str(rs.RECIPE_DIR / f"{recipe}.yaml"),
+            "--linear-exr", str(exr),
+            "--scene-manifest-json", str(BUILD / "scenes" / f"cc_{ill}" / "colorchecker_manifest.json"),
+            "--integration-time-s", str(T_INT), "--raw-out", str(raw_out),
+            "--preview-color-correction-enabled", "false", "--seed", str(seed),
+        ]  # fmt: skip
+        apply_emva_noise.main()
+    stats = json.loads((tmp / "raw_png" / "run_stats.json").read_text())
+    raw = np.fromfile(raw_out, dtype=np.uint16).astype(np.float64)
+    h = int(round(math.sqrt(raw.size * 640 / 960)))
+    e = (raw.reshape(h, -1) - float(stats["black_level_DN"])) * float(stats["K_effective_e_per_DN"])
+    layout = rs.recipe_layout(noise_config_from_camera_model(model, "", ""))
+    if h != 640:  # charge-binned output
+        layout = cm.binned_layout(layout, 640 // h)
+    return e, layout, stats
 
 
-def patch_means(elec: dict) -> dict:
-    out = {}
-    for n, img in elec.items():
-        out[n] = [float(img[cy - HALF : cy + HALF, cx - HALF : cx + HALF].mean()) for cy in PATCH_CY for cx in PATCH_CX]
-    return out
+def patch_slices(scale: int) -> list[tuple[slice, slice]]:
+    hw = HALF // scale
+    return [
+        (slice(cy // scale - hw, cy // scale + hw), slice(cx // scale - hw, cx // scale + hw))
+        for cy in PATCH_CY
+        for cx in PATCH_CX
+    ]
 
 
-def mosaic(elec: dict, tile: list[list[str]]) -> tuple[np.ndarray, np.ndarray]:
-    h, w = next(iter(elec.values())).shape
-    th, tw = len(tile), len(tile[0])
-    raw = np.zeros((h, w))
-    rgb = np.zeros((h, w, 3))
-    tint = {
-        "R": (1, 0.25, 0.25),
-        "G": (0.3, 1, 0.3),
-        "B": (0.3, 0.45, 1),
-        "W": (1, 1, 1),
-        "Ye": (1, 1, 0.3),
-        "Cy": (0.3, 1, 1),
-    }
-    for i in range(th):
-        for j in range(tw):
-            n = tile[i][j]
-            raw[i::th, j::tw] = elec[n][i::th, j::tw]
-            rgb[i::th, j::tw] = elec[n][i::th, j::tw, None] * np.array(tint[n])
-    return raw, rgb
+def site_values(e: np.ndarray, layout: cm.CfaLayout, ch: str, sl: tuple[slice, slice]) -> np.ndarray:
+    idx = layout.site_index(*e.shape)
+    return e[sl][idx[sl] == layout.channels.index(ch)]
 
 
-def snr(mu: float, sigma_d: float) -> float:
-    return mu / np.sqrt(mu + sigma_d**2)
+def ideal_cam(layout: cm.CfaLayout, ircf: str | None) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Noise-free spectral camera responses of the 24 patches (perfect diffuser = 1) and XYZ (D65)."""
+    lam = np.arange(380.0, 731.0, 1.0)
+    chart = cs.load_colorchecker(cm.DATA_ROOT, lam)
+    _, spd = cs.load_illuminant(cm.DATA_ROOT, "D65", lam)
+    qe = cm.qe_stack_for_layout(REPO, layout, lam, ircf_csv=ircf).astype(np.float64)
+    cam = cs.integrate_spectra(lam, cs.radiance_spectra(chart.reflectance, spd), qe)
+    cam /= np.maximum(cs.integrate_spectra(lam, np.atleast_2d(spd), qe)[0], 1e-30)[None, :]
+    xyz = cs.xyz_from_spectra(lam, chart.reflectance, spd)
+    return cam, xyz, lam
+
+
+def de00(cam: np.ndarray, xyz_ref: np.ndarray, ccm: np.ndarray) -> np.ndarray:
+    xyz = cs.srgb_linear_to_xyz(cm.apply_channel_ccm(cam, ccm))
+    xyz = xyz / xyz[WHITE, 1]
+    ref = xyz_ref / xyz_ref[WHITE, 1]
+    return cs.delta_e_2000(cs.xyz_to_lab(xyz), cs.xyz_to_lab(ref))
 
 
 def main() -> None:
-    cam = load_camera_model(REPO / "config" / "camera_recipes" / "default.yaml")
-    sigma_d = float(cam["noise"]["emva"]["sigma_d_e"])
-    full_well = float(cam["noise"]["adc"]["full_well_e"])
+    rows, crops = {}, {}
+    for recipe, (label, luma) in RECIPES.items():
+        model = model_for(recipe, LUX)
+        sigma_d = float(model["noise"]["emva"]["sigma_d_e"])
+        ircf = model["sensor"]["quantum_efficiency"].get("ircf_csv")
+        if not (model.get("cfa") or {}).get("ircf", True):
+            ircf = None
+        e, layout, stats = run(recipe, "D65", LUX, 0)
+        scale = 640 // e.shape[0]
+        sls = patch_slices(scale)
+        mu = float(site_values(e, layout, luma, sls[NEUTRAL5]).mean())
+        e_a, _, _ = run(recipe, "A", LUX, 0)
+        mu_a = float(site_values(e_a, layout, luma, sls[NEUTRAL5]).mean())
+        lo = [run(recipe, "D65", LOW_LUX, s)[0] for s in (1, 2)]
+        v1, v2 = (site_values(x, layout, luma, sls[NEUTRAL5]) for x in lo)
+        mu_lo = float(0.5 * (v1.mean() + v2.mean()))
+        sigma_lo = float(np.std(v1 - v2) / math.sqrt(2.0))
 
-    elec, lam, qe, scale, cv = channel_electrons("D65")
-    elec_a, *_ = channel_electrons("A", anchor_scale=None)
-    pm, pm_a = patch_means(elec), patch_means(elec_a)
+        ccm, _ = cm.colorchecker_spectral_ccm(REPO, layout, ircf_csv=ircf)
+        cam_ideal, xyz_ref, _ = ideal_cam(layout, ircf)
+        chans = cm.demosaic(np.clip(e, 0.0, None), layout, str((model.get("cfa") or {}).get("demosaic", "gradient")))
+        pm = np.array([chans[sl].reshape(-1, chans.shape[2]).mean(axis=0) for sl in sls])
+        cam_pipe = pm / pm[WHITE] * cam_ideal[WHITE]
+        de_ideal, de_pipe = de00(cam_ideal, xyz_ref, ccm), de00(cam_pipe, xyz_ref, ccm)
 
-    white = 18
-    proxy_ratio = np.array(pm["Cy"]) / np.array(pm["W"])
-    proxy_ratio /= proxy_ratio[white]
-    rows = {}
-    for cfa, luma in LUMA.items():
-        mu_500 = pm[luma][21]  # patch 22, neutral 5 (~19% reflectance)
-        mu_10 = mu_500 * LOW_LIGHT_SCALE
-        rows[cfa] = {
+        rows[recipe] = {
+            "label": label,
+            "layout": [list(r) for r in layout.tile],
             "luma_channel": luma,
-            "mu_e_patch22_500lux": mu_500,
-            "snr_db_patch22_10lux": 20 * np.log10(snr(mu_10, sigma_d)),
-            "white_patch_fraction_of_full_well": pm[luma][white] / full_well,
-            "luma_over_G_D65_patch22": pm[luma][21] / pm["G"][21],
-            "luma_over_G_A_patch22": pm_a[luma][21] / pm_a["G"][21],
+            "demosaic": str((model.get("cfa") or {}).get("demosaic", "gradient")),
+            "binning": str((model.get("cfa") or {}).get("binning", "none")),
+            "raw_shape": list(e.shape),
+            "sigma_d_e": sigma_d,
+            "mu_e_neutral5_lux_D65": mu,
+            "mu_e_neutral5_lux_A": mu_a,
+            "mu_e_neutral5_10lux_D65": mu_lo,
+            "sigma_temporal_e_10lux_measured": sigma_lo,
+            "snr_db_10lux_measured": 20 * math.log10(mu_lo / sigma_lo),
+            "snr_db_10lux_emva": 20 * math.log10(mu_lo / math.sqrt(mu_lo + sigma_d**2)),
+            "adc_clip_e": float(stats["K_effective_e_per_DN"])
+            * ((1 << int(stats["bit_depth"])) - 1 - float(stats["black_level_DN"])),
+            "white_patch_luma_fraction_of_full_well": float(
+                site_values(e, layout, luma, sls[WHITE]).mean() / float(stats["full_well_effective_e"])
+            ),
+            "de00_mean_ideal_ccm": float(de_ideal.mean()),
+            "de00_max_ideal_ccm": float(de_ideal.max()),
+            "de00_mean_pipeline_lux": float(de_pipe.mean()),
+            "de00_max_pipeline_lux": float(de_pipe.max()),
         }
-    ref_db = rows["Bayer RGGB"]["snr_db_patch22_10lux"]
+        # Display crop: corner of patches 14/15/20/21 after demosaic + white balance + CCM.
+        y0, y1, x0, x1 = 320 // scale, 500 // scale, 300 // scale, 480 // scale
+        wroi = [sls[WHITE][1].start, sls[WHITE][0].start, sls[WHITE][1].stop, sls[WHITE][0].stop]
+        rgb = rs.to_srgb_linear(e, layout, ccm, wroi)
+        crops[recipe] = rgb[y0:y1, x0:x1] / rgb[sls[WHITE]].mean()
+
+    ref = rows["default"]
     for r in rows.values():
-        r["snr_gain_db_vs_bayer_10lux"] = r["snr_db_patch22_10lux"] - ref_db
-    summary = {
-        "anchor_scale_e_per_unit": scale,
-        "anchor_ratio_cv_over_24_patches": cv,
-        "sigma_d_e": sigma_d,
-        "full_well_e": full_well,
-        "cyan_proxy_over_clear_normalised_to_white": {
-            "min": float(proxy_ratio.min()),
-            "max": float(proxy_ratio.max()),
-            "argmin_patch": int(np.argmin(proxy_ratio)) + 1,
-            "argmax_patch": int(np.argmax(proxy_ratio)) + 1,
-        },
-        "cfas": rows,
-        "neutral_patch_means_D65": {n: [pm[n][k] for k in NEUTRAL] for n in pm},
-    }
+        r["luma_over_bayer_G_D65"] = r["mu_e_neutral5_lux_D65"] / ref["mu_e_neutral5_lux_D65"]
+        r["luma_over_bayer_G_A"] = r["mu_e_neutral5_lux_A"] / ref["mu_e_neutral5_lux_A"]
+        r["snr_gain_db_vs_bayer_10lux_measured"] = r["snr_db_10lux_measured"] - ref["snr_db_10lux_measured"]
+    summary = {"integration_time_s": T_INT, "lux": LUX, "low_lux": LOW_LUX, "cfas": rows}
     OUT.mkdir(parents=True, exist_ok=True)
     (OUT / "cfa_summary.json").write_text(json.dumps(summary, indent=2))
 
-    # Figure 1: channel QE x IRCF curves used here.
+    # Figure 1: per-channel QE x IRCF of the default research camera (cfa_mosaic.DEFAULT_CHANNEL_QE).
+    dflt = model_for("default", LUX)
+    ircf = dflt["sensor"]["quantum_efficiency"].get("ircf_csv")
+    lam = np.arange(380.0, 781.0, 1.0)
+    names = ["R", "G", "B", "W", "Ye", "Cy"]
+    lay = cm.resolve_layout({"layout": [["R", "G", "B"], ["W", "Ye", "Cy"]]})
+    qe = cm.qe_stack_for_layout(REPO, lay, lam, ircf_csv=ircf)
     colours = {"R": "tab:red", "G": "tab:green", "B": "tab:blue", "W": "0.2", "Ye": "goldenrod", "Cy": "tab:cyan"}
     fig, ax = plt.subplots(figsize=(3.4, 2.2))
-    for i, n in enumerate(CHANNELS):
-        ax.plot(lam, qe[:, i], color=colours[n], lw=1.1, label=n)
+    for n in names:
+        ax.plot(lam, qe[lay.channels.index(n)], color=colours[n], lw=1.1, label="W, C" if n == "W" else n)
     ax.set_xlabel("wavelength [nm]", fontsize=8)
     ax.set_ylabel(r"QE $\times$ IRCF", fontsize=8)
     ax.set_xlim(380, 780)
@@ -183,22 +216,20 @@ def main() -> None:
     fig.savefig(OUT / "fig_qe.pdf")
     plt.close(fig)
 
-    # Figure 2: raw mosaics of the same spectral render, crop at the corner of patches 14/15/20/21.
-    names = list(CFAS)
-    fig, axes = plt.subplots(2, 3, figsize=(3.4, 2.6))
-    crop = (slice(374, 414), slice(366, 406))
-    vmax = np.percentile(elec["W"][crop], 99)
-    for ax, name in zip(axes.ravel(), names, strict=True):
-        _, rgb = mosaic(elec, CFAS[name])
-        ax.imshow(np.clip(rgb[crop] / vmax, 0, 1) ** (1 / 2.2), interpolation="nearest")
-        ax.set_title(name.replace(" (", "\n("), fontsize=5.5)
+    # Figure 2: pipeline output (demosaiced, white-balanced, CCM) for each layout, same crop.
+    fig, axes = plt.subplots(2, 3, figsize=(3.4, 2.55))
+    for ax, (recipe, img) in zip(axes.ravel(), crops.items(), strict=True):
+        srgb = np.clip(img, 0, 1)
+        srgb = np.where(srgb <= 0.0031308, 12.92 * srgb, 1.055 * srgb ** (1 / 2.4) - 0.055)
+        ax.imshow(srgb, interpolation="nearest")
+        ax.set_title(RECIPES[recipe][0], fontsize=5.5)
         ax.set_xticks([])
         ax.set_yticks([])
     fig.tight_layout(pad=0.3, h_pad=0.6)
     fig.savefig(OUT / "fig_cfa_mosaics.pdf", dpi=300)
     plt.close(fig)
 
-    print(json.dumps({k: v for k, v in summary.items() if k != "neutral_patch_means_D65"}, indent=2))
+    print(json.dumps(summary, indent=2))
 
 
 if __name__ == "__main__":

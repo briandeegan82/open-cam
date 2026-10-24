@@ -1,0 +1,26 @@
+{
+  "day_dry": {
+    "recipe": "default",
+    "exposure_scale_e_per_unit": 4.8554064284903955,
+    "signal_e_mean_mono": 1194.70947265625,
+    "demosaic": "malvar"
+  },
+  "day_wet": {
+    "recipe": "default",
+    "exposure_scale_e_per_unit": 4.901307855546934,
+    "signal_e_mean_mono": 1189.2828369140625,
+    "demosaic": "malvar"
+  },
+  "swir_900_1600": {
+    "recipe": "swir_ingaas_vga_15um",
+    "exposure_scale_e_per_unit": 0.5622647849831376,
+    "signal_e_mean_mono": 15103.5634765625,
+    "demosaic": null
+  },
+  "night_wet": {
+    "recipe": "default",
+    "exposure_scale_e_per_unit": 0.0003805369237256349,
+    "signal_e_mean_mono": 1630.7164306640625,
+    "demosaic": "malvar"
+  }
+}
