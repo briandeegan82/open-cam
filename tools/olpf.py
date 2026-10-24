@@ -36,10 +36,19 @@ incidence it reduces to t tan(rho). The image is filtered per field zone (biline
 across its own axis). The CRA comes from ``lens.chief_ray_angle_table`` (``cra: table``) or rises
 linearly to ``max_cra_deg`` at the frame corner (``cra: linear``).
 
+Light cone (``cone``, opt-in, quartz filters): a pixel receives a cone of rays around the chief ray,
+of image-space numerical aperture 1 / (2 N) for the working f-number N. Each plate's split depends on
+the incidence angle, so with ``cone.enabled`` the split is traced for ``samples`` rays spread evenly
+over the pupil (direction sines in a disk of radius 1 / (2 N) around the chief ray) and the three
+displaced spots become clouds of 3 x samples spots. A plane-parallel plate also moves the focus back
+by t (1 - 1/n_o) (ordinary ray, paraxial). With ``focus_compensated: true`` (default) the sensor is
+taken to sit at that shifted focus, as in a camera designed with its filter stack, so the ordinary
+spot stays sharp and only the extraordinary rays' extra spread remains. ``focus_compensated: false``
+models a plate added behind a lens focused without it: every ray then also lands t (1 - 1/n_o) x its
+direction sine (per unit cos) off, a defocus disc of diameter about t (1 - 1/n_o) / N.
+
 Not modelled: the IR-cut coating and cover-glass of the filter stack (see
-``sensor.quantum_efficiency.ircf_csv``), the spread of incidence angles within the lens cone (only
-the chief ray is used), and the focus shift of the plate (pbrt's film position already includes
-whatever the lens file assumes).
+``sensor.quantum_efficiency.ircf_csv``).
 """
 
 from __future__ import annotations
@@ -72,7 +81,11 @@ DEFAULTS = {
     # Opt-in: {enabled, cra: table|linear, max_cra_deg, field_grid: [gy, gx]}.
     "angle_dependence": None,
     "interpolation": "box",
+    # Opt-in: {enabled, samples, f_number (default: the camera's working f-number), focus_compensated}.
+    "cone": None,
 }
+
+CONE_DEFAULTS = {"enabled": False, "samples": 16, "f_number": None, "focus_compensated": True}
 
 ANGLE_DEFAULTS = {"enabled": False, "cra": "linear", "max_cra_deg": 25.0, "field_grid": [5, 7]}
 
@@ -166,6 +179,63 @@ def zone_splits(cfg: dict, lam_nm: float, h: int, w: int, lens_cfg: dict | None 
     return out
 
 
+def pupil_sines(f_number: float, samples: int) -> np.ndarray:
+    """(samples, 2) direction-sine offsets spread evenly (sunflower) over a disk of radius 1 / (2 N)."""
+    k = np.arange(int(samples), dtype=np.float64)
+    r = (0.5 / float(f_number)) * np.sqrt((k + 0.5) / len(k))
+    phi = k * math.pi * (3.0 - math.sqrt(5.0))
+    return np.stack([r * np.cos(phi), r * np.sin(phi)], axis=1)
+
+
+def focus_shift_um(cfg: dict, lam_nm: float = 550.0) -> float:
+    """Paraxial focus shift of the quartz plates, sum of t (1 - 1/n_o) [um]."""
+    n_o = float(quartz_indices(lam_nm)[0])
+    t = sum(float(cfg[k]) for k in ("thickness_x_um", "thickness_y_um") if cfg.get(k) is not None)
+    return t * (1.0 - 1.0 / n_o)
+
+
+def cone_spots(
+    cfg: dict, lam_nm: float, sin_x: float, sin_y: float, f_number: float, samples: int, compensated: bool = True
+) -> tuple[list[tuple[float, float]], list[float]]:
+    """Four-spot pattern summed over pupil rays around a chief ray with direction sines (sin_x, sin_y).
+
+    Returns (spots in px, weights summing to 1): per pupil ray the ordinary spot and the three
+    extraordinary ones (plate x, plate y, both). With ``compensated`` the ordinary spot is the focus
+    reference (0, 0); otherwise every spot of a ray is also displaced by the plates' defocus.
+    """
+    pitch = float(cfg["pixel_pitch_um"])
+    ax = float(cfg["axis_angle_deg"])
+    n_o = float(quartz_indices(lam_nm)[0])
+    tx, ty = cfg.get("thickness_x_um"), cfg.get("thickness_y_um")
+    spots, weights = [], []
+    pupil = pupil_sines(f_number, samples)
+    for du, dv in pupil:
+        a, b = sin_x + du, sin_y + dv
+        e1 = plate_split_um(float(tx), lam_nm, ax, "x", a, b) if tx is not None else (0.0, 0.0)
+        e2 = plate_split_um(float(ty), lam_nm, ax, "y", a, b) if ty is not None else (0.0, 0.0)
+        ox = oy = 0.0
+        if not compensated:
+            # ordinary-ray exit offset relative to the unrefracted ray, minus the chief ray's (pure shift)
+            for t in (tx, ty):
+                if t is not None:
+                    for o, s0, s in ((0, sin_x, a), (1, sin_y, b)):
+                        d = float(t) * (s / math.sqrt(1 - a * a - b * b) - s / math.sqrt(n_o**2 - a * a - b * b))
+                        d0 = float(t) * (
+                            s0 / math.sqrt(1 - sin_x**2 - sin_y**2) - s0 / math.sqrt(n_o**2 - sin_x**2 - sin_y**2)
+                        )
+                        if o == 0:
+                            ox += d - d0
+                        else:
+                            oy += d - d0
+        o = (ox / pitch, oy / pitch)
+        d1 = (float(e1[0]) / pitch, float(e1[1]) / pitch)
+        d2 = (float(e2[0]) / pitch, float(e2[1]) / pitch)
+        for sx, sy in ((0.0, 0.0), d1, d2, (d1[0] + d2[0], d1[1] + d2[1])):
+            spots.append((o[0] + sx, o[1] + sy))
+            weights.append(1.0 / (4 * len(pupil)))
+    return spots, weights
+
+
 def _hat(n: int, size: int) -> np.ndarray:
     """(n, size) linear hat weights over ``size`` samples; columns sum to 1."""
     if n == 1:
@@ -208,22 +278,24 @@ def transfer(fx, fy, dx_px: float, dy_px: float) -> np.ndarray:
     return np.cos(np.pi * np.asarray(fx) * dx_px) * np.cos(np.pi * np.asarray(fy) * dy_px)
 
 
-def spot_sum(img: np.ndarray, spots) -> np.ndarray:
+def spot_sum(img: np.ndarray, spots, weights=None) -> np.ndarray:
     """Mean of copies of ``img`` moved by each (sx, sy) px spot, out(x) = mean a(x - s), with box-pixel
-    (bilinear) weights for fractional moves; reflect-padded. Non-negative weights: no ringing."""
+    (bilinear) weights for fractional moves; reflect-padded. Non-negative weights: no ringing.
+    ``weights`` (summing to 1) replaces the plain mean."""
     a = np.asarray(img, dtype=np.float64)
     pad = int(math.ceil(max(max(abs(sx), abs(sy)) for sx, sy in spots))) + 2
     p = np.pad(a, pad, mode="reflect")
     h, w = a.shape
     out = np.zeros_like(a)
-    for sx, sy in spots:
+    ws = [1.0 / len(spots)] * len(spots) if weights is None else list(weights)
+    for (sx, sy), ws_k in zip(spots, ws):
         ix, iy = math.floor(sx), math.floor(sy)
         fx, fy = sx - ix, sy - iy
         for oy, wy in ((iy, 1.0 - fy), (iy + 1, fy)):
             for ox, wx in ((ix, 1.0 - fx), (ix + 1, fx)):
                 if wy * wx:
-                    out += wy * wx * p[pad - oy : pad - oy + h, pad - ox : pad - ox + w]
-    return out / len(spots)
+                    out += ws_k * wy * wx * p[pad - oy : pad - oy + h, pad - ox : pad - ox + w]
+    return out
 
 
 def apply_plane(img: np.ndarray, dx_px: float, dy_px: float, interpolation: str = "box") -> np.ndarray:
@@ -268,7 +340,7 @@ def apply_plane_vec(
 
 
 def apply_channels(
-    chans: dict[str, np.ndarray], sensor_cfg: dict, lens_cfg: dict | None = None
+    chans: dict[str, np.ndarray], sensor_cfg: dict, lens_cfg: dict | None = None, f_number: float | None = None
 ) -> tuple[dict[str, np.ndarray], dict]:
     """Apply ``sensor.olpf`` to every image channel (S0.<lambda>nm at its wavelength, others at 550 nm).
 
@@ -287,6 +359,22 @@ def apply_channels(
         raise ValueError(f"sensor.olpf.interpolation must be box or fourier, got {interp!r}")
     if angular and (cfg.get("split_pixels") is not None or cfg.get("split_x_um") or cfg.get("split_y_um")):
         raise ValueError("olpf.angle_dependence needs the quartz plates (thickness_x_um / thickness_y_um)")
+    cone = {**CONE_DEFAULTS, **(cfg.get("cone") or {})}
+    use_cone = bool(cone["enabled"])
+    if use_cone:
+        if cfg.get("thickness_x_um") is None and cfg.get("thickness_y_um") is None:
+            raise ValueError("olpf.cone needs the quartz plates (thickness_x_um / thickness_y_um)")
+        if interp != "box":
+            raise ValueError("olpf.cone needs interpolation: box")
+        if cone["f_number"] is not None:
+            f_number = float(cone["f_number"])
+        elif f_number is None:
+            from camera_model import effective_f_number
+
+            f_number = effective_f_number(sensor_cfg or {}, lens_cfg)
+        samples = int(cone["samples"])
+        if samples < 1 or not f_number > 0:
+            raise ValueError("olpf.cone needs samples >= 1 and a positive f_number")
     out, splits, clipped, total = {}, {}, 0.0, 0.0
     zone_info = None
     for name, arr in chans.items():
@@ -294,7 +382,30 @@ def apply_channels(
             out[name] = arr
             continue
         lam = parse_s0_wavelength_nm(name) or 550.0
-        if angular:
+        if use_cone:
+            h, w = arr.shape
+            if angular:
+                zones = zone_splits(cfg, lam, h, w, lens_cfg)
+                gy, gx = (int(v) for v in ad["field_grid"])
+            else:
+                zones = zone_splits({**cfg, "angle_dependence": {"field_grid": [1, 1], "max_cra_deg": 0.0}}, lam, h, w)
+                gy = gx = 1
+            wy, wx = _hat(gy, h), _hat(gx, w)
+            cy0, cx0 = 0.5 * (h - 1), 0.5 * (w - 1)
+            f = np.zeros(arr.shape, dtype=np.float64)
+            for k, z in enumerate(zones):
+                ux, uy = z["col"] - cx0, z["row"] - cy0
+                rad = math.hypot(ux, uy)
+                s = math.sin(math.radians(z["cra_deg"]))
+                sx, sy = (s * ux / rad, s * uy / rad) if rad > 0 else (0.0, 0.0)
+                spots, sw = cone_spots(cfg, lam, sx, sy, f_number, samples, bool(cone["focus_compensated"]))
+                wz = wy[k // gx][:, None] * wx[k % gx][None, :]
+                f += spot_sum(arr.astype(np.float64) * wz, spots, sw)
+            dx = min(z["dx_px"] for z in zones)
+            dy = min(z["dy_px"] for z in zones)
+            if angular and (zone_info is None or abs(lam - 550.0) < abs(zone_info["lambda_nm"] - 550.0)):
+                zone_info = {"lambda_nm": lam, "zones": zones}
+        elif angular:
             h, w = arr.shape
             zones = zone_splits(cfg, lam, h, w, lens_cfg)
             gy, gx = (int(v) for v in ad["field_grid"])
@@ -329,6 +440,15 @@ def apply_channels(
         "clipped_energy_fraction": clipped / total if total else 0.0,
         "interpolation": interp,
     }
+    if use_cone:
+        dz = focus_shift_um(cfg)
+        info["cone"] = {
+            "f_number": f_number,
+            "samples": samples,
+            "focus_compensated": bool(cone["focus_compensated"]),
+            "focus_shift_um": dz,
+            "defocus_disc_px": 0.0 if cone["focus_compensated"] else dz / f_number / float(cfg["pixel_pitch_um"]),
+        }
     if zone_info is not None:
         zs = zone_info["zones"]
         info["angle_dependence"] = {
@@ -343,13 +463,15 @@ def apply_channels(
     return out, info
 
 
-def apply_cube(cube: np.ndarray, lam_nm, sensor_cfg: dict, lens_cfg: dict | None = None) -> tuple[np.ndarray, dict]:
+def apply_cube(
+    cube: np.ndarray, lam_nm, sensor_cfg: dict, lens_cfg: dict | None = None, f_number: float | None = None
+) -> tuple[np.ndarray, dict]:
     """``apply_channels`` for an H x W x K spectral cube with bucket wavelengths ``lam_nm``."""
     lam = np.asarray(lam_nm, dtype=np.float64).ravel()
     names = [f"S0.{x:g}nm" for x in lam]
     if not resolve_config(sensor_cfg)["enabled"]:
         return cube, {"enabled": False}
-    out, info = apply_channels({n: cube[:, :, k] for k, n in enumerate(names)}, sensor_cfg, lens_cfg)
+    out, info = apply_channels({n: cube[:, :, k] for k, n in enumerate(names)}, sensor_cfg, lens_cfg, f_number)
     return np.stack([out[n] for n in names], axis=2), info
 
 

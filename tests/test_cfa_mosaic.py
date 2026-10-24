@@ -402,3 +402,17 @@ def test_defect_correction_removes_scene_spike_only() -> None:
         assert dpc["corrected_count"] == 1 and dpc["hot_count"] == 1
         diff = np.flatnonzero(raw0 != raw1)
         assert diff.size == 1 and raw1[diff[0]] < raw0[diff[0]]
+
+
+def test_desaturate_near_clip_whitens_fringes_only():
+    import cfa_mosaic as cm
+
+    rgb = np.ones((8, 12, 3)) * np.array([0.2, 0.5, 0.9])
+    raw = np.full((8, 12), 100.0)
+    raw[:, 8:] = 1000.0  # clipped highlight on the right
+    out = cm.desaturate_near_clip(rgb, raw, 1000.0, radius=2)
+    np.testing.assert_array_equal(out[:, :5], rgb[:, :5])  # far from the clip: untouched
+    assert np.ptp(out[:, 8], axis=-1).max() < 1e-12  # at the clip: neutral
+    y = rgb[0, 0] @ np.array([0.2126, 0.7152, 0.0722])
+    np.testing.assert_allclose(out[:, 8].mean(axis=-1), y)  # luminance kept
+    assert cm.desaturate_near_clip(rgb, raw, None) is rgb

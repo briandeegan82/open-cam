@@ -203,3 +203,39 @@ def test_spd_centroid_offset_shifts_only_the_spd_image():
     assert half_level_x(a1) - half_level_x(base) == pytest.approx(-0.5, abs=0.05)
     with pytest.raises(ValueError):
         _arch("default_hdr_dcg", spd_centroid_offset_x_px=0.5)
+
+
+def test_column_parallel_adc_dnl_gives_each_column_its_own_table():
+    def missing_codes(arch):
+        r = arch.readouts[0]
+        ramp = np.linspace(0.0, 300.0 * r.K_e_per_DN, 4096)
+        d = _sim(arch, np.repeat(ramp[:, None], 2, axis=1), seed=5)[r.name]
+        lo, hi = int(r.black_DN) + 20, int(r.black_DN) + 280
+        return [set(range(lo, hi)) - set(np.unique(d[:, j]).astype(int)) for j in range(2)]
+
+    shared = missing_codes(_arch("default_hdr_dcg", adc_dnl_lsb=1.0))
+    cols = missing_codes(_arch("default_hdr_dcg", adc_dnl_lsb=1.0, adc_dnl_columns=1.0))
+    assert len(cols[0]) > 20 and len(cols[1]) > 20  # about Phi(-1) of the codes are missing
+
+    def overlap(a, b):
+        return len(a & b) / len(a | b)
+
+    # read noise leaves a few codes unobserved by chance; the table's missing codes are shared or not
+    assert overlap(*shared) > 0.8 and overlap(*cols) < 0.5
+
+
+def test_spd_aperture_sharpens_by_the_sinc_ratio():
+    x = np.arange(256)
+    f = 0.2
+    img = 1000.0 + 500.0 * np.cos(2 * np.pi * f * x)[None, :] * np.ones((64, 1))
+    np.testing.assert_array_equal(hp.spd_aperture(img, 0.0), img)
+    out = hp.spd_aperture(img, 0.4)
+    amp = lambda a: np.abs(np.fft.rfft(a[32] - a[32].mean()))[int(f * 256)]  # noqa: E731
+    assert out.mean() == pytest.approx(img.mean(), rel=1e-3)
+    assert amp(out) / amp(img) == pytest.approx(np.sinc(0.4 * f) / np.sinc(f), rel=0.02)
+    bayer = hp.spd_aperture(img, 0.4, "RGGB")
+    # each Bayer sub-lattice is filtered at the physical frequency: same boost below its Nyquist
+    assert amp(bayer) / amp(img) == pytest.approx(amp(out) / amp(img), rel=1e-3)
+    assert bayer.mean() == pytest.approx(img.mean(), rel=1e-3)
+    with pytest.raises(ValueError):
+        _arch("default_hdr_dcg", spd_aperture_fraction=0.5)

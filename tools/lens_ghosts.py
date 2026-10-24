@@ -1025,6 +1025,10 @@ DEFAULTS = {
     "iris_blades": 0,
     "iris_rotation_deg": 0.0,
     "pupil_samples": 64,
+    # Opt-in: blur each ghost by the diffraction of its converging beam at the iris (Airy core of
+    # the working f-number N, Gaussian sigma 0.42 lambda N), so footprint edges soften with lambda.
+    "iris_diffraction": False,
+    "iris_diffraction_f_number": None,
     "source_threshold_relative": 0.01,
     "source_threshold_abs": 0.0,
     "cluster_px": 8,
@@ -1346,6 +1350,17 @@ def render_ghosts(cube: np.ndarray, lams: list[float], spectral_mask: np.ndarray
     finally:
         _POOL_CTX.clear()
     ghost = np.ascontiguousarray(np.moveaxis(ghost, 0, -1))
+    if bool(cfg.get("iris_diffraction", False)):
+        n_f = cfg.get("iris_diffraction_f_number")
+        if n_f is None or not float(n_f) > 0:
+            raise ValueError("traced_ghosts.iris_diffraction needs iris_diffraction_f_number > 0")
+        from scipy.ndimage import gaussian_filter  # noqa: PLC0415
+
+        pitch_um = 1e3 * mapping.xw / w
+        for k, lam in enumerate(lams):
+            sigma = 0.42 * float(lam) * 1e-3 * float(n_f) / pitch_um
+            if sigma > 0.05:
+                ghost[:, :, k] = gaussian_filter(ghost[:, :, k], sigma, mode="constant", truncate=4.0)
     ghost_energy = np.zeros(nl)
     src_energy = np.zeros(nl)
     skipped = 0

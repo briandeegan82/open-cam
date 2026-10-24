@@ -670,6 +670,32 @@ def clip_highlights(img: np.ndarray, gains: np.ndarray, clip_level: float | None
     return np.minimum(img, float(clip_level) * float(np.min(g))).astype(np.asarray(img).dtype, copy=False)
 
 
+def desaturate_near_clip(
+    rgb: np.ndarray, raw: np.ndarray, clip_level: float | None, radius: int = 2, start: float = 0.9
+) -> np.ndarray:
+    """Blend display RGB toward its luminance where the raw mosaic nears its clip level.
+
+    Next to a clipped highlight the demosaic mixes clipped and unclipped samples of different
+    channels, so one channel stops growing while the others do: a coloured fringe along window and
+    lamp edges. The weight ramps from 0 at ``start * clip_level`` to 1 at the clip level, using the
+    largest raw sample within ``radius`` pixels (the demosaic's support). Display only; the raw data
+    and the metrics are not touched."""
+    if clip_level is None or clip_level <= 0:
+        return rgb
+    r = np.asarray(raw, dtype=np.float64)
+    pad = np.pad(r, radius, mode="edge")
+    h, w = r.shape
+    m = np.full((h, w), -np.inf)
+    for dy in range(2 * radius + 1):
+        for dx in range(2 * radius + 1):
+            m = np.maximum(m, pad[dy : dy + h, dx : dx + w])
+    wgt = np.clip((m / float(clip_level) - start) / (1.0 - start), 0.0, 1.0)[:, :, None]
+    if not np.any(wgt):
+        return rgb
+    y = np.tensordot(rgb, np.array([0.2126, 0.7152, 0.0722]), axes=([2], [0]))[:, :, None]
+    return (rgb * (1.0 - wgt) + y * wgt).astype(np.asarray(rgb).dtype, copy=False)
+
+
 def render_cfa_rgb(
     dn_images: Sequence[np.ndarray],
     black_dn: float,
@@ -719,8 +745,12 @@ def render_cfa_rgb(
     info["ccm"] = ccm.tolist()
     info["wb_gains"] = gains.tolist()
     out_clip = None if clip_dn is None else clip_dn * float(np.min(gains))
-    rgb = [
-        clip_highlights(np.clip(apply_channel_ccm(c, ccm), 0.0, None), ccm.sum(axis=0), out_clip) + black_dn
-        for c in chans
-    ]
+    rgb = [clip_highlights(np.clip(apply_channel_ccm(c, ccm), 0.0, None), ccm.sum(axis=0), out_clip) for c in chans]
+    if clip_dn is not None and bool(cfa_cfg.get("highlight_desaturation", True)):
+        rgb = [
+            desaturate_near_clip(c, np.asarray(d, dtype=np.float64) - black_dn, clip_dn)
+            for c, d in zip(rgb, dn_images, strict=True)
+        ]
+        info["highlight_desaturation"] = True
+    rgb = [c + black_dn for c in rgb]
     return [r.astype(np.float32) for r in rgb], info

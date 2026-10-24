@@ -1849,6 +1849,16 @@ def main() -> None:
                 dn_clean_rgb = clip_preview_ccm_highlights(dn_clean_rgb, black_dn, ccm, _ccm_clip)
                 dn_noisy_rgb = clip_preview_ccm_highlights(dn_noisy_rgb, black_dn, ccm, _ccm_clip)
             ccm_source = ccm_method
+        if highlight_clip_dn is not None and bool(bayer_cfg.get("highlight_desaturation", True)):
+            # display only: neutralise the demosaic fringe next to raw-clipped highlights
+            from cfa_mosaic import desaturate_near_clip  # noqa: PLC0415
+
+            dn_clean_rgb = (
+                desaturate_near_clip(dn_clean_rgb - black_dn, dn_clean - black_dn, highlight_clip_dn) + black_dn
+            )
+            dn_noisy_rgb = (
+                desaturate_near_clip(dn_noisy_rgb - black_dn, dn_noisy - black_dn, highlight_clip_dn) + black_dn
+            )
         pw_d_clean = None if preview_no_normalize else float(np.percentile(dn_clean_rgb, args.preview_percentile))
         pw_d_noisy = None if preview_no_normalize else float(np.percentile(dn_noisy_rgb, args.preview_percentile))
         write_png(
