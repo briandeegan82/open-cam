@@ -36,9 +36,12 @@ is recorded in the scene manifest (``road.wear.luminous_reflectance``).
 
 from __future__ import annotations
 
+import copy
+import json
 import math
 import os
 import zlib
+from collections import OrderedDict
 from pathlib import Path
 
 import numpy as np
@@ -248,6 +251,12 @@ def tonal_mask(tex_dir: Path, seed: int) -> Path:
     return path
 
 
+# Wear maps of recent (level, texel, geometry, rng state) keys: tests and sweeps rebuild the same
+# default scene many times per process, and the maps are about 7 s of a 14 s default build.
+_WEAR_CACHE: OrderedDict[str, tuple] = OrderedDict()
+_WEAR_CACHE_SIZE = 2
+
+
 class RoadWear:
     """Seeded road ageing. ``geom`` (from build_highway_scene.Layout):
 
@@ -268,6 +277,27 @@ class RoadWear:
 
     # ------------------------------------------------------------------ wear maps
     def wear_maps(self) -> dict[str, np.ndarray]:
+        """Seeded wear maps; repeated identical builds in one process reuse them (byte-identical)."""
+        key = json.dumps([self.level, self.texel, self.geom, self.rng.bit_generator.state], sort_keys=True, default=str)
+        hit = _WEAR_CACHE.get(key)
+        if hit is None:
+            before = dict(self.summary)
+            maps = self._compute_wear_maps()
+            extra = {k: v for k, v in self.summary.items() if before.get(k, object()) != v}
+            hit = (maps, self.wheel_map, self.texel_zx, extra, copy.deepcopy(self.rng.bit_generator.state))
+            for a in (*maps.values(), self.wheel_map):
+                a.flags.writeable = False
+            _WEAR_CACHE[key] = hit
+            while len(_WEAR_CACHE) > _WEAR_CACHE_SIZE:
+                _WEAR_CACHE.popitem(last=False)
+        else:
+            _WEAR_CACHE.move_to_end(key)
+        maps, self.wheel_map, self.texel_zx, extra, state = hit
+        self.summary.update(copy.deepcopy(extra))
+        self.rng.bit_generator.state = copy.deepcopy(state)
+        return dict(maps)
+
+    def _compute_wear_maps(self) -> dict[str, np.ndarray]:
         g, p, rng = self.geom, self.p, self.rng
         P, x0, x1 = float(g["period"]), float(g["x0"]), float(g["x1"])
         H, W = max(8, round(P / self.texel)), max(8, round((x1 - x0) / self.texel))
