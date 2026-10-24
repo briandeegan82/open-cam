@@ -33,6 +33,7 @@ def dead_leaves(
     cx = rng.uniform(-r_max, size + r_max, n)
     cy = rng.uniform(-r_max, size + r_max, n)
     val = rng.uniform(low, high, n)
+    remaining = size * size
     for r, x, y, v in zip(radii, cx, cy, val, strict=True):
         x0, x1 = int(max(0, np.floor(x - r))), int(min(size, np.ceil(x + r) + 1))
         y0, y1 = int(max(0, np.floor(y - r))), int(min(size, np.ceil(y + r) + 1))
@@ -41,7 +42,8 @@ def dead_leaves(
         sub = img[y0:y1, x0:x1]
         m = ((xx[y0:y1, x0:x1] - x) ** 2 + (yy[y0:y1, x0:x1] - y) ** 2 <= r * r) & np.isnan(sub)
         sub[m] = v
-        if not np.isnan(img).any():
+        remaining -= int(np.count_nonzero(m))
+        if remaining == 0:
             break
     img[np.isnan(img)] = 0.5 * (low + high)
     return img
