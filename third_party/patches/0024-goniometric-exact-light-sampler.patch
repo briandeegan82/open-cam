@@ -1,0 +1,270 @@
+--- a/src/pbrt/lights.h
++++ b/src/pbrt/lights.h
+@@ -397,12 +397,24 @@
+         return scale * Iemit->Sample(lambda) * image.LookupNearestChannel(uv, 0);
+     }
+ 
++    // open-cam: intensity toward p over the image mean that Bounds() assumes; 0 where
++    // the lamp does not emit ("bvhexact" light sampler).
++    PBRT_CPU_GPU
++    Float BoundIntensityRatio(Point3f p) const {
++        Float ref = meanY;
++        Vector3f w = renderFromLight.ApplyInverse(p - renderFromLight(Point3f(0, 0, 0)));
++        if (ref <= 0 || LengthSquared(w) == 0)
++            return 1;
++        return image.LookupNearestChannel(EqualAreaSphereToSquare(Normalize(w)), 0) / ref;
++    }
++
+   private:
+     // GoniometricLight Private Members
+     const DenselySampledSpectrum *Iemit;
+     Float scale;
+     Image image;
+     PiecewiseConstant2D distrib;
++    Float meanY = 0;
+ };
+ 
+ // DiffuseAreaLight Definition
+--- a/src/pbrt/lights.cpp
++++ b/src/pbrt/lights.cpp
+@@ -537,6 +537,10 @@
+     // Compute sampling distribution for _GoniometricLight_
+     Array2D<Float> d = image.GetSamplingDistribution();
+     distrib = PiecewiseConstant2D(d);
++    for (int y = 0; y < image.Resolution().y; ++y)
++        for (int x = 0; x < image.Resolution().x; ++x)
++            meanY += image.GetChannel({x, y}, 0);
++    meanY /= image.Resolution().x * image.Resolution().y;
+ 
+     imageBytes += image.BytesUsed() + distrib.BytesUsed();
+ }
+--- a/src/pbrt/lightsamplers.h
++++ b/src/pbrt/lightsamplers.h
+@@ -266,11 +266,26 @@
+     // beam-peaked headlamp rare exactly where its beam dominates (fireflies); the peak
+     // bounds alone over-sample it outside the beam. The mixture pmf is at least half of
+     // either, and both are nonzero wherever a lamp emits, so the estimate stays unbiased.
++    // open-cam: with exactBeams (patch 0024), half the samples score each goniometric lamp
++    // exactly (its intensity toward the point) and draw it by CDF inversion, the other bounded
++    // lights keeping a BVH entered with its root importance as weight; the other half use the
++    // stock tree. The mixture keeps at least half the stock pmf for every light, so lamps the
++    // exact half under-samples (e.g. tail lamps seen in a wet road under a low beam) do not
++    // get noisier than half-rate stock sampling, and the estimate stays unbiased.
+     BVHLightSampler(pstd::span<const Light> lights, Allocator alloc, bool beamMix = true,
+-                    bool peakBeams = false);
++                    bool peakBeams = false, bool exactBeams = false);
+ 
+     PBRT_CPU_GPU
+     pstd::optional<SampledLight> Sample(const LightSampleContext &ctx, Float u) const {
++        if (exactBeams) {
++            pstd::optional<SampledLight> s =
++                u < 0.5f ? SampleExact(ctx, 2 * u)
++                         : SampleOne(ctx, std::min<Float>(2 * u - 1, OneMinusEpsilon));
++            if (!s)
++                return {};
++            s->p = 0.5f * (PMFExact(ctx, s->light) + PMFOne(ctx, s->light));
++            return s;
++        }
+         if (!beam)
+             return SampleOne(ctx, u);
+         pstd::optional<SampledLight> s =
+@@ -284,6 +299,8 @@
+ 
+     PBRT_CPU_GPU
+     Float PMF(const LightSampleContext &ctx, Light light) const {
++        if (exactBeams)
++            return 0.5f * (PMFExact(ctx, light) + PMFOne(ctx, light));
+         if (!beam)
+             return PMFOne(ctx, light);
+         return 0.5f * (PMFOne(ctx, light) + beam->PMFOne(ctx, light));
+@@ -321,9 +338,8 @@
+                     // Compute light BVH child node importances
+                     const LightBVHNode *children[2] = {&nodes[nodeIndex + 1],
+                                                        &nodes[node.childOrLightIndex]};
+-                    Float ci[2] = {
+-                        children[0]->lightBounds.Importance(p, n, allLightBounds),
+-                        children[1]->lightBounds.Importance(p, n, allLightBounds)};
++                    Float ci[2] = {children[0]->lightBounds.Importance(p, n, allLightBounds),
++                                   children[1]->lightBounds.Importance(p, n, allLightBounds)};
+                     if (ci[0] == 0 && ci[1] == 0)
+                         return {};
+ 
+@@ -373,8 +389,7 @@
+             // Compute child importances and update PMF for current node
+             const LightBVHNode *child0 = &nodes[nodeIndex + 1];
+             const LightBVHNode *child1 = &nodes[node->childOrLightIndex];
+-            Float ci[2] = {child0->lightBounds.Importance(p, n, allLightBounds),
+-                           child1->lightBounds.Importance(p, n, allLightBounds)};
++            Float ci[2] = {child0->lightBounds.Importance(p, n, allLightBounds), child1->lightBounds.Importance(p, n, allLightBounds)};
+             DCHECK_GT(ci[bitTrail & 1], 0);
+             pmf *= ci[bitTrail & 1] / (ci[0] + ci[1]);
+ 
+@@ -403,6 +418,96 @@
+ 
+   private:
+     // BVHLightSampler Private Methods
++    PBRT_CPU_GPU
++    Float GonioImportance(size_t i, Point3f p, Normal3f n) const {
++        Float imp = gonioBounds[i].Importance(p, n, gonioAllBounds);
++        if (imp == 0)
++            return 0;
++        return imp * std::max<Float>(
++                         gonio[i].Cast<GoniometricLight>()->BoundIntensityRatio(p),
++                         1e-3f);
++    }
++
++    PBRT_CPU_GPU
++    Float RestImportance(Point3f p, Normal3f n) const {
++        if (!rest || rest->nodes.empty())
++            return 0;
++        return rest->nodes[0].lightBounds.Importance(p, n, rest->allLightBounds);
++    }
++
++    PBRT_CPU_GPU
++    Float ExactPInfinite() const {
++        bool bounded = !gonio.empty() || (rest && !rest->nodes.empty());
++        return Float(infiniteLights.size()) / Float(infiniteLights.size() + (bounded ? 1 : 0));
++    }
++
++    PBRT_CPU_GPU
++    pstd::optional<SampledLight> SampleExact(const LightSampleContext &ctx, Float u) const {
++        Float pInfinite = ExactPInfinite();
++        if (u < pInfinite) {
++            int index = std::min<int>(u / pInfinite * infiniteLights.size(),
++                                      infiniteLights.size() - 1);
++            return SampledLight{infiniteLights[index], pInfinite / infiniteLights.size()};
++        }
++        u = std::min<Float>((u - pInfinite) / (1 - pInfinite), OneMinusEpsilon);
++        Point3f p = ctx.p();
++        Normal3f n = ctx.ns;
++        Float wR = RestImportance(p, n), wG = 0;
++        for (size_t i = 0; i < gonio.size(); ++i)
++            wG += GonioImportance(i, p, n);
++        Float total = wG + wR;
++        if (!(total > 0))
++            return {};
++        Float target = u * total;
++        if (target < wG) {
++            Float c = 0;
++            int last = -1;
++            for (size_t i = 0; i < gonio.size(); ++i) {
++                Float w = GonioImportance(i, p, n);
++                if (w <= 0)
++                    continue;
++                last = int(i);
++                c += w;
++                if (c > target)
++                    return SampledLight{gonio[i], (1 - pInfinite) * w / total};
++            }
++            if (last >= 0)
++                return SampledLight{gonio[last],
++                                    (1 - pInfinite) * GonioImportance(last, p, n) / total};
++        }
++        if (!(wR > 0))
++            return {};
++        Float ur = std::min<Float>((target - wG) / wR, OneMinusEpsilon);
++        pstd::optional<SampledLight> s = rest->SampleOne(ctx, std::max<Float>(ur, 0));
++        if (!s)
++            return {};
++        s->p *= (1 - pInfinite) * wR / total;
++        return s;
++    }
++
++    PBRT_CPU_GPU
++    Float PMFExact(const LightSampleContext &ctx, Light light) const {
++        Float pInfinite = ExactPInfinite();
++        bool inRest = rest && rest->lightToBitTrail.HasKey(light);
++        int gi = -1;
++        for (size_t i = 0; i < gonio.size(); ++i)
++            if (gonio[i] == light)
++                gi = int(i);
++        if (gi < 0 && !inRest)
++            return 1.f / (infiniteLights.size() + (pInfinite < 1 ? 1 : 0));
++        Point3f p = ctx.p();
++        Normal3f n = ctx.ns;
++        Float wR = RestImportance(p, n), wG = 0;
++        for (size_t i = 0; i < gonio.size(); ++i)
++            wG += GonioImportance(i, p, n);
++        Float total = wG + wR;
++        if (!(total > 0))
++            return 0;
++        if (gi >= 0)
++            return (1 - pInfinite) * GonioImportance(gi, p, n) / total;
++        return (1 - pInfinite) * wR / total * rest->PMFOne(ctx, light);
++    }
++
+     std::pair<int, LightBounds> buildBVH(
+         std::vector<std::pair<int, LightBounds>> &bvhLights, int start, int end,
+         uint32_t bitTrail, int depth);
+@@ -429,6 +534,11 @@
+     pstd::vector<LightBVHNode> nodes;
+     HashMap<Light, uint32_t> lightToBitTrail;
+     BVHLightSampler *beam = nullptr;
++    bool exactBeams = false;
++    pstd::vector<Light> gonio;
++    pstd::vector<CompactLightBounds> gonioBounds;
++    Bounds3f gonioAllBounds;
++    BVHLightSampler *rest = nullptr;
+ };
+ 
+ // ExhaustiveLightSampler Definition
+--- a/src/pbrt/lightsamplers.cpp
++++ b/src/pbrt/lightsamplers.cpp
+@@ -50,10 +50,20 @@
+         return alloc.new_object<UniformLightSampler>(lights, alloc);
+     else if (name == "power")
+         return alloc.new_object<PowerLightSampler>(lights, alloc);
+-    else if (name == "bvh")
++    else if (name == "bvh") {
++        // open-cam (patch 0024): goniometric lamps are scored exactly when there are not too
++        // many of them (the cost is linear in their number); otherwise the beam mixture.
++        int nGonio = 0;
++        for (Light light : lights)
++            nGonio += light.Is<GoniometricLight>();
++        bool exact = nGonio > 0 && nGonio <= 256;
++        return alloc.new_object<BVHLightSampler>(lights, alloc, !exact, false, exact);
++    } else if (name == "bvhbeam")  // open-cam: patch 0022 mean/peak tree mixture
+         return alloc.new_object<BVHLightSampler>(lights, alloc);
+     else if (name == "bvhmean")  // open-cam: stock pbrt BVH (mean-intensity bounds only)
+         return alloc.new_object<BVHLightSampler>(lights, alloc, false);
++    else if (name == "bvhexact")  // open-cam: goniometric lamps scored exactly
++        return alloc.new_object<BVHLightSampler>(lights, alloc, false, false, true);
+     else if (name == "exhaustive")
+         return alloc.new_object<ExhaustiveLightSampler>(lights, alloc);
+     else {
+@@ -109,11 +119,33 @@
+ 
+ // BVHLightSampler Method Definitions
+ BVHLightSampler::BVHLightSampler(pstd::span<const Light> lights, Allocator alloc,
+-                                 bool beamMix, bool peakBeams)
++                                 bool beamMix, bool peakBeams, bool exactBeams)
+     : lights(lights.begin(), lights.end(), alloc),
+       infiniteLights(alloc),
+       nodes(alloc),
+-      lightToBitTrail(alloc) {
++      lightToBitTrail(alloc),
++      exactBeams(exactBeams),
++      gonio(alloc),
++      gonioBounds(alloc) {
++    if (exactBeams) {
++        std::vector<Light> others;
++        std::vector<LightBounds> gb;
++        for (Light light : lights) {
++            pstd::optional<LightBounds> lb = light.Bounds();
++            if (!lb || lb->phi <= 0)
++                continue;
++            else if (light.Is<GoniometricLight>()) {
++                gonio.push_back(light);
++                gb.push_back(*lb);
++                gonioAllBounds = Union(gonioAllBounds, lb->bounds);
++            } else
++                others.push_back(light);
++        }
++        for (const LightBounds &lb : gb)
++            gonioBounds.push_back(CompactLightBounds(lb, gonioAllBounds));
++        if (!others.empty())
++            rest = alloc.new_object<BVHLightSampler>(others, alloc, false, false, false);
++    }
+     // Initialize _infiniteLights_ array and light BVH
+     std::vector<std::pair<int, LightBounds>> bvhLights;
+     for (size_t i = 0; i < lights.size(); ++i) {
