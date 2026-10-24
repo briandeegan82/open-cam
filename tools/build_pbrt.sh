@@ -5,6 +5,7 @@
 # NIR build (spectral range 360..PBRT_LAMBDA_MAX_NM, patch 0002):
 #   PBRT_LAMBDA_MAX_NM=1100 PBRT_BUILD_DIR=third_party/pbrt-v4/build-nir tools/build_pbrt.sh
 set -euo pipefail
+export LC_ALL=C  # patch glob order = byte order of the file names, on every machine
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 src="$repo/third_party/pbrt-v4"
 build="${PBRT_BUILD_DIR:-$src/build}"
@@ -46,4 +47,5 @@ env -u PBRT_OPTIX_PATH cmake -S "$src" -B "$build" -DCMAKE_BUILD_TYPE=Release \
   -DPBRT_BUILD_NATIVE_EXECUTABLE="${PBRT_NATIVE:-ON}" \
   -DCMAKE_CXX_FLAGS="${PBRT_LAMBDA_MAX_NM:+-DPBRT_LAMBDA_MAX_NM=${PBRT_LAMBDA_MAX_NM}}"
 env -u PBRT_OPTIX_PATH cmake --build "$build" -j"$(nproc)" --target pbrt_exe "$@"
-echo "pbrt: $build/pbrt"
+python3 "$repo/tools/pbrt_patchstamp.py" >"$build/pbrt.patchstamp"
+echo "pbrt: $build/pbrt (patch stamp $(cut -c1-12 "$build/pbrt.patchstamp"))"

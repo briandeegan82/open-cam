@@ -78,7 +78,9 @@ jobs:
         id: pbrt-cache
         uses: actions/cache@v4
         with:
-          path: third_party/pbrt-v4/build/pbrt
+          path: |
+            third_party/pbrt-v4/build/pbrt
+            third_party/pbrt-v4/build/pbrt.patchstamp
           key: pbrt-v4-cpu-portable-${{ runner.os }}-${{ steps.pbrt.outputs.sha }}-${{ hashFiles('third_party/patches/*.patch', 'tools/build_pbrt.sh') }}
       - name: Install runtime libraries
         run: |
@@ -114,9 +116,16 @@ jobs:
         run: pip install -r requirements-dev.txt
       # Each pbrt call in the tests is killed after OPENCAM_PBRT_TIMEOUT s (TimeoutExpired names
       # the scene); --timeout dumps every thread's stack if a test hangs elsewhere.
+      - name: Check pbrt binary matches the patch stack
+        run: python tools/pbrt_patchstamp.py --check third_party/pbrt-v4/build/pbrt
+      # Every test file that renders with pbrt (they skip without it in the matrix job), so the
+      # patch-regression tests (light BVH, wavelength jitter, dispersion, caustics, r-table) run too.
       - name: End-to-end render test
-        timeout-minutes: 30
+        timeout-minutes: 45
         env:
           OPENCAM_REQUIRE_PBRT: "1"
           OPENCAM_PBRT_TIMEOUT: "600"
-        run: python -m pytest tests/test_pbrt_e2e.py tests/test_pbrt_full_pipeline.py tests/test_highway_night.py tests/test_highway_spectral_sky.py tests/test_road_rtable.py -v --durations=15 --timeout=900
+        run: |
+          files=$(grep -lE 'OPENCAM_PBRT|pbrt-v4/build/pbrt' tests/test_*.py)
+          echo "$files"
+          python -m pytest $files -v --durations=25 --timeout=900
