@@ -386,3 +386,19 @@ def test_hdr_channel_ratios_need_rgb_channels() -> None:
     spd = hp.Collector("spd", 0.02, response_rgb=(0.01, 0.02, 0.03))
     ref = hp.response_map(spd, (4, 4), bayer_pattern="RGGB")
     assert np.array_equal(hp.response_map(spd, (4, 4), cfa_layout=lay), ref)
+
+
+def test_defect_correction_removes_scene_spike_only() -> None:
+    """processing.defect_correction: a one-pixel scene spike is replaced, the smooth scene is untouched."""
+    with tempfile.TemporaryDirectory() as d:
+        tmp = Path(d)
+        scene = _scene()
+        scene[21, 20, :] *= 50.0
+        exr = write_spectral_exr(tmp / "s.exr", scene, SPECTRAL_LAMBDAS_NM)
+        cfa = {"layout": LAYOUTS[0], "channels": _channel_qe(tmp), "demosaic": "bilinear"}
+        raw0, _ = _run(tmp, _cfg(tmp, exr, cfa))
+        raw1, stats = _run(tmp, _cfg(tmp, exr, cfa, defect_correction={"enabled": True}))
+        dpc = stats["defect_correction"]
+        assert dpc["corrected_count"] == 1 and dpc["hot_count"] == 1
+        diff = np.flatnonzero(raw0 != raw1)
+        assert diff.size == 1 and raw1[diff[0]] < raw0[diff[0]]

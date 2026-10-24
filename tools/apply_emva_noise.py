@@ -27,6 +27,7 @@ from cfa_mosaic import (
     site_parameter_map,
 )
 from cfa_mosaic import mosaic as cfa_sample
+from defect_correction import bayer_index_tile, correct_defects
 from exr_multispectral import (
     linear_rgb_from_exr,
     spectral_buckets_from_exr,
@@ -1714,6 +1715,20 @@ def main() -> None:
         dn_clean = bin_mosaic(dn_clean - black_dn, cfa_layout, mode="mean")[0] + black_dn
         dn_noisy, cfa_out_layout = bin_mosaic(dn_noisy - black_dn, cfa_layout, mode="mean")
         dn_noisy = dn_noisy + black_dn
+    dpc_cfg = proc_cfg.get("defect_correction") or {}
+    dpc_stats = {"enabled": False}
+    if dpc_cfg.get("enabled", False):
+        if hdr_pixel.hdr_enabled(cfg):
+            raise ValueError("processing.defect_correction is not yet supported for HDR captures")
+        if bayer_on:
+            dpc_tile = bayer_index_tile(bayer_pat)
+        elif cfa_out_layout is not None:
+            dpc_tile = cfa_out_layout.index_tile
+        else:
+            raise ValueError("processing.defect_correction needs a CFA mosaic (bayer or cfa.layout)")
+        dn_noisy, dpc_stats = correct_defects(
+            dn_noisy, dpc_tile, dpc_cfg, black_dn=black_dn, K_e_per_DN=K_e_per_DN, sigma_d_e=sigma_d_e
+        )
     hdr_run = None
     if hdr_pixel.hdr_enabled(cfg):
         if cfa_binning != "none":
@@ -1937,6 +1952,7 @@ def main() -> None:
         "adc_dnl_model": "fixed_per_bin_map" if adc_dnl_std_lsb > 0.0 else None,
         "adc_clipping": adc_clipping,
         "defect_pixels": defect_stats,
+        "defect_correction": dpc_stats,
         "random_telegraph_noise": rts_stats,
         "preview_no_normalize": preview_no_normalize,
         "crosstalk_enabled": crosstalk_enabled,
