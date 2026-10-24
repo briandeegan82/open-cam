@@ -100,7 +100,13 @@ default 5 mm, shrinking every pass as in SPPM; `--caustic-photons`, default min(
 27 % to the render time and halves the caustic noise (12.1 % to 6.8 % at 1024 spp); floor noise and
 slanted-edge MTF50 are unchanged.
 
+Viewed alone and stretched, the caustic EXR shows low-frequency photon blotches over the walls and floor.
+They are SPPM density-estimation noise from the weak light the spheres reflect onto the whole room, not
+an error in the sum: on that render the photon pass carries 0.1–0.2 % of the wall and floor signal,
+and its blotches (4–16 px band) are 0.05–0.08 % of it, against 3–9 % render noise from the path pass
+in the same regions.
+
 Limits: CPU only (the wavefront/GPU integrator ignores both flags, so a split scene rendered there would
-count the caustic twice; build with `--caustics path`); caustics through participating
+count the caustic twice, so `combine_caustics.render` refuses `--gpu`/`--wavefront` on a split scene; build with `--caustics path`); caustics through participating
 media and BSSRDFs stay with the path tracer; passthrough dielectrics (patches 0017/0020) are skipped as
 null surfaces by `volpath` but refract the photons, so scenes with them don't split exactly.

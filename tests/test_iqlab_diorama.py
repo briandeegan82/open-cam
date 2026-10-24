@@ -213,3 +213,13 @@ def test_caustic_split_sums_to_volpath(tmp_path):
     assert sum(caus[c].mean() for c in sb) > 0
     ratio = np.array([tot[c].mean() / vol[c].mean() for c in vb])
     assert np.all(np.abs(ratio - 1) < 0.05), ratio
+
+
+def test_split_scene_refuses_wavefront(tmp_path):
+    import combine_caustics
+
+    args = ["--out-dir", str(tmp_path), "--caustics", "photons", "--pixelsamples", "4", "--caustic-photons", "100"]
+    dio.write_diorama(dio.build_parser().parse_args(args))
+    for flag in ("--gpu", "--wavefront"):
+        with pytest.raises(ValueError, match="twice"):
+            combine_caustics.render(tmp_path, Path("/nonexistent/pbrt"), [flag])
