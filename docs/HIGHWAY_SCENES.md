@@ -44,6 +44,12 @@ venv/bin/python tools/pbrt_spectral_exr_to_electrons.py --exr out/highway_spectr
     --scene-manifest-json scenes/generated/highway/highway_manifest.json --integration-time-s 0.0002
 ```
 
+The spectral film defaults to 32 buckets over 360-830 nm (14.7 nm each). With 16 buckets the
+piecewise-constant bucket spectrum biases colour: on a pinhole ColorChecker render under D65 the
+worst R/G or B/G ratio error against a 470-bucket (1 nm) reference was 7.5 % (iphone_8) and
+5.9 % (nikon_z6); 32 buckets cut it to 0.75 % and 1.0 %, 64 buckets to 0.35 % and 0.27 %.
+`--spectral-nbuckets 16` is still available for quick previews.
+
 Useful options: `--sky {kloofendal_43d_clear,kloofendal_48d_partly_cloudy,syferfontein_6d_clear,analytic}`,
 `--sun-elevation` (analytic sky), `--sun-azimuth` (degrees from the road direction, + = right),
 `--global-illuminance-lux`, `--road` (see below), `--verge`, `--vegetation`, `--traffic none`,

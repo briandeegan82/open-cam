@@ -118,7 +118,7 @@ def main() -> None:
     export("FILM", str(render.get("film", "rgb")).lower())
     fo = render.get("film_output", None)
     export("FILM_OUTPUT_REL", fo if fo else "")
-    export("SPECTRAL_NBUCKETS", int(render.get("spectral_nbuckets", 16)))
+    export("SPECTRAL_NBUCKETS", int(render.get("spectral_nbuckets", 32)))
     export("SPECTRAL_LAMBDA_MIN", float(render.get("spectral_lambda_min", 360.0)))
     export("SPECTRAL_LAMBDA_MAX", float(render.get("spectral_lambda_max", 830.0)))
     illum = render.get("illuminant", None)
