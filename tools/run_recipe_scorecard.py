@@ -100,6 +100,8 @@ METRICS = (
     ("edge_mtf50_cy_px", "MTF50 cy/px", "{:.3f}"),
     ("edge_acutance", "Edge acutance", "{:.3f}"),
     ("edge_mtf_rebound", "MTF rebound", "{:.2f}"),
+    ("edge_mtf_0p4", "MTF @0.4 cy/px", "{:.3f}"),
+    ("edge_mtf_0p4_noise", "MTF @0.4 noise ±", "{:.3f}"),
     ("edge_mtf50_sensor_cy_px", "Sensor MTF50 cy/px", "{:.3f}"),
     ("edge_acutance_sensor", "Sensor edge acutance", "{:.3f}"),
     ("texture_acutance", "Texture acutance", "{:.3f}"),
@@ -597,6 +599,21 @@ def score_diorama(
         out["edge_mtf50_cy_px"] = float(r.mtf50_cy_per_px)
         out["edge_acutance"] = float(cpiq.acutance(r.frequency_cy_per_px, r.mtf, view))
         out["edge_mtf_rebound"] = mtf_rebound(r.frequency_cy_per_px, r.mtf)
+        out["edge_mtf_0p4"] = float(np.interp(0.4, r.frequency_cy_per_px, r.mtf))
+        if noise is not None:
+            # Noise floor of the fine-detail reading: SFRs of the edge with the measured noise
+            # realisation added and subtracted differ by twice its effect at 0.4 cy/px.
+            try:
+                nz = _luma(noise)[y0:y1, x0:x1]
+                ed = y[y0:y1, x0:x1]
+                rp = sfr.slanted_edge_sfr(despeckle(ed + nz))
+                rm = sfr.slanted_edge_sfr(despeckle(ed - nz))
+                out["edge_mtf_0p4_noise"] = 0.5 * abs(
+                    float(np.interp(0.4, rp.frequency_cy_per_px, rp.mtf))
+                    - float(np.interp(0.4, rm.frequency_cy_per_px, rm.mtf))
+                )
+            except ValueError:
+                out["edge_mtf_0p4_noise"] = float("nan")
         if sensor is not None:
             try:
                 rs = sfr.slanted_edge_sfr(despeckle(sensor[y0:y1, x0:x1]))
