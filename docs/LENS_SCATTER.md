@@ -29,6 +29,7 @@ assumptions, not measurements of these lenses:
 | `abg_g` | 2.0 | ABg slope g (Harvey `g = 2` is a common polished-glass value) |
 | `abg_shoulder` | 0.01 | roll-off direction cosine (B = shoulder^g) |
 | `reference_nm` | 550 | wavelength at which the kernel is built; other bands scale by (λ₀/λ)² |
+| `shape_groups` | 0 | opt-in: kernels for N wavelength groups, ABg shoulder × λ/λ₀ (see below) |
 
 ## Field dependence and barrel scatter (opt-in)
 
@@ -52,8 +53,16 @@ assumptions, not measurements of these lenses:
 ## Not modelled
 
 Particulate contamination, edge scatter, out-of-field sources, the sensor cover glass's own
-scatter, the angular distribution of the barrel light, and any wavelength dependence of the
-ABg shape. Real lenses' ISO 9358 veiling-glare index is usually dominated by barrel and
+scatter, and the angular distribution of the barrel light.
+
+## Wavelength dependence of the shape (`shape_groups`, opt-in)
+
+In Rayleigh–Rice theory the scatter BSDF is a function of the surface spatial frequency
+f = β/λ, so a given roughness spectrum scatters red light to wider angles than blue. With
+`shape_groups: N` the bands are split into N wavelength groups. Each group gets its own kernel with
+the ABg shoulder scaled to `abg_shoulder × λ_group / reference_nm`. The slope g and the (λ₀/λ)² TIS
+scaling are unchanged. Every group costs one more kernel and FFT per field zone, so it is off by
+default. Real lenses' ISO 9358 veiling-glare index is usually dominated by barrel and
 mount scatter, so these numbers are a lower bound for the optics, not a prediction of a real
 lens' VGI.
 

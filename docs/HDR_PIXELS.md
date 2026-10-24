@@ -200,7 +200,13 @@ noise:
   time, so colours don't mix. Where the merge switches from LPD to SPD, an edge or texture jumps by the offset,
   which distorts slanted-edge MTF measurements across the transition. A per-capture SPD input
   (`capture_electrons_npz`) is taken as already rendered from the SPD position and is not shifted.
-  The smaller SPD aperture (its pixel-aperture MTF) is not modelled.
+  `spd_aperture_fraction: a` (opt-in) gives the SPD its own, smaller aperture: a square photodiode
+  a × pitch wide, so its pixel-aperture MTF is sinc(a f) instead of the full pixel's sinc(f). The
+  input is already integrated over the whole pixel, so the SPD signal is filtered by the ratio
+  sinc(a f)/sinc(f) on each CFA sub-lattice, up to that sub-lattice's Nyquist. That is a mild
+  sharpening, by at most 11 % on a Bayer sub-lattice and 57 % without a mosaic. Undershoot at hard
+  edges is clipped to zero. Detail above the pixel Nyquist that pbrt has already integrated away
+  cannot come back.
 * **LOFIC soft knee.** The overflow barrier turns on gradually rather than at exactly the full
   well. The photodiode keeps a smooth minimum of the collected charge and the full well,
   `Q_pd = −k ln(e^(−Q/k) + e^(−FW/k))`, which is `k ln 2` short of FW at `Q = FW`. The rest goes to
@@ -210,8 +216,10 @@ noise:
   spatial seed, so it is the same in every frame. Each transition is at `k − ½ + e_k`, with
   independent `e_k ~ N(0, adc_dnl_lsb/√2)`, so the code widths have an rms of `adc_dnl_lsb`, the
   INL stays bounded at about that level, and the end points are exact. A transition that falls
-  below the previous one gives a missing code (about Φ(−1/adc_dnl_lsb) of codes). Column-parallel
-  ADCs, each with their own table, are not modelled; the smooth bow is `adc_inl_dn`.
+  below the previous one gives a missing code (about Φ(−1/adc_dnl_lsb) of codes). With
+  `adc_dnl_columns: 1` the readout is column-parallel, as in most CMOS sensors: every column's
+  ADC has its own fixed table, drawn from a per-column seed, so missing codes and wide codes differ
+  from column to column and show up as column FPN in flat fields. The smooth bow is `adc_inl_dn`.
 * **SPD offset and crosstalk** bias the merged signal wherever the SPD dominates, by
   `offset / r_spd` and `f·(r_lpd / r_spd)·μ`. Because the bias appears only above the LPD
   transition, it makes the merged response non-linear across the knee.

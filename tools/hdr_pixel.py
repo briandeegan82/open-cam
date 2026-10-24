@@ -259,6 +259,8 @@ SECOND_ORDER_KEYS = (
     "spd_centroid_offset_y_px",
     "lofic_knee_e",
     "adc_dnl_lsb",
+    "adc_dnl_columns",
+    "spd_aperture_fraction",
 )
 SIGNED_SECOND_ORDER_KEYS = ("spd_offset_e", "spd_centroid_offset_x_px", "spd_centroid_offset_y_px")
 
@@ -279,6 +281,10 @@ def _second_order_cfg(d: dict | None, arch_name: str) -> dict:
         raise ValueError("spd_crosstalk_fraction / spd_offset_e need architecture: split_pixel")
     if (out["spd_centroid_offset_x_px"] or out["spd_centroid_offset_y_px"]) and arch_name != "split_pixel":
         raise ValueError("spd_centroid_offset_x_px / _y_px need architecture: split_pixel")
+    if out["spd_aperture_fraction"] and arch_name != "split_pixel":
+        raise ValueError("spd_aperture_fraction needs architecture: split_pixel")
+    if out["spd_aperture_fraction"] > 1:
+        raise ValueError("spd_aperture_fraction is the SPD's linear aperture over the pixel pitch, in (0, 1]")
     if out["lofic_knee_e"] and arch_name != "lofic":
         raise ValueError("lofic_knee_e needs architecture: lofic")
     return out
@@ -312,6 +318,37 @@ def _box_shift(a: np.ndarray, dx: float, dy: float) -> np.ndarray:
             if wy * wx:
                 out += wy * wx * p[pad + oy : pad + oy + h, pad + ox : pad + ox + w]
     return out
+
+
+def spd_aperture(
+    signal_e: np.ndarray, fraction: float, bayer_pattern: str | None = None, cfa_layout=None
+) -> np.ndarray:
+    """The optical signal as integrated by a square photodiode ``fraction`` x the pixel pitch wide.
+
+    The input is already integrated over the full pixel (pbrt's box pixel), so the smaller aperture is
+    the transfer-function ratio ``sinc(fraction f) / sinc(f)`` per axis (f in cycles per pixel), applied
+    to each CFA sub-lattice on its own (so colours do not mix) up to that sub-lattice's Nyquist. The
+    gain is at most 1 / sinc(1/2) = 1.57 without a mosaic and 1.11 on a Bayer sub-lattice;
+    undershoot at hard edges is clipped to zero."""
+    a = np.asarray(signal_e, dtype=np.float64)
+    if not fraction or fraction >= 1 or a.ndim != 2 or min(a.shape) < 2:
+        return a
+    period = cfa_layout.period if cfa_layout is not None else (2, 2) if bayer_pattern else (1, 1)
+    pr, pc = period
+
+    def filt(x: np.ndarray) -> np.ndarray:
+        pad = 8
+        p = np.pad(x, pad, mode="reflect")
+        fy = np.fft.fftfreq(p.shape[0])[:, None] / pr
+        fx = np.fft.rfftfreq(p.shape[1])[None, :] / pc
+        h = (np.sinc(fraction * fx) / np.sinc(fx)) * (np.sinc(fraction * fy) / np.sinc(fy))
+        return np.fft.irfft2(np.fft.rfft2(p) * h, s=p.shape)[pad:-pad, pad:-pad]
+
+    out = np.empty_like(a)
+    for i in range(pr):
+        for j in range(pc):
+            out[i::pr, j::pc] = filt(a[i::pr, j::pc])
+    return np.maximum(out, 0.0)
 
 
 def spd_centroid_shift(
@@ -567,19 +604,27 @@ def simulate_captures(
                 "col_fpn_e"
             ] * spatial_rng.standard_normal((1, shape[1]))
     dnl: dict[str, np.ndarray] = {}
+    col_dnl: dict[str, int] = {}
     if so and so["adc_dnl_lsb"] > 0:
         for r in arch.readouts:  # one fixed code table per readout chain's ADC
-            dnl[r.name] = dnl_transitions(r.max_dn, so["adc_dnl_lsb"], spatial_rng)
+            if so.get("adc_dnl_columns", 0.0) > 0 and two_d:
+                # column-parallel ADCs: one fixed table per column, drawn from its own seed
+                col_dnl[r.name] = int(spatial_rng.integers(2**62))
+            else:
+                dnl[r.name] = dnl_transitions(r.max_dn, so["adc_dnl_lsb"], spatial_rng)
     spd_shift = (so.get("spd_centroid_offset_x_px", 0.0), so.get("spd_centroid_offset_y_px", 0.0)) if so else (0, 0)
+    spd_ap = so.get("spd_aperture_fraction", 0.0) if so else 0.0
     out: dict[str, np.ndarray] = {}
     for c in arch.collectors:
         if c.name in capture_signal_e:
             sig = np.asarray(capture_signal_e[c.name], dtype=np.float64)
             if sig.shape != shape:
                 raise ValueError(f"capture {c.name!r} electrons shape {sig.shape} != {shape}")
-        elif c.pd == "spd" and any(spd_shift):
-            # The SPD sits off-centre in the pixel, so it samples the optical image at an offset centroid.
-            sig = spd_centroid_shift(signal_e, *spd_shift, bayer_pattern, cfa_layout) * response_map(
+        elif c.pd == "spd" and (any(spd_shift) or spd_ap):
+            # The SPD is smaller than the pixel (its own aperture MTF) and sits off-centre, so it samples
+            # the optical image with a narrower box at an offset centroid.
+            sig = spd_aperture(signal_e, spd_ap, bayer_pattern, cfa_layout)
+            sig = spd_centroid_shift(sig, *spd_shift, bayer_pattern, cfa_layout) * response_map(
                 c, shape, bayer_pattern, cfa_layout
             )
         else:
@@ -624,7 +669,13 @@ def simulate_captures(
                 # Bow-shaped integral non-linearity, peak adc_inl_dn at mid-scale, zero at both ends.
                 x = np.clip((dn - r.black_DN) / (r.max_dn - r.black_DN), 0.0, 1.0)
                 dn = dn + so["adc_inl_dn"] * 4.0 * x * (1.0 - x)
-            if r.name in dnl:
+            if r.name in col_dnl:
+                codes = np.empty(shape, dtype=np.float64)
+                for j in range(shape[1]):
+                    t = dnl_transitions(r.max_dn, so["adc_dnl_lsb"], np.random.default_rng([col_dnl[r.name], j]))
+                    codes[:, j] = np.searchsorted(t, dn[:, j], side="right")
+                out[r.name] = codes
+            elif r.name in dnl:
                 out[r.name] = np.searchsorted(dnl[r.name], dn, side="right").astype(np.float64)
             else:
                 out[r.name] = np.clip(np.rint(dn), 0.0, r.max_dn)
