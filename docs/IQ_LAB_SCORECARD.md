@@ -40,6 +40,8 @@ Outputs: `scorecard.csv` (one row per recipe), `scorecard.json` (settings, optic
 
 At 480×320 the slanted-edge ROI behind the realistic lenses is only about 44 px square, so the measured MTF ripples by about ±0.1 between 0.2 and 0.4 cy/px. Where it hovers near 0.5, MTF50 can jump between neighbouring crossings: `canon_eos_r` reads 0.40 cy/px and `nikon_z6` 0.30 cy/px behind the same lens, with no rebound. Rank sharpness on edge acutance, which integrates the curve, or render at a higher resolution.
 
+**Fine-detail noise floor.** `edge_mtf_0p4` is the output MTF at 0.4 cy/px. `edge_mtf_0p4_noise` is its noise floor: the edge SFR is measured again with the capture's own noise realisation (the difference of two noise draws / √2) added and subtracted, and half the difference of the two readings at 0.4 cy/px is reported. Treat differences in `edge_mtf_0p4` smaller than about twice this value as noise.
+
 **Viewing condition.** Acutance uses `monitor_100pct` (CPIQ CSF).
 
 ## Caveats

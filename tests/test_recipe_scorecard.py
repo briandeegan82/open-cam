@@ -213,3 +213,19 @@ def test_recipe_lens_dispersion_options_reach_builder(lens_extra, flag):
     args = sc.builder_args("diorama", optics, 360, 240, 4)
     dispersion_flags = [a for a in args if "lens-dispersion" in a]
     assert dispersion_flags == ([flag] if flag else [])
+
+
+def test_edge_mtf_noise_floor_grows_with_noise():
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+    import sfr_analysis as sfr_mod
+
+    edge = sfr_mod.synthetic_slanted_edge(96, 96)
+    rgb = np.repeat(edge[..., None], 3, -1)
+    rng = np.random.default_rng(1)
+    floors = []
+    for amp in (0.002, 0.02):
+        noise = amp * rng.standard_normal(rgb.shape)
+        out = sc.score_diorama(rgb + noise, {"slanted_edge": [0, 0, 96, 96]}, noise=noise)
+        assert 0.0 <= out["edge_mtf_0p4"] <= 1.2
+        floors.append(out["edge_mtf_0p4_noise"])
+    assert 0 < floors[0] < floors[1]
