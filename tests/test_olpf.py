@@ -151,3 +151,53 @@ def test_angle_dependence_off_by_default_and_centre_matches():
             {"S0.550nm": img},
             {**base, "olpf": {"enabled": True, "split_pixels": 1.0, "angle_dependence": {"enabled": True}}},
         )
+
+
+def test_cone_off_by_default_and_narrow_cone_matches_chief_ray():
+    rng = np.random.default_rng(1)
+    img = rng.random((33, 47)).astype(np.float64)
+    base = {"pixel_pitch_um": 4.0, "olpf": {"enabled": True, "thickness_x_um": 680, "thickness_y_um": 680}}
+    chief, info0 = olpf.apply_channels({"S0.550nm": img}, base)
+    assert "cone" not in info0
+    narrow = {**base, "olpf": {**base["olpf"], "cone": {"enabled": True, "f_number": 1e6, "samples": 4}}}
+    same, info = olpf.apply_channels({"S0.550nm": img}, narrow)
+    np.testing.assert_allclose(same["S0.550nm"], chief["S0.550nm"], atol=1e-6)
+    assert info["cone"]["focus_compensated"] and info["cone"]["defocus_disc_px"] == 0.0
+
+
+def test_cone_spreads_extraordinary_spots_and_keeps_energy():
+    cfg = {"pixel_pitch_um": 4.0, "axis_angle_deg": 45.0, "thickness_x_um": 680.0, "thickness_y_um": 680.0}
+    spots, w = olpf.cone_spots(cfg, 550.0, 0.0, 0.0, 2.0, 32)
+    sp = np.asarray(spots).reshape(-1, 4, 2)
+    assert sum(w) == pytest.approx(1.0) and np.all(sp[:, 0] == 0)  # ordinary spot is the focus reference
+    chief = olpf.plate_split_um(680.0, 550.0, 45.0, "x", 0.0, 0.0)[0] / 4.0
+    assert abs(sp[:, 1, 0].mean() - chief) < 0.05 and sp[:, 1, 0].std() > 0.01
+    img = np.zeros((41, 41))
+    img[20, 20] = 1.0
+    out, _ = olpf.apply_channels(
+        {"S0.550nm": img},
+        {"pixel_pitch_um": 4.0, "olpf": {**cfg, "enabled": True, "cone": {"enabled": True, "f_number": 2.0}}},
+    )
+    assert out["S0.550nm"].sum() == pytest.approx(1.0, rel=1e-9)
+
+
+def test_uncompensated_plate_focus_shift_defocuses():
+    cfg = {"enabled": True, "thickness_x_um": 680.0, "thickness_y_um": 680.0}
+    dz = olpf.focus_shift_um({**cfg, "pixel_pitch_um": 4.0})
+    n_o = float(olpf.quartz_indices(550.0)[0])
+    assert dz == pytest.approx(1360.0 * (1 - 1 / n_o))
+    img = np.zeros((161, 161))
+    img[80, 80] = 1.0
+    sens = {
+        "pixel_pitch_um": 4.0,
+        "olpf": {**cfg, "cone": {"enabled": True, "f_number": 4.0, "samples": 256, "focus_compensated": False}},
+    }
+    out, info = olpf.apply_channels({"S0.550nm": img}, sens)
+    disc = info["cone"]["defocus_disc_px"]
+    assert disc == pytest.approx(dz / 4.0 / 4.0)
+    o = out["S0.550nm"]
+    yy, xx = np.indices(o.shape)
+    cy, cx = (o * yy).sum(), (o * xx).sum()
+    r2 = (o * ((yy - cy) ** 2 + (xx - cx) ** 2)).sum()
+    # a uniform disc of diameter D has <r^2> = D^2 / 8; the four-spot split and box weights add a little
+    assert disc**2 / 8 < r2 < disc**2 / 8 + 4.0

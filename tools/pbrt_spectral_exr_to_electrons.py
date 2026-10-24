@@ -191,7 +191,8 @@ def spectral_radiance_to_electrons(
     """
     scene = scene or {}
     # Optical low-pass filter in front of the sensor (sensor.olpf, opt-in): spatial, per wavelength.
-    L, olpf_meta = apply_olpf_cube(L, lambdas_nm, sensor, lens_cfg)
+    f_number = effective_f_number(sensor, lens_cfg, tag=tag)
+    L, olpf_meta = apply_olpf_cube(L, lambdas_nm, sensor, lens_cfg, f_number)
     exr_is_irradiance = scene.get("exr_quantity") == "irradiance"
     cal = model.get("calibration", {}) or {}
     pbrt_cfg = model.get("pbrt_spectral_exr", {}) or {}
@@ -210,7 +211,6 @@ def spectral_radiance_to_electrons(
     t_int = float(integration_time_s if integration_time_s is not None else sensor.get("integration_time_s", 0.01))
     pixel_pitch_um = float(sensor.get("pixel_pitch_um", 3.45))
 
-    f_number = effective_f_number(sensor, lens_cfg, tag=tag)
     mag = (
         1.0
         if exr_is_irradiance
