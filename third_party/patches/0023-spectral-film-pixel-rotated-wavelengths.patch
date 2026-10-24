@@ -1,0 +1,125 @@
+--- a/src/pbrt/util/spectrum.h
++++ b/src/pbrt/util/spectrum.h
+@@ -289,15 +289,23 @@
+     // jittered independently (SampleUniform shifts all strata by the same offset, so film
+     // buckets one stratum apart receive identical paths). Every lambda[i] is still uniform.
+     PBRT_CPU_GPU
++    // open-cam: rot (optional) holds one offset in [0, 1) per secondary wavelength, fixed for
++    // the whole pixel (patch 0023); without it each sample hashes its own offsets from u.
+     static SampledWavelengths SampleUniformJittered(Float u, Float lambda_min,
+-                                                    Float lambda_max) {
++                                                    Float lambda_max,
++                                                    const Float *rot = nullptr) {
+         SampledWavelengths swl;
+         Float delta = (lambda_max - lambda_min) / NSpectrumSamples;
+         Float us = u * NSpectrumSamples;
+         int s0 = std::min<int>(int(us), NSpectrumSamples - 1);
+         uint64_t bits = uint64_t(FloatToBits(u)) * 0x9e3779b97f4a7c15ull;
+         for (int i = 0; i < NSpectrumSamples; ++i) {
+-            Float v = i == 0 ? us - s0 : Float(MixBits(bits + i) >> 40) * 0x1p-24f;
++            Float v = us - s0;
++            if (i > 0 && rot) {
++                v += rot[i - 1];
++                v -= pstd::floor(v);
++            } else if (i > 0)
++                v = Float(MixBits(bits + i) >> 40) * 0x1p-24f;
+             v = std::min<Float>(v, OneMinusEpsilon);
+             swl.lambda[i] = lambda_min + ((s0 + i) % NSpectrumSamples + v) * delta;
+             swl.pdf[i] = 1 / (lambda_max - lambda_min);
+@@ -308,13 +316,19 @@
+     // open-cam: as SampleUniformJittered, but each stratum is mapped through the CDF of a
+     // tabulated distribution over the film range (spectral film "float bucketweights").
+     template <typename Distrib>
+-    PBRT_CPU_GPU static SampledWavelengths SampleTabulatedJittered(Float u, const Distrib &d) {
++    PBRT_CPU_GPU static SampledWavelengths SampleTabulatedJittered(Float u, const Distrib &d,
++                                                                const Float *rot = nullptr) {
+         SampledWavelengths swl;
+         Float us = u * NSpectrumSamples;
+         int s0 = std::min<int>(int(us), NSpectrumSamples - 1);
+         uint64_t bits = uint64_t(FloatToBits(u)) * 0x9e3779b97f4a7c15ull;
+         for (int i = 0; i < NSpectrumSamples; ++i) {
+-            Float v = i == 0 ? us - s0 : Float(MixBits(bits + i) >> 40) * 0x1p-24f;
++            Float v = us - s0;
++            if (i > 0 && rot) {
++                v += rot[i - 1];
++                v -= pstd::floor(v);
++            } else if (i > 0)
++                v = Float(MixBits(bits + i) >> 40) * 0x1p-24f;
+             v = std::min<Float>(v, OneMinusEpsilon);
+             Float uc = std::min<Float>(((s0 + i) % NSpectrumSamples + v) / NSpectrumSamples,
+                                        OneMinusEpsilon);
+--- a/src/pbrt/film.h
++++ b/src/pbrt/film.h
+@@ -405,11 +405,21 @@
+     bool UsesVisibleSurface() const { return false; }
+ 
+     PBRT_CPU_GPU
+-    SampledWavelengths SampleWavelengths(Float u) const {
++    SampledWavelengths SampleWavelengths(Float u) const { return SampleWavelengths(u, nullptr); }
++
++    // open-cam (patch 0023): true if each wavelength gets its own offset in its stratum.
++    PBRT_CPU_GPU
++    bool JittersWavelengths() const { return lambdaDistrib || jitterWavelengths; }
++    PBRT_CPU_GPU
++    bool PixelRotatedWavelengths() const { return pixelRotatedWavelengths; }
++
++    // rot: NSpectrumSamples - 1 offsets shared by every sample of a pixel, or nullptr.
++    PBRT_CPU_GPU
++    SampledWavelengths SampleWavelengths(Float u, const Float *rot) const {
+         if (lambdaDistrib)
+-            return SampledWavelengths::SampleTabulatedJittered(u, *lambdaDistrib);
++            return SampledWavelengths::SampleTabulatedJittered(u, *lambdaDistrib, rot);
+         return jitterWavelengths
+-                   ? SampledWavelengths::SampleUniformJittered(u, lambdaMin, lambdaMax)
++                   ? SampledWavelengths::SampleUniformJittered(u, lambdaMin, lambdaMax, rot)
+                    : SampledWavelengths::SampleUniform(u, lambdaMin, lambdaMax);
+     }
+ 
+@@ -556,6 +566,7 @@
+     bool writeFP16;
+     // open-cam "bool jitterwavelengths" (default true): see SampleUniformJittered.
+     bool jitterWavelengths = true;
++    bool pixelRotatedWavelengths = true;  // open-cam patch 0023 ("wavelengthjitter" "pixel")
+     pstd::optional<PiecewiseConstant1D> lambdaDistrib;
+     Float filterIntegral;
+     Array2D<Pixel> pixels;
+--- a/src/pbrt/film.cpp
++++ b/src/pbrt/film.cpp
+@@ -1063,6 +1063,11 @@
+         filmBaseParameters, lambdaMin, lambdaMax, nBuckets, colorSpace, maxComponentValue,
+         writeFP16, alloc);
+     film->jitterWavelengths = parameters.GetOneBool("jitterwavelengths", true);
++    std::string wlJitter = parameters.GetOneString("wavelengthjitter", "pixel");
++    if (wlJitter != "pixel" && wlJitter != "sample")
++        ErrorExit(loc, "%s: unknown \"wavelengthjitter\" (use \"pixel\" or \"sample\")",
++                  wlJitter);
++    film->pixelRotatedWavelengths = wlJitter == "pixel";
+     std::vector<Float> bucketWeights = parameters.GetFloatArray("bucketweights");
+     if (!bucketWeights.empty()) {
+         if (int(bucketWeights.size()) != nBuckets)
+--- a/src/pbrt/cpu/integrators.cpp
++++ b/src/pbrt/cpu/integrators.cpp
+@@ -260,7 +260,22 @@
+         Float lu = sampler.Get1D();
+         if (Options->disableWavelengthJitter)
+             lu = 0.5;
+-        SampledWavelengths lambda = camera.GetFilm().SampleWavelengths(lu);
++        // open-cam (patch 0023): the spectral film's secondary wavelengths are offset from
++        // the first by a per-pixel random rotation, so which bucket each one lands in is set
++        // by lu alone and stays stratified over the pixel's samples. A fresh hash per sample
++        // (patch 0006) decorrelated buckets one stratum apart but lost that stratification.
++        const SpectralFilm *sf = camera.GetFilm().CastOrNullptr<SpectralFilm>();
++        SampledWavelengths lambda;
++        if (sf && sf->JittersWavelengths() && sf->PixelRotatedWavelengths()) {
++            Float rot[NSpectrumSamples - 1];
++            uint64_t h = Hash(pPixel, Options->seed);
++            for (int i = 0; i < NSpectrumSamples - 1; ++i)
++                rot[i] = Options->disableWavelengthJitter
++                             ? Float(0)
++                             : Float(MixBits(h + i) >> 40) * 0x1p-24f;
++            lambda = sf->SampleWavelengths(lu, rot);
++        } else
++            lambda = camera.GetFilm().SampleWavelengths(lu);
+         if (pass > 0)
+             lambda.RotateHero(pass);
+ 
