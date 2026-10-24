@@ -79,6 +79,43 @@ the tunnel `outside_in` view show no 1/64-frame tile that differs by more than t
 Unbiased renders converge more slowly where these paths matter (night scenes on wet roads especially),
 so raise `--pixelsamples` there rather than switch regularization back on.
 
+### Light sampling of headlamps and street lights (pbrt patch 0022)
+
+pbrt's BVH light sampler picks one light per shading point with probability proportional to a bound on
+its contribution. Stock pbrt bounds a goniometric lamp as an isotropic source of its *mean* intensity,
+which for a low beam (peak 30 kcd, mean 32 cd) is about 1/950 of the hot spot. Where the beam
+dominates, such as the lead car in front of the ego headlamps, the lamp was therefore picked rarely and
+its light arrived as bright isolated pixels. More path depth, more layer samples on the car paint, or the
+caustic photon split do not change it; the spikes are in the light choice.
+
+Patch 0022 builds a second light tree in which each goniometric lamp is bounded by its *peak* intensity
+inside a cone around its beam axis that holds every emitting direction. The default `"bvh"` sampler
+draws from a 50/50 mixture of the two trees, so the chance of picking any light is at least half of what
+either tree alone gives. The peak tree on its own makes the street-lit road noisier, because it over-
+samples headlamps outside their beam. The mixture changes only sampling probabilities, so the expected
+image is unchanged. Scenes without goniometric lamps use the stock tree only and render exactly as
+before. `"string lightsampler" "bvhmean"` selects the stock sampler.
+
+Highway night, wet road (EI 2027 driving figure, panel d), lead-car crop, default `maxdepth` 8, 256 spp,
+raw pbrt EXR, 4 seeds. Means are the 4-seed average (± its standard error), per-pixel noise the
+seed-to-seed RMS difference over the region mean:
+
+| region | mean, stock / patch | per-pixel noise, stock / patch |
+|---|---:|---:|
+| lead car | 88.1 ± 2.5 / 88.8 ± 0.6 | 451 % / 68 % |
+| road lit by street lights | 2.25 / 2.25 | 26 % / 31 % |
+| road right of the car | 0.30 / 0.30 | 134 % / 75 % |
+| sign gantry | 0.44 ± 0.05 / 0.39 ± 0.02 | 369 % / 140 % |
+| road just in front of the car | 0.57 ± 0.04 / 0.86 ± 0.07 | 1026 % / 540 % |
+| whole crop | 16.67 ± 0.36 / 16.79 ± 0.08 | 894 % / 147 % |
+
+The road just in front of the lead car is lit mostly by headlamp light reflected off the car, which
+the stock sampler reaches only through rare, very bright samples, so its mean converges slowly and from
+below. At 16384 spp that region is 0.848 ± 0.029 (8 seeds) with the stock sampler and 0.928 ± 0.009
+(4 seeds) with the patch. At 1024 spp it therefore gets brighter with the patch and shows some residual
+sparkle that the stock render mostly lacked. The patch costs about 25 % more render time on this scene,
+so at equal render time the lead car's per-pixel variance is still about 35x lower.
+
 ## Radiometry
 
 - Sun: `distant` light with a spectral direct-normal SPD (5778 K envelope x Rayleigh, aerosol,
