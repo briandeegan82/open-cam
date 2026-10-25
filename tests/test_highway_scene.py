@@ -358,6 +358,14 @@ def test_regularize_is_opt_in(tmp_path):
         assert ('"bool regularize" true' in scene) == bool(a)
 
 
+def test_sampler_defaults_to_pmj02bn_and_zsobol_stays_selectable(tmp_path):
+    for d, a, want in (("default", (), "pmj02bn"), ("zsobol", ("--sampler", "zsobol"), "zsobol")):
+        (tmp_path / d).mkdir()
+        build_without_assets(tmp_path / d, *a)
+        scene = (tmp_path / d / "scene" / "highway.pbrt").read_text()
+        assert f'Sampler "{want}" "integer pixelsamples" [' in scene
+
+
 def test_leaf_luminance_normalised_over_leaves_not_background(tmp_path):
     """A leaf atlas that is 75 % black background must average 1 over the leaf texels; averaging the
     whole atlas multiplied the leaves by 4x (and their R + T far above 1)."""
@@ -394,3 +402,65 @@ def test_two_builds_are_byte_identical(tmp_path):
     for f in files:
         if f.suffix in (".pbrt", ".json"):
             assert str(tmp_path) not in (sa / f).read_text(), f
+
+
+def _car_body(inst: str, paint: str) -> list[str]:
+    return [
+        f'MakeNamedMaterial "{inst}:Paint"',
+        '    "string type" "coateddiffuse"',
+        f'    "spectrum reflectance" "spd/carpaint_{paint}.spd"',
+        f'MakeNamedMaterial "{inst}:Black" "string type" "diffuse"',
+        f'MakeNamedMaterial "{inst}:Mix" "string type" "mix" "string materials" [ "{inst}:Black" "{inst}:Paint" ]',
+        f'MakeNamedMaterial "{inst}:Glass" "string type" "dielectric"',
+        "Scale 0.5 0.5 0.5",
+        "Translate 0 1 0",
+        f'NamedMaterial "{inst}:Paint"',
+        'Shape "plymesh" "string filename" "body.ply"',
+        f'NamedMaterial "{inst}:Glass"',
+        'Shape "plymesh" "string filename" "glass.ply"',
+        f'NamedMaterial "{inst}:Mix"',
+        'Shape "plymesh" "string filename" "trim.ply"',
+        f'NamedMaterial "{inst}:Black"',
+        'Shape "plymesh" "string filename" "tyre.ply"',
+    ]
+
+
+def test_car_instancing_shares_only_shapes_whose_materials_match():
+    bodies = {"car00": _car_body("car00", "red"), "car01": _car_body("car01", "blue")}
+    bodies["car02"] = _car_body("car02", "red") + ["AttributeBegin", "AttributeEnd"]  # unknown statement
+    defs, out = hw.instance_car_bodies(bodies)
+    text = "\n".join(defs)
+    # Glass and black tyre are shared; the paint and the mix that refers to the paint stay per car.
+    assert text.count("ObjectBegin") == 1 and 'ObjectBegin "car00:shared"' in text
+    assert "glass.ply" in text and "tyre.ply" in text
+    assert "body.ply" not in text and "trim.ply" not in text
+    assert 'MakeNamedMaterial "car00:shared:Glass"' in text and "carpaint" not in text
+
+    for inst in ("car00", "car01"):
+        body = "\n".join(out[inst])
+        assert 'ObjectInstance "car00:shared"' in body
+        assert "body.ply" in body and "trim.ply" in body and "glass.ply" not in body
+        assert body.index("ObjectInstance") < body.index("Scale")  # the object carries its own transform
+    assert out["car02"] == bodies["car02"]
+
+
+def test_car_instancing_leaves_single_cars_alone():
+    bodies = {"car00": _car_body("car00", "red")}
+    assert hw.instance_car_bodies(bodies) == ([], bodies)
+
+
+def test_car_instancing_defines_mix_parts_before_the_mix():
+    def body(inst: str, paint: str) -> list[str]:
+        return [
+            f'MakeNamedMaterial "{inst}:Paint" "string type" "coateddiffuse" "spectrum reflectance" "spd/{paint}.spd"',
+            f'MakeNamedMaterial "{inst}:L-black" "string type" "diffuse"',
+            f'MakeNamedMaterial "{inst}:L-white" "string type" "diffuse"',
+            f'MakeNamedMaterial "{inst}:L" "string type" "mix" "string materials" [ "{inst}:L-black" "{inst}:L-white" ]',
+            f'NamedMaterial "{inst}:Paint"',
+            'Shape "plymesh" "string filename" "body.ply"',
+            f'NamedMaterial "{inst}:L"',
+            'Shape "plymesh" "string filename" "seat.ply"',
+        ]
+
+    text = "\n".join(hw.instance_car_bodies({"a": body("a", "red"), "b": body("b", "blue")})[0])
+    assert text.index('"a:shared:L-black"') < text.index('MakeNamedMaterial "a:shared:L"')

@@ -1,0 +1,23 @@
+diff --git a/src/pbrt/lightsamplers.h b/src/pbrt/lightsamplers.h
+index 4b897bb..7dbd353 100644
+--- a/src/pbrt/lightsamplers.h
++++ b/src/pbrt/lightsamplers.h
+@@ -278,12 +278,15 @@ class BVHLightSampler {
+     PBRT_CPU_GPU
+     pstd::optional<SampledLight> Sample(const LightSampleContext &ctx, Float u) const {
+         if (exactBeams) {
++            // open-cam: each half's sampling routine already returns its own pmf for the
++            // drawn light, so only the other half's pmf has to be evaluated.
++            bool exact = u < 0.5f;
+             pstd::optional<SampledLight> s =
+-                u < 0.5f ? SampleExact(ctx, 2 * u)
+-                         : SampleOne(ctx, std::min<Float>(2 * u - 1, OneMinusEpsilon));
++                exact ? SampleExact(ctx, 2 * u)
++                      : SampleOne(ctx, std::min<Float>(2 * u - 1, OneMinusEpsilon));
+             if (!s)
+                 return {};
+-            s->p = 0.5f * (PMFExact(ctx, s->light) + PMFOne(ctx, s->light));
++            s->p = 0.5f * (exact ? s->p + PMFOne(ctx, s->light) : PMFExact(ctx, s->light) + s->p);
+             return s;
+         }
+         if (!beam)
