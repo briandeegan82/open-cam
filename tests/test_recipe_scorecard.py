@@ -231,6 +231,33 @@ def test_edge_mtf_noise_floor_grows_with_noise():
     assert 0 < floors[0] < floors[1]
 
 
+def test_failed_recipe_is_an_error_row_in_the_csv_and_exit_code_1(tmp_path, monkeypatch):
+    import csv
+
+    def score(recipe, renders, work, seed):
+        if recipe == "default":
+            raise RuntimeError("boom")
+        return {"recipe": recipe, "cfa": "bayer", "hdr": False, "edge_mtf50_cy_px": 0.3}
+
+    monkeypatch.setattr(sc, "render_scene", lambda *a, **k: {})
+    monkeypatch.setattr(sc, "score_recipe", score)
+    rc = sc.main(["--recipes", "default", "iphone_8", "--scenes", "skin", "--out-dir", str(tmp_path)])
+    assert rc == 1
+    rows = {r["recipe"]: r for r in csv.DictReader((tmp_path / "scorecard.csv").open())}
+    assert rows["default"]["error"] == "RuntimeError: boom"
+    assert rows["iphone_8"]["error"] == "" and rows["iphone_8"]["edge_mtf50_cy_px"] == "0.3"
+    assert "## Failed recipes" in (tmp_path / "scorecard.md").read_text()
+
+
+def test_noise_spread_is_half_the_plus_minus_difference_and_nan_on_failure():
+    assert sc.noise_spread(lambda a: a.sum(), np.ones(4), np.full(4, 0.25)) == pytest.approx(1.0)
+
+    def fails(a):
+        raise ValueError("no edge")
+
+    assert np.isnan(sc.noise_spread(fails, np.ones(4), np.ones(4)))
+
+
 def test_score_diorama_texture_acutance_matches_ground_truth():
     """The ROI sees the card inset by CARD_ROI_MARGIN; the reference must be that region at full resolution.
     (Zooming the whole card into the ROI read ~0.25 low with ~0.2 seed scatter.)"""
