@@ -291,11 +291,12 @@ class TestPipelineShellEnv(unittest.TestCase):
 
 class TestValidateEmvaModel(unittest.TestCase):
     def setUp(self) -> None:
-        import yaml
 
         self._tmp = tempfile.TemporaryDirectory()
         self.tmp = Path(self._tmp.name)
-        self.base = yaml.safe_load((REPO / "config" / "camera_models" / "default.yaml").read_text())
+        from camera_model import load_camera_model
+
+        self.base = load_camera_model(REPO / "config" / "camera_recipes" / "default.yaml")
 
     def tearDown(self) -> None:
         self._tmp.cleanup()

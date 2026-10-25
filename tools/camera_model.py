@@ -27,6 +27,7 @@ base is identical to using the override alone).
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -91,12 +92,32 @@ def _resolve_model_ref(repo: Path, root: Path, subdir: str, ref: str) -> Path:
     return (repo / "config" / subdir / f"{ref}.yaml").resolve()
 
 
+LEGACY_CAMERA_MODEL_DIR = Path(__file__).resolve().parents[1] / "config" / "camera_models"
+ALLOW_LEGACY_ENV = "OPENCAM_ALLOW_LEGACY_CAMERA_MODEL"
+
+
+def _check_not_legacy(path: Path) -> None:
+    """Refuse ``config/camera_models/*.yaml`` (stale, not lock-step with the recipes) unless opted in."""
+    p = Path(path).resolve()
+    if p.parent != LEGACY_CAMERA_MODEL_DIR or os.environ.get(ALLOW_LEGACY_ENV) == "1":
+        return
+    recipe = LEGACY_CAMERA_MODEL_DIR.parent / "camera_recipes" / p.name
+    hint = (
+        f"use {recipe.relative_to(LEGACY_CAMERA_MODEL_DIR.parents[1])}" if recipe.is_file() else "use a camera recipe"
+    )
+    raise ValueError(
+        f"{p.name} is a legacy config/camera_models file: its gain, noise and optics values differ from the "
+        f"maintained recipe ({hint}). Pass --allow-legacy-camera-model (run_pipeline) or set {ALLOW_LEGACY_ENV}=1."
+    )
+
+
 def load_camera_model(path: Path) -> dict:
+    _check_not_legacy(path)
     cfg = _load_yaml_mapping(path)
     required_full = ("lens", "sensor", "noise", "cfa", "sensor_forward")
     if all(key in cfg for key in required_full):
         # Full in-file model: deep-merge from defaults if a defaults file lives
-        # alongside (edge case: full camera model YAMLs in config/camera_models/).
+        # alongside (tests' temporary models; legacy config/camera_models/ only when opted in).
         return cfg
 
     # Recipe mode: compose a full in-memory camera model from split files.

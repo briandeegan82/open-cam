@@ -47,7 +47,7 @@ def test_glass_scales_with_thickness():
 
 
 def test_measured_cameras_skip_generic_ircf_research_cameras_use_hybrid():
-    for p in sorted((REPO / "config/camera_models").glob("*.yaml")):
+    for p in sorted((REPO / "config/sensor_models").glob("*.yaml")):
         qe = (yaml.safe_load(p.read_text()).get("sensor") or {}).get("quantum_efficiency") or {}
         if "spectra/QE/cameras/" in str(qe.get("red_csv", "")):
             assert qe.get("ircf_csv") is None, p.name
@@ -55,3 +55,15 @@ def test_measured_cameras_skip_generic_ircf_research_cameras_use_hybrid():
             assert qe["ircf_csv"] == "spectra/QE/ircf/QE_IRCF_hybrid.csv", p.name
             assert qe["ircf_coating_csv"] == "spectra/QE/ircf/QE_IRCF_hybrid_coating.csv", p.name
             assert str(qe["red_csv"]).startswith("spectra/QE/nir/"), p.name
+
+
+def test_legacy_camera_models_need_opt_in(monkeypatch):
+    import camera_model
+    import pytest
+
+    legacy = REPO / "config/camera_models/sony_alpha_6100.yaml"
+    monkeypatch.delenv(camera_model.ALLOW_LEGACY_ENV, raising=False)
+    with pytest.raises(ValueError, match="camera_recipes/sony_alpha_6100.yaml"):
+        camera_model.load_camera_model(legacy)
+    monkeypatch.setenv(camera_model.ALLOW_LEGACY_ENV, "1")
+    assert "sensor" in camera_model.load_camera_model(legacy)

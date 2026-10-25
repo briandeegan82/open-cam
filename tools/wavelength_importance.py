@@ -13,7 +13,7 @@ mixed with a uniform share ``--uniform-fraction`` (default 0.25) so every bucket
 A uniform share u multiplies the variance of the unweighted (e.g. NIR) buckets by up to 1/u, so
 use this only when the spectral EXR is consumed by the sensor the weights were built for.
 
-    venv/bin/python tools/wavelength_importance.py scene.pbrt --camera-model config/camera_models/sony_alpha_6100.yaml
+    venv/bin/python tools/wavelength_importance.py scene.pbrt --camera-model config/camera_recipes/sony_alpha_6100.yaml
 """
 
 from __future__ import annotations
@@ -24,10 +24,10 @@ import sys
 from pathlib import Path
 
 import numpy as np
-import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from camera_model import load_camera_model  # noqa: E402
 from pbrt_spectral_exr_to_electrons import qe_stack_on_lambdas  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[1]
@@ -100,7 +100,7 @@ def main(argv: list[str] | None = None) -> None:
     args = ap.parse_args(argv)
     text = args.scene.read_text()
     lo, hi, nb = film_params(text)
-    model = yaml.safe_load(args.camera_model.read_text())
+    model = load_camera_model(args.camera_model)
     w = bucket_weights(sensor_qe_config(model), lo, hi, nb, args.uniform_fraction)
     (args.out or args.scene).write_text(apply_to_scene(text, w))
     print(f"bucketweights ({nb} buckets, {lo:g}-{hi:g} nm): min {w.min():.3f} max {w.max():.3f}")
