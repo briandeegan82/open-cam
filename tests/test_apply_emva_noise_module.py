@@ -256,3 +256,26 @@ class TestPreviewCcmHelpers(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestNoiseStreams(_EmvaCase):
+    def _dark(self) -> Path:
+        return write_rgb_exr(self.tmp / "dark.exr", np.zeros((H, W, 3), np.float32))
+
+    def test_random_hot_pixels_are_fixed_across_frame_seeds(self) -> None:
+        defects = {"enabled": True, "hot_pixel_rate": 0.05, "hot_dark_e_min": 1500.0, "hot_dark_e_max": 1800.0}
+        self._config(exr=self._dark(), emva={"defect_pixels": defects})
+        masks = [self._run(seed=s)[1] > 1000 for s in (1, 2)]
+        self.assertGreater(int(masks[0].sum()), 0)
+        self.assertTrue(np.array_equal(*masks))
+
+    def test_switching_one_term_leaves_the_others_unchanged(self) -> None:
+        """Same frame seed with and without 1/f row flicker: the difference is the flicker offsets alone."""
+        self._config(processing={"exposure_scale_e_per_unit": 200.0})
+        _, a = self._run(seed=5)
+        self._config(processing={"exposure_scale_e_per_unit": 200.0}, emva={"flicker_noise_std_e": 4.0})
+        _, b = self._run(seed=5)
+        d = b.astype(np.float64) - a.astype(np.float64)
+        within_row = d - d.mean(axis=1, keepdims=True)
+        self.assertGreater(float(np.abs(d.mean(axis=1)).max()), 2.0)
+        self.assertLess(float(np.abs(within_row).max()), 1.01)  # DN rounding only

@@ -236,3 +236,28 @@ class TestBlooming(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestNoiseStreams(unittest.TestCase):
+    def test_spatial_seed_does_not_depend_on_where_the_checkout_lives(self):
+        import tempfile
+        from unittest import mock
+
+        seeds = []
+        for _ in range(2):
+            with tempfile.TemporaryDirectory() as d:
+                cfg = Path(d) / "config" / "camera_recipes" / "cam.yaml"
+                cfg.parent.mkdir(parents=True)
+                cfg.write_text("{}\n")
+                with mock.patch.object(aen, "_REPO", Path(d).resolve()):
+                    seeds.append(aen.default_spatial_seed(cfg))
+                    other = aen.default_spatial_seed(cfg.with_name("other.yaml"))
+        self.assertEqual(seeds[0], seeds[1])
+        self.assertNotEqual(seeds[0], other)
+
+    def test_named_streams_are_reproducible_and_independent(self):
+        a = aen.noise_stream(3, "shot").normal(size=1000)
+        self.assertTrue(np.array_equal(a, aen.noise_stream(3, "shot").normal(size=1000)))
+        b = aen.noise_stream(3, "read").normal(size=1000)
+        self.assertLess(abs(np.corrcoef(a, b)[0, 1]), 0.1)
+        self.assertFalse(np.array_equal(a, aen.noise_stream(4, "shot").normal(size=1000)))

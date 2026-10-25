@@ -845,6 +845,25 @@ def random_telegraph_offsets(
     return off, stats
 
 
+_REPO = Path(__file__).resolve().parents[1]
+
+
+def noise_stream(seed: int, name: str) -> np.random.Generator:
+    """Generator for one named noise term, independent of the other terms drawn from the same seed."""
+    return np.random.default_rng([int(seed), int.from_bytes(name.encode(), "big")])
+
+
+def default_spatial_seed(cfg_path: Path | None) -> int:
+    """Per-camera fixed-pattern seed from the camera config's repo-relative path (its file name
+    outside the repo), so the seed does not depend on where the checkout lives."""
+    if cfg_path is None:
+        key = "None"
+    else:
+        p = Path(cfg_path).resolve()
+        key = p.relative_to(_REPO).as_posix() if p.is_relative_to(_REPO) else p.name
+    return int(hashlib.sha256(key.encode()).hexdigest()[:16], 16) & 0x7FFFFFFF
+
+
 def apply_hot_stuck_pixel_model(
     signal_e: np.ndarray,
     rng: np.random.Generator,
@@ -1290,17 +1309,17 @@ def main() -> None:
     bloom_spread = float(bloom_cfg.get("spread_fraction", 0.5))
     bloom_max_iters = int(bloom_cfg.get("max_iters", 20))
 
-    # Stable per-camera seed for fixed spatial patterns (PRNU, DSNU).
+    # Stable per-camera seed for fixed spatial patterns (PRNU, DSNU, defects).
     # These represent physical properties of the sensor silicon that are the same
     # across every frame from the same camera unit.
     # If emva.spatial_noise_seed is set in YAML, use it directly.
-    # Otherwise, derive a reproducible integer from the config file path so each
-    # camera model gets its own unique but deterministic pattern.
+    # Otherwise, derive it from the config's repo-relative path, so each camera model gets its
+    # own pattern and the same camera is the same unit in every checkout.
     _spatial_seed_cfg = emva.get("spatial_noise_seed", None)
     if _spatial_seed_cfg is not None:
         _spatial_seed = int(_spatial_seed_cfg)
     else:
-        _spatial_seed = int(hashlib.sha256(str(cfg_path).encode()).hexdigest()[:16], 16) & 0x7FFFFFFF
+        _spatial_seed = default_spatial_seed(cfg_path)
     spatial_rng = np.random.default_rng(_spatial_seed)
 
     adc_inl_quad_fraction = float(adc.get("inl_quadratic_fraction", 0.0))
@@ -1454,10 +1473,18 @@ def main() -> None:
             exposure_scale = float(args.target_fullwell_fraction) * full_well_e / pctl
         signal_e = e_nominal * exposure_scale
 
-    rng = np.random.default_rng(args.seed)
+    # One generator per temporal noise term, so switching a term on or off (or changing its
+    # size) leaves the realisation of every other term unchanged.
+    rng_rowcol = noise_stream(args.seed, "rowcol")
+    rng_flicker = noise_stream(args.seed, "flicker")
+    rng_shot = noise_stream(args.seed, "shot")
+    rng_read = noise_stream(args.seed, "read")
+    rng_ktc = noise_stream(args.seed, "ktc")
+    rng_rts = noise_stream(args.seed, "rts")
+    # Hot/stuck pixels are fixed defects of the camera unit: draw them from the spatial seed.
     signal_e, defect_stats = apply_hot_stuck_pixel_model(
         signal_e,
-        rng,
+        noise_stream(_spatial_seed, "defects"),
         defect_cfg,
         full_well_e,
         persistent_map_npz=persistent_map_path,
@@ -1620,13 +1647,13 @@ def main() -> None:
     )
 
     # Row/column readout amplifier noise: temporal banding that changes every frame.
-    row_fpn, col_fpn = row_column_fpn_offsets(signal_e.shape, row_fpn_std_e, col_fpn_std_e, rng)
+    row_fpn, col_fpn = row_column_fpn_offsets(signal_e.shape, row_fpn_std_e, col_fpn_std_e, rng_rowcol)
 
     # ---- 1/f (flicker) noise: pink-spectrum row offsets ----
     # Drawn from the temporal rng, so it differs every frame.
     flicker_row_e = np.zeros(1, dtype=np.float32)
     if flicker_noise_std_e > 0.0:
-        _pink = flicker_row_offsets(signal_e.shape[0], flicker_noise_std_e, rng)
+        _pink = flicker_row_offsets(signal_e.shape[0], flicker_noise_std_e, rng_flicker)
         if signal_e.ndim == 2:
             flicker_row_e = _pink[:, np.newaxis]
         else:
@@ -1644,7 +1671,7 @@ def main() -> None:
     # before readout, so the clip must be applied to shot_e alone, not to (shot_e + readout).
     mean_e = signal_e * prnu_map + dark_mean_e + dsnu_map
     if use_poisson:
-        shot_e = rng.poisson(np.maximum(mean_e, 0.0)).astype(np.float32)
+        shot_e = rng_shot.poisson(np.maximum(mean_e, 0.0)).astype(np.float32)
     else:
         shot_e = np.maximum(mean_e, 0.0).astype(np.float32)
 
@@ -1685,11 +1712,11 @@ def main() -> None:
         raise ValueError('cfa.binning must be "none", "charge" or "digital"')
 
     # ---- Additive Gaussian readout noise (post-Poisson, includes kTC when enabled) ----
-    read_e = rng.normal(0.0, sigma_d_e, size=signal_e.shape).astype(np.float32)
+    read_e = rng_read.normal(0.0, sigma_d_e, size=signal_e.shape).astype(np.float32)
     if sigma_ktc_e > 0.0:
-        read_e = read_e + rng.normal(0.0, sigma_ktc_e, size=signal_e.shape).astype(np.float32)
+        read_e = read_e + rng_ktc.normal(0.0, sigma_ktc_e, size=signal_e.shape).astype(np.float32)
     rts_e, rts_stats = random_telegraph_offsets(
-        signal_e.shape, emva.get("random_telegraph_noise") or {}, _spatial_seed, rng
+        signal_e.shape, emva.get("random_telegraph_noise") or {}, _spatial_seed, rng_rts
     )
     if rts_e is not None:
         read_e = read_e + rts_e
