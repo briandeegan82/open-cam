@@ -34,6 +34,16 @@ relative to the sky), converts the sky to pbrt's equal-area format, converts the
 vegetation to PLY, and indexes the car scenes' materials and meshes. The Bitterli car zips
 also contain an `envmap.pfm` that is *not* CC0; it is never used.
 
+Cars of the same model share their geometry (`instance_car_bodies` in `build_highway_scene.py`,
+also used by the urban and garage builders): every mesh whose material is identical in all
+copies of the model goes into one `ObjectBegin "<first car>:shared"` definition, which each
+`cars/carNN.pbrt` places with `ObjectInstance`; the paint, and any mix material that refers to
+it, stays a per-car mesh. Motion blur (`--animate`) still works, because pbrt applies the
+instance's animated transform. On the night wet highway (1280x720, 64 spp, 3 alternating runs)
+peak pbrt memory drops from 3.56 to 2.87 GB with unchanged render time (70.2 +/- 2.1 s vs
+70.3 +/- 6.7 s) and an unchanged image (frame mean ratio 0.9998, every 4x4-tile mean within
+1.2 sigma of the 3-seed noise).
+
 ## Build, render, convert
 
 ```bash
