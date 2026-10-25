@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pbrt_patchstamp as ps
 
+REPO = Path(__file__).resolve().parents[1]
+
 
 def _patches(d: Path, files: dict[str, str]) -> Path:
     d.mkdir()
@@ -36,3 +38,11 @@ def test_build_script_writes_the_same_stamp():
     script = (ps.REPO / "tools" / "build_pbrt.sh").read_text()
     assert "export LC_ALL=C" in script
     assert 'pbrt_patchstamp.py" >"$build/pbrt.patchstamp"' in script
+
+
+def test_nspectrum_patch_is_opt_in() -> None:
+    patch = (REPO / "third_party/patches/0029-nspectrum-build-option.patch").read_text()
+    assert "#define PBRT_NSPECTRUM 4" in patch
+    assert "+static constexpr int NSpectrumSamples = PBRT_NSPECTRUM;" in patch
+    script = (REPO / "tools/build_pbrt.sh").read_text()
+    assert "${PBRT_NSPECTRUM:+-DPBRT_NSPECTRUM=${PBRT_NSPECTRUM}}" in script
