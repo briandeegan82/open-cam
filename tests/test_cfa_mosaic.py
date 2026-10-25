@@ -416,3 +416,23 @@ def test_desaturate_near_clip_whitens_fringes_only():
     y = rgb[0, 0] @ np.array([0.2126, 0.7152, 0.0722])
     np.testing.assert_allclose(out[:, 8].mean(axis=-1), y)  # luminance kept
     assert cm.desaturate_near_clip(rgb, raw, None) is rgb
+
+
+@pytest.mark.parametrize("pattern", ["RGGB", "BGGR", "GRBG", "GBRG"])
+def test_malvar_on_bayer_layouts_is_the_real_malvar(pattern):
+    lay = cm.CfaLayout(tile=(tuple(pattern[:2]), tuple(pattern[2:])), qe_csv={"R": "r", "G": "g", "B": "b"})
+    assert cm.bayer_pattern(lay) == pattern
+    rng = np.random.default_rng(0)
+    raw = rng.random((32, 32))
+    out = cm.demosaic(raw, lay, "malvar")
+    ref = apply_emva_noise.malvar_demosaic(raw, pattern)
+    np.testing.assert_array_equal(out, ref[..., ["RGB".index(c) for c in lay.channels]])
+
+
+def test_malvar_on_a_non_bayer_layout_warns_and_uses_the_gradient_method():
+    lay = cm.CfaLayout(tile=(("R", "C"), ("C", "B")), qe_csv={"R": "r", "C": "c", "B": "b"}, name="rccb")
+    assert cm.bayer_pattern(lay) is None
+    raw = np.random.default_rng(1).random((16, 16))
+    with pytest.warns(UserWarning, match="Bayer-only"):
+        out = cm.demosaic(raw, lay, "malvar")
+    np.testing.assert_array_equal(out, cm.demosaic_gradient(raw, lay))
