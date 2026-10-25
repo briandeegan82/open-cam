@@ -73,6 +73,19 @@ Useful options: `--sky {kloofendal_43d_clear,kloofendal_48d_partly_cloudy,syferf
 `--allow-missing-assets` builds without any downloads (proxy cars, analytic sky, untextured
 surfaces); the tests use it.
 
+### Derived-texture cache (`tools/derived_cache.py`)
+
+Detiled road maps, tonal masks, luminance maps, normal-map PNGs and road-wear maps are generated
+once into a shared cache, `scenes/assets/derived/` (or `$OPENCAM_DERIVED_CACHE`), and hard-linked
+into each out-dir's `textures/` (copied if hard links fail). Each entry's key hashes the generating
+code (module or function source), every parameter, and the sha256 of the source assets. So a change
+to `detile()`, a parameter or an asset makes a new entry. Before, files were found by name only, and
+an old map in a reused out-dir was silently kept. The scene text and every texture are byte-identical
+to an uncached build.
+
+Road-wear entries hold the float32 maps (about 180 MB per level/seed/geometry). Delete the directory
+at any time to reclaim the space; it is rebuilt on demand.
+
 ### Eight wavelengths per path (opt-in build, pbrt patch 0029)
 
 Stock pbrt carries 4 wavelengths per camera path (`NSpectrumSamples`). Patch 0029 makes this a build

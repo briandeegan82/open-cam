@@ -40,10 +40,13 @@ import copy
 import json
 import math
 import os
+import pickle
+import sys
 import zlib
 from collections import OrderedDict
 from pathlib import Path
 
+import derived_cache
 import numpy as np
 
 # Per-level parameters. Spacings/frequencies are typical of an ageing (~10-15 year old) interstate
@@ -154,13 +157,11 @@ def linear_normal_map(src: Path, out_dir: Path) -> Path:
     """
     if src.suffix.lower() == ".png":
         return src
-    dst = out_dir / f"{src.stem}.png"
-    if not dst.is_file():
-        from PIL import Image
+    from PIL import Image
 
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        Image.open(src).convert("RGB").save(dst)
-    return dst
+    dst = out_dir / f"{src.stem}.png"
+    k = derived_cache.key("normal", [linear_normal_map], [src])
+    return derived_cache.materialize(k, [dst], lambda ps: Image.open(src).convert("RGB").save(ps[0]))[0]
 
 
 def _load_maps(info: dict, raw: Path, n: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -215,7 +216,8 @@ def detiled_maps(aid: str, info: dict, raw: Path, tex_dir: Path, seed: int, rota
     """Anti-tiled TILE_M periodic [luminance, roughness] EXRs (mean 1) and normal-map PNG of an ambientCG texture."""
     stem = tex_dir / f"{aid}_detile{TILE_M:g}m{'' if rotate else '_norot'}_s{seed}"
     paths = [Path(f"{stem}_{s}") for s in ("lum.exr", "rough.exr", "normal.png")]
-    if not all(q.is_file() for q in paths):
+
+    def make(paths: list[Path]) -> None:
         src_m = float(info["tile_size_m"])
         n_src = round(TILE_PX * src_m / TILE_M)
         chans = list(_load_maps(info, raw, n_src))
@@ -231,7 +233,12 @@ def detiled_maps(aid: str, info: dict, raw: Path, tex_dir: Path, seed: int, rota
         nz = np.sqrt(np.clip(1.0 - nx**2 - ny**2, 0.04, 1.0))
         n = np.stack([nx, ny, nz], axis=-1)
         _write_normal_png(paths[2], n / np.linalg.norm(n, axis=-1, keepdims=True))
-    return paths
+
+    srcs = sorted(raw / m for m in info.get("maps", {}).values() if (raw / m).is_file())
+    k = derived_cache.key(
+        "detile", [sys.modules[__name__]], srcs, aid=aid, info=info, tile=[TILE_M, TILE_PX], seed=seed, rotate=rotate
+    )
+    return derived_cache.materialize(k, paths, make)
 
 
 TONE_TILE_M, TONE_TEXEL_M, TONE_CORR_M, TONE_SD = 60.0, 0.25, 3.0, 0.08
@@ -243,12 +250,15 @@ def tonal_mask(tex_dir: Path, seed: int) -> Path:
     Multiplied onto a pavement texture so its own repeat (2.4 m concrete, 1.15-3.5 m paving) no longer
     lines up into bands; the values are nominal, not measured pavement statistics."""
     path = tex_dir / f"tone{TONE_TILE_M:g}m_s{seed}.exr"
-    if not path.is_file():
+
+    def make(ps: list[Path]) -> None:
         n = round(TONE_TILE_M / TONE_TEXEL_M)
         a = periodic_noise(np.random.default_rng([seed, 0x70E]), (n, n), (TONE_TEXEL_M,) * 2, (TONE_CORR_M,) * 2)
         a = np.clip(1.0 + TONE_SD * a, 0.6, 1.4)
-        write_float_exr(path, a / a.mean())
-    return path
+        write_float_exr(ps[0], a / a.mean())
+
+    k = derived_cache.key("tone", [sys.modules[__name__]], seed=seed)
+    return derived_cache.materialize(k, [path], make)[0]
 
 
 # Wear maps of recent (level, texel, geometry, rng state) keys: tests and sweeps rebuild the same
@@ -279,13 +289,11 @@ class RoadWear:
     def wear_maps(self) -> dict[str, np.ndarray]:
         """Seeded wear maps; repeated identical builds in one process reuse them (byte-identical)."""
         key = json.dumps([self.level, self.texel, self.geom, self.rng.bit_generator.state], sort_keys=True, default=str)
+        self._wear_key = derived_cache.key("wear", [sys.modules[__name__]], key=key)
         hit = _WEAR_CACHE.get(key)
         if hit is None:
-            before = dict(self.summary)
-            maps = self._compute_wear_maps()
-            extra = {k: v for k, v in self.summary.items() if before.get(k, object()) != v}
-            hit = (maps, self.wheel_map, self.texel_zx, extra, copy.deepcopy(self.rng.bit_generator.state))
-            for a in (*maps.values(), self.wheel_map):
+            hit = self._wear_maps_disk()
+            for a in (*hit[0].values(), hit[1]):
                 a.flags.writeable = False
             _WEAR_CACHE[key] = hit
             while len(_WEAR_CACHE) > _WEAR_CACHE_SIZE:
@@ -296,6 +304,23 @@ class RoadWear:
         self.summary.update(copy.deepcopy(extra))
         self.rng.bit_generator.state = copy.deepcopy(state)
         return dict(maps)
+
+    def _wear_maps_disk(self) -> tuple:
+        """(maps, wheel map, texel_zx, summary additions, rng state after), via the derived-texture cache."""
+
+        def make(ps: list[Path]) -> None:
+            before = dict(self.summary)
+            maps = self._compute_wear_maps()
+            extra = {k: v for k, v in self.summary.items() if before.get(k, object()) != v}
+            np.savez(ps[0], wheel_map=self.wheel_map, **{f"map_{k}": a for k, a in maps.items()})
+            ps[1].write_bytes(pickle.dumps((list(maps), self.texel_zx, extra, self.rng.bit_generator.state)))
+
+        e = derived_cache.entry(self._wear_key, ["maps.npz", "meta.pkl"], make)
+        names, texel_zx, extra, state = pickle.loads((e / "meta.pkl").read_bytes())
+        with np.load(e / "maps.npz") as z:
+            maps = {k: z[f"map_{k}"] for k in names}
+            wheel = z["wheel_map"]
+        return maps, wheel, texel_zx, extra, state
 
     def _compute_wear_maps(self) -> dict[str, np.ndarray]:
         g, p, rng = self.geom, self.p, self.rng
@@ -455,8 +480,13 @@ class RoadWear:
         maps = self.wear_maps()
         g = self.geom
         tag = f"{self.level}_s{self.seed}"
-        for k, a in maps.items():
-            write_float_exr(self.tex_dir / f"wear_{tag}_{k}.exr", a)
+        exrs = [self.tex_dir / f"wear_{tag}_{k}.exr" for k in maps]
+
+        def write(ps: list[Path]) -> None:
+            for p, a in zip(ps, maps.values()):
+                write_float_exr(p, a)
+
+        derived_cache.materialize(self._wear_key + "-exr", exrs, write)
         aged = np.loadtxt(spd_dir / "asphalt_aged.spd")[:, 1]
         self.summary["luminous_reflectance"] = self.reflectance_stats(maps, wl, aged)
         w_m = float(g["x1"] - g["x0"])
