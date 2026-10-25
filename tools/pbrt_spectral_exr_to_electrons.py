@@ -480,7 +480,7 @@ def main() -> None:
         preview = np.clip(preview / p99, 0.0, 1.0)
     preview_u8 = np.rint(preview * 255.0).astype(np.uint8)
 
-    np.savez_compressed(
+    np.savez(  # uncompressed: zlib was ~30 % of this stage for a 13 % smaller file
         out_npz,
         electrons_rgb=electrons,
         wavelength_nm=lam.astype(np.float32),

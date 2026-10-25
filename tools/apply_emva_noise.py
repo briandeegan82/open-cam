@@ -405,7 +405,7 @@ def _demosaic_rggb_malvar(raw: np.ndarray) -> np.ndarray:
     Significantly reduces zipper artefacts and false colour at luminance edges
     compared to bilinear interpolation.
     """
-    from scipy.signal import convolve2d  # noqa: PLC0415
+    from scipy.ndimage import convolve  # noqa: PLC0415
 
     raw = np.asarray(raw, dtype=np.float64)
     h0, w0 = raw.shape
@@ -414,7 +414,7 @@ def _demosaic_rggb_malvar(raw: np.ndarray) -> np.ndarray:
         raw = np.pad(raw, ((0, ph), (0, pw)), mode="edge")
 
     def _conv(img: np.ndarray, k: np.ndarray) -> np.ndarray:
-        return convolve2d(img, k, mode="same", boundary="symm")
+        return convolve(img, k, mode="reflect")  # = convolve2d(same, symm); no scipy.signal import
 
     # G interpolation at R and B sites (same kernel for both).
     K_G = (
