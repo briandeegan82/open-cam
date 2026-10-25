@@ -85,3 +85,13 @@ class TestPipelineConfigSemantics(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_python_and_shell_pipelines_share_the_illuminant_default():
+    """An unset render.illuminant must give the same white point in run_pipeline and the shell scripts."""
+    from tools import pipeline_shell_env, run_pipeline
+
+    for render in ({}, {"illuminant": None}, {"illuminant": "  "}, {"illuminant": "null"}):
+        assert run_pipeline.resolve_illuminant_rel(render) == pipeline_shell_env.resolve_illuminant_rel(render)
+        assert pipeline_shell_env.resolve_illuminant_rel(render).endswith("D65.csv")
+    assert pipeline_shell_env.resolve_illuminant_rel({"illuminant": " spectra/x.csv "}) == "spectra/x.csv"
