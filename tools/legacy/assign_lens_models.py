@@ -32,7 +32,7 @@ from pathlib import Path
 
 import yaml
 
-REPO = Path(__file__).resolve().parent.parent
+REPO = Path(__file__).resolve().parents[2]
 
 # Lens model name by sensor class label.
 _CLASS_TO_LENS: dict[str, str] = {
