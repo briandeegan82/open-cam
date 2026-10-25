@@ -394,3 +394,16 @@ class TestIndicatorsReversing(unittest.TestCase):
             # z <= 0.007 (white).
             self.assertLessEqual(y / s, 0.429)
             self.assertLessEqual(z / s, 0.01)
+
+
+def test_grid_ray_casts_are_memoised_per_surface():
+    import highway_taillamps as tl
+
+    surf = tl.proxy_surface()
+    args = (surf, 0.3, 0.8, 0.6, 0.9, -2.315, ())
+    g = tl._grid(*args)
+    assert tl._grid(*args) is g
+    assert not g.mask.flags.writeable and not g.corners.flags.writeable
+    fresh = tl._grid_cells(*args)
+    assert np.array_equal(g.mask, fresh.mask) and np.array_equal(g.corners, fresh.corners)
+    assert g.surface == fresh.surface == "mesh"
