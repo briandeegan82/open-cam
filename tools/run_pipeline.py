@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -112,8 +113,15 @@ def main() -> None:
         help="Camera model YAML (default: pipeline paths.camera_model_config)",
     )
     ap.add_argument("--dry-run", action="store_true", help="Print commands only; do not execute.")
+    ap.add_argument(
+        "--allow-legacy-camera-model",
+        action="store_true",
+        help="Allow config/camera_models/*.yaml (stale legacy models; prefer config/camera_recipes).",
+    )
     ap.add_argument("--name", type=str, default=None, help="Optional run name for manifest filename.")
     args = ap.parse_args()
+    if args.allow_legacy_camera_model:
+        os.environ["OPENCAM_ALLOW_LEGACY_CAMERA_MODEL"] = "1"  # also seen by the stage subprocesses
 
     repo = args.repo_root.resolve()
     cfg_path = (args.config or (repo / "config" / "pipeline.yaml")).resolve()

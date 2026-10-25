@@ -11,16 +11,16 @@ from pathlib import Path
 
 import numpy as np
 import wavelength_importance as wi
-import yaml
+from camera_model import load_camera_model
 from exr_multispectral import parse_s0_wavelength_nm, read_separate_exr_channels
 from synthetic_data import REPO
 
 PBRT = Path(os.environ.get("OPENCAM_PBRT", REPO / "third_party" / "pbrt-v4" / "build" / "pbrt"))
-SONY = REPO / "config/camera_models/sony_alpha_6100.yaml"
+SONY = REPO / "config/camera_recipes/sony_alpha_6100.yaml"
 
 
 def _qe() -> dict:
-    return wi.sensor_qe_config(yaml.safe_load(SONY.read_text()))
+    return wi.sensor_qe_config(load_camera_model(SONY))
 
 
 class TestBucketWeights(unittest.TestCase):
