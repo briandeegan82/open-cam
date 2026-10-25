@@ -24,6 +24,7 @@ from camera_model import (
     sensor_forward_config_from_camera_model,
 )
 from exr_multispectral import spectral_buckets_from_exr, trapezoid_weights_nm
+from image_io import write_png
 from olpf import apply_cube as apply_olpf_cube
 from pixel_angular_response import apply_pixel_angular_response, pixel_angular_response_cfg
 from qe_curves import load_qe_curves_rgb, read_csv_curve
@@ -494,12 +495,7 @@ def main() -> None:
             for k, v in meta.items()
         },
     )
-    try:
-        import imageio.v3 as iio
-
-        iio.imwrite(out_npz.with_suffix(".png"), preview_u8)
-    except Exception:
-        pass
+    write_png(out_npz.with_suffix(".png"), preview_u8)
 
     print(f"Wrote electrons npz (from PBRT spectral EXR): {out_npz}")
     print(f"Wrote preview png: {out_npz.with_suffix('.png')}")

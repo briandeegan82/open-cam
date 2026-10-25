@@ -14,6 +14,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+from image_io import write_exr
 
 # Spectral luminous efficacy (lm/W) and the extraterrestrial direct-normal illuminance.
 SOLAR_ILLUMINANCE_CONSTANT_LUX = 128_000.0
@@ -82,12 +83,7 @@ def read_rgb_exr(path: Path) -> np.ndarray:
 
 
 def write_rgb_exr(path: Path, rgb: np.ndarray) -> None:
-    import OpenEXR
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    header = {"compression": OpenEXR.ZIP_COMPRESSION, "type": OpenEXR.scanlineimage}
-    with OpenEXR.File(header, {"RGB": np.ascontiguousarray(rgb, dtype=np.float32)}) as f:
-        f.write(str(path))
+    write_exr(path, {"RGB": rgb})
 
 
 def excise_sun(img: np.ndarray, *, core_deg: float = 0.75, search_deg: float = 4.0) -> tuple[np.ndarray, dict]:

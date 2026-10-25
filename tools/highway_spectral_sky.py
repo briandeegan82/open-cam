@@ -33,6 +33,7 @@ from pathlib import Path
 import numpy as np
 from colour_science import cmf_on_grid
 from highway_sky import equal_area_directions, read_rgb_exr
+from image_io import write_exr
 
 REPO = Path(__file__).resolve().parents[1]
 DAYLIGHT_CSV = REPO / "spectra" / "illuminant" / "original" / "CIE_illum_Dxx_comp.csv"
@@ -322,13 +323,7 @@ def prague_swir_tails(
 
 def write_weight_exr(path: Path, w: np.ndarray) -> None:
     """Basis-weight map as a float EXR with channels B0..B{K-1} (pbrt patch convention)."""
-    import OpenEXR
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    header = {"compression": OpenEXR.ZIP_COMPRESSION, "type": OpenEXR.scanlineimage}
-    chans = {f"B{k}": np.ascontiguousarray(w[..., k], dtype=np.float32) for k in range(w.shape[-1])}
-    with OpenEXR.File(header, chans) as f:
-        f.write(str(path))
+    write_exr(path, {f"B{k}": w[..., k] for k in range(w.shape[-1])})
 
 
 def read_weight_exr(path: Path) -> np.ndarray:
