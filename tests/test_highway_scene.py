@@ -358,6 +358,14 @@ def test_regularize_is_opt_in(tmp_path):
         assert ('"bool regularize" true' in scene) == bool(a)
 
 
+def test_sampler_defaults_to_pmj02bn_and_zsobol_stays_selectable(tmp_path):
+    for d, a, want in (("default", (), "pmj02bn"), ("zsobol", ("--sampler", "zsobol"), "zsobol")):
+        (tmp_path / d).mkdir()
+        build_without_assets(tmp_path / d, *a)
+        scene = (tmp_path / d / "scene" / "highway.pbrt").read_text()
+        assert f'Sampler "{want}" "integer pixelsamples" [' in scene
+
+
 def test_leaf_luminance_normalised_over_leaves_not_background(tmp_path):
     """A leaf atlas that is 75 % black background must average 1 over the leaf texels; averaging the
     whole atlas multiplied the leaves by 4x (and their R + T far above 1)."""
