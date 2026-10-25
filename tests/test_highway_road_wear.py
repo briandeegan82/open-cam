@@ -179,3 +179,43 @@ class TestBuilderHook(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestWearCache(unittest.TestCase):
+    def _fresh(self) -> tuple[rw.RoadWear, dict]:
+        w = rw.RoadWear("moderate", 7, Path(tempfile.gettempdir()), _geom(), 0.05)
+        return w, w.wear_maps()
+
+    def test_cache_hit_matches_cold_compute(self) -> None:
+        rw._WEAR_CACHE.clear()
+        w0, m0 = self._fresh()
+        after0 = w0.rng.random(4)
+        self.assertEqual(len(rw._WEAR_CACHE), 1)
+        w1, m1 = self._fresh()
+        after1 = w1.rng.random(4)
+        self.assertEqual(len(rw._WEAR_CACHE), 1)
+        self.assertEqual(sorted(m0), sorted(m1))
+        for k in m0:
+            np.testing.assert_array_equal(m0[k], m1[k])
+        np.testing.assert_array_equal(w0.wheel_map, w1.wheel_map)
+        self.assertEqual(w0.summary, w1.summary)
+        np.testing.assert_array_equal(after0, after1)  # rng continues as after a cold compute
+        with self.assertRaises(ValueError):
+            m1["mul"][0, 0] = 0.0  # cached maps are shared, so read-only
+
+    def test_rebuild_is_byte_identical(self) -> None:
+        rw._WEAR_CACHE.clear()
+        outs = []
+        with tempfile.TemporaryDirectory() as td:
+            for i in range(2):
+                d = Path(td) / str(i)
+                d.mkdir()
+                build_without_assets(d, "--road-wear-texel-m", "0.1")
+                tex = d / "scene" / "textures" / "road_wear"
+                outs.append(
+                    (
+                        (d / "scene" / "highway.pbrt").read_text().replace(str(d), "<out>"),
+                        {p.name: p.read_bytes() for p in sorted(tex.iterdir())},
+                    )
+                )
+        self.assertEqual(outs[0], outs[1])

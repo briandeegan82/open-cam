@@ -42,7 +42,7 @@ PREPARED_VERSION = 2
 
 
 def load_asset_manifest(path: Path = DEFAULT_MANIFEST) -> dict:
-    data = yaml.safe_load(Path(path).read_text())
+    data = yaml.load(Path(path).read_text(), Loader=getattr(yaml, "CSafeLoader", yaml.SafeLoader))
     for aid, a in data["assets"].items():
         for key in ("kind", "source", "license", "title"):
             if not a.get(key):
