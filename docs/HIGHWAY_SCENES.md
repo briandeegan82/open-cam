@@ -60,6 +60,22 @@ Useful options: `--sky {kloofendal_43d_clear,kloofendal_48d_partly_cloudy,syferf
 `--allow-missing-assets` builds without any downloads (proxy cars, analytic sky, untextured
 surfaces); the tests use it.
 
+### Eight wavelengths per path (opt-in build, pbrt patch 0029)
+
+Stock pbrt carries 4 wavelengths per camera path (`NSpectrumSamples`). Patch 0029 makes this a build
+macro, `PBRT_NSPECTRUM` (default 4), so an 8-wavelength binary can be built next to the default one:
+
+```bash
+PBRT_NATIVE=OFF PBRT_NSPECTRUM=8 PBRT_BUILD_DIR=third_party/pbrt-v4/build-ns8 tools/build_pbrt.sh
+```
+
+The estimator is unchanged. Each path just splats twice as many stratified wavelengths, so both builds
+converge to the same image. Measured on the night wet-highway lead-car crop (`0.38,0.62,0.45,0.75` of
+1280x720, zsobol 256 spp, 32 buckets, seeds 1–4): crop mean ratio 1.0006 and largest per-bucket |z| 1.8.
+Time per render was 35.5 ± 1.6 → 37.1 ± 0.9 s (+5 %). Median per-pixel seed noise in the 500–600 nm band
+was 14.5 → 9.4 % on the lead car and 43 → 32 % on the flat road. On the sparkling wet road, the
+firefly-dominated noise was not resolved with 4 seeds (46 → 54 % at 500–600 nm, 38 → 30 % at 600–700 nm).
+
 ### Path regularization (`--regularize`, off by default)
 
 The highway, urban, rural, garage and tunnel builders write pbrt's unbiased path tracer by default.

@@ -4,6 +4,8 @@
 # never changed). Usage: tools/build_pbrt.sh [--apply-only|--patch-only] [extra cmake --build args]
 # NIR build (spectral range 360..PBRT_LAMBDA_MAX_NM, patch 0002):
 #   PBRT_LAMBDA_MAX_NM=1100 PBRT_BUILD_DIR=third_party/pbrt-v4/build-nir tools/build_pbrt.sh
+# 8 wavelengths per path instead of 4 (patch 0029; opt-in, own build dir):
+#   PBRT_NSPECTRUM=8 PBRT_BUILD_DIR=third_party/pbrt-v4/build-ns8 tools/build_pbrt.sh
 set -euo pipefail
 export LC_ALL=C  # patch glob order = byte order of the file names, on every machine
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -45,7 +47,7 @@ case "${1:-}" in --apply-only | --patch-only) exit 0 ;; esac
 
 env -u PBRT_OPTIX_PATH cmake -S "$src" -B "$build" -DCMAKE_BUILD_TYPE=Release \
   -DPBRT_BUILD_NATIVE_EXECUTABLE="${PBRT_NATIVE:-ON}" \
-  -DCMAKE_CXX_FLAGS="${PBRT_LAMBDA_MAX_NM:+-DPBRT_LAMBDA_MAX_NM=${PBRT_LAMBDA_MAX_NM}}"
+  -DCMAKE_CXX_FLAGS="${PBRT_LAMBDA_MAX_NM:+-DPBRT_LAMBDA_MAX_NM=${PBRT_LAMBDA_MAX_NM}} ${PBRT_NSPECTRUM:+-DPBRT_NSPECTRUM=${PBRT_NSPECTRUM}}"
 env -u PBRT_OPTIX_PATH cmake --build "$build" -j"$(nproc)" --target pbrt_exe "$@"
 python3 "$repo/tools/pbrt_patchstamp.py" >"$build/pbrt.patchstamp"
 echo "pbrt: $build/pbrt (patch stamp $(cut -c1-12 "$build/pbrt.patchstamp"))"
