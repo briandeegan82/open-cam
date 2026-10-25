@@ -1,5 +1,5 @@
 diff --git a/src/pbrt/lights.cpp b/src/pbrt/lights.cpp
-index bb91527..90abca2 100644
+index bb91527..4254be3 100644
 --- a/src/pbrt/lights.cpp
 +++ b/src/pbrt/lights.cpp
 @@ -524,26 +524,38 @@ ProjectionLight *ProjectionLight::Create(const Transform &renderFromLight, Mediu
@@ -124,7 +124,7 @@ index bb91527..90abca2 100644
  }
  
  std::string GoniometricLight::ToString() const {
-@@ -672,11 +674,19 @@ GoniometricLight *GoniometricLight::Create(const Transform &renderFromLight,
+@@ -672,11 +674,24 @@ GoniometricLight *GoniometricLight::Create(const Transform &renderFromLight,
      Float sc = parameters.GetOneFloat("scale", 1);
  
      Image image(alloc);
@@ -138,28 +138,40 @@ index bb91527..90abca2 100644
      if (texname.empty())
          Warning(loc, "No \"filename\" parameter provided for goniometric light.");
 -    else {
-+    std::lock_guard<std::mutex> lock(cacheMutex);  // lights are created in parallel
-+    if (!texname.empty() && cache.count(texname))
-+        data = cache[texname];
-+    else if (!texname.empty()) {
++    // Lights are created by parallel jobs, and a thread that waits on a job may run another
++    // light's creation, so no lock is held while loading: a map loaded twice at once is
++    // built twice and the copy that loses the race is freed.
++    if (!texname.empty()) {
++        std::lock_guard<std::mutex> lock(cacheMutex);
++        if (auto it = cache.find(texname); it != cache.end())
++            data = it->second;
++    }
++    if (!data && !texname.empty()) {
          ImageAndMetadata imageAndMetadata = Image::Read(texname, alloc);
  
          if (imageAndMetadata.image.HasAnyInfinitePixels())
-@@ -722,6 +732,13 @@ GoniometricLight *GoniometricLight::Create(const Transform &renderFromLight,
+@@ -722,6 +737,20 @@ GoniometricLight *GoniometricLight::Create(const Transform &renderFromLight,
                        texname);
      }
  
 +    if (!data) {
 +        data = GoniometricData::Create(std::move(image), alloc);
-+        if (!texname.empty())
-+            cache[texname] = data;
++        if (!texname.empty()) {
++            std::lock_guard<std::mutex> lock(cacheMutex);
++            auto [it, inserted] = cache.insert({texname, data});
++            if (!inserted) {
++                imageBytes -= data->image.BytesUsed() + data->distrib.BytesUsed();
++                alloc.delete_object(const_cast<GoniometricData *>(data));
++                data = it->second;
++            }
++        }
 +    }
 +    const Image *im = &data->image;
 +
      // open-cam: "bool photometric" false keeps I in absolute radiometric units (NIR-only
      // emitters have a ~0 photometric integral).
      if (parameters.GetOneBool("photometric", true))
-@@ -730,10 +747,10 @@ GoniometricLight *GoniometricLight::Create(const Transform &renderFromLight,
+@@ -730,10 +759,10 @@ GoniometricLight *GoniometricLight::Create(const Transform &renderFromLight,
      Float phi_v = parameters.GetOneFloat("power", -1);
      if (phi_v > 0) {
          Float sumY = 0;
@@ -174,7 +186,7 @@ index bb91527..90abca2 100644
          sc *= phi_v / k_e;
      }
  
-@@ -742,7 +759,7 @@ GoniometricLight *GoniometricLight::Create(const Transform &renderFromLight,
+@@ -742,7 +771,7 @@ GoniometricLight *GoniometricLight::Create(const Transform &renderFromLight,
      Transform finalRenderFromLight = renderFromLight * t;
  
      return alloc.new_object<GoniometricLight>(finalRenderFromLight, medium, I, sc,
