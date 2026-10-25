@@ -42,7 +42,10 @@ it, stays a per-car mesh. Motion blur (`--animate`) still works, because pbrt ap
 instance's animated transform. On the night wet highway (1280x720, 64 spp, 3 alternating runs)
 peak pbrt memory drops from 3.56 to 2.87 GB with unchanged render time (70.2 +/- 2.1 s vs
 70.3 +/- 6.7 s) and an unchanged image (frame mean ratio 0.9998, every 4x4-tile mean within
-1.2 sigma of the 3-seed noise).
+1.2 sigma of the 3-seed noise). On the day highway (256 spp) it drops from 2.89 to 2.19 GB
+(175.7 +/- 3.4 s vs 172.8 +/- 2.0 s, frame mean ratio 1.00003, tiles within 0.9 sigma); scene load
+for the garage goes from 3.99 GB / 7.5 s to 0.83 GB / 3.0 s and for the urban scene from
+1.70 GB / 3.9 s to 0.85 GB / 1.3 s.
 
 ## Build, render, convert
 
