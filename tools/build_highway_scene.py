@@ -446,7 +446,7 @@ def add_film_args(ap: argparse.ArgumentParser, *, xres: int, yres: int, pixelsam
     ap.add_argument("--yres", type=int, default=yres)
     ap.add_argument("--pixelsamples", type=int, default=pixelsamples)
     ap.add_argument("--film", choices=("spectral", "rgb"), default="spectral")
-    ap.add_argument("--spectral-nbuckets", type=int, default=16)
+    ap.add_argument("--spectral-nbuckets", type=int, default=32)
     ap.add_argument("--spectral-lambda-min", type=float, default=360.0)
     ap.add_argument("--spectral-lambda-max", type=float, default=830.0)
     ap.add_argument("--step-nm", type=float, default=5.0)

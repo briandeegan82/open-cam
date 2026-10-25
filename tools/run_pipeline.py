@@ -223,7 +223,7 @@ def main() -> None:
         build_cmd.extend(
             [
                 "--spectral-nbuckets",
-                str(int(render.get("spectral_nbuckets", 16))),
+                str(int(render.get("spectral_nbuckets", 32))),
                 "--spectral-lambda-min",
                 str(float(render.get("spectral_lambda_min", 360.0))),
                 "--spectral-lambda-max",
