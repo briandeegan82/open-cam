@@ -1084,7 +1084,272 @@ def _scene_radiometry(manifest_path: Path | None, repo: Path) -> dict | None:
     return scene_radiometry_from_manifest(json.loads(path.read_text()))
 
 
-def main() -> None:
+def load_noise_config(camera_model_config: Path | None, config: Path | None, repo: Path) -> tuple[Path, dict, dict]:
+    """(config path, camera model or {}, noise config) from a camera model, else --config / noise_emva.yaml."""
+    if camera_model_config is not None:
+        cfg_path = camera_model_config.resolve()
+        if not cfg_path.is_file():
+            raise FileNotFoundError(f"missing camera model config: {cfg_path}")
+        camera_model = load_camera_model(cfg_path)
+        cfg = noise_config_from_camera_model(
+            camera_model,
+            linear_rgb_in="out/colorchecker_spectral.exr",
+            raw_out="out/colorchecker_noisy.raw16",
+        )
+        return cfg_path, camera_model, cfg
+    cfg_path = (config or (repo / "config" / "noise_emva.yaml")).resolve()
+    if not cfg_path.is_file():
+        raise FileNotFoundError(f"missing config: {cfg_path}")
+    return cfg_path, {}, yaml.safe_load(cfg_path.read_text())
+
+
+def relative_qe_rgb(curves, ircf_curve, cfg_path: Path | None) -> np.ndarray:
+    """Mean QE (times IRCF) of the R, G, B curves, normalised to the largest (float32)."""
+    qe_means = []
+    for q_wl, q_v in curves:
+        q = np.clip(np.asarray(q_v, dtype=np.float64), 0.0, 1.0)
+        if ircf_curve is not None:
+            ir_i = np.clip(np.interp(q_wl, ircf_curve[0], ircf_curve[1], left=0.0, right=0.0), 0.0, 1.0)
+            q = q * ir_i
+        qe_means.append(float(np.mean(q)))
+    qe_vec = np.array(qe_means, dtype=np.float32)
+    qe_max = float(np.max(qe_vec))
+    if not np.isfinite(qe_max) or qe_max <= 0.0:
+        raise ValueError(f"computed QE response is non-positive; check QE/IRCF curves in camera model {cfg_path}")
+    qe_vec /= qe_max
+    return qe_vec
+
+
+def parse_adc_clipping(_clipping_raw) -> bool:
+    """adc.clipping: a bool, or "hard" (clip at full well / max DN) vs "soft" (no clipping)."""
+    if isinstance(_clipping_raw, bool):
+        return _clipping_raw
+    elif isinstance(_clipping_raw, str):
+        _cs = _clipping_raw.strip().lower()
+        if _cs in ("hard", "true", "yes", "on", "1"):
+            return True
+        elif _cs in ("soft", "false", "no", "off", "0", "none", "disabled"):
+            return False
+        else:
+            raise ValueError(f"adc.clipping must be a boolean or one of 'hard'/'soft', got {_clipping_raw!r}")
+    else:
+        return bool(_clipping_raw)
+
+
+def crosstalk_matrix_from_cfg(crosstalk_cfg: dict) -> np.ndarray:
+    """sensor.crosstalk.matrix_3x3 (identity with a warning if absent), rows normalised unless disabled."""
+    if "matrix_3x3" not in crosstalk_cfg:
+        print(
+            "warning: sensor.crosstalk.enabled is true but matrix_3x3 is absent; "
+            "falling back to identity (no crosstalk applied). "
+            "Set sensor.crosstalk.matrix_3x3 or disable crosstalk.",
+            file=sys.stderr,
+        )
+    crosstalk_matrix = np.asarray(crosstalk_cfg.get("matrix_3x3", np.eye(3)), dtype=np.float32)
+    if crosstalk_matrix.shape != (3, 3):
+        raise ValueError("sensor.crosstalk.matrix_3x3 must be a 3x3 matrix")
+    if bool(crosstalk_cfg.get("normalize_rows", True)):
+        row_sum = np.sum(crosstalk_matrix, axis=1, keepdims=True)
+        row_sum = np.where(np.abs(row_sum) < 1e-12, 1.0, row_sum)
+        crosstalk_matrix = (crosstalk_matrix / row_sum).astype(np.float32)
+    return crosstalk_matrix
+
+
+def sample_cfa(signal_e, bayer_pat, cfa_layout, spatial_xtalk_cfg, si_diffusion_on, _spectral_meta, sensor):
+    """RAW mosaic of the per-pixel electrons (RGGB-family ``bayer_pat`` or a generic ``cfa_layout``) with
+    spatial crosstalk applied; unchanged when neither is set."""
+    if bayer_pat is not None:
+        signal_e = bayer_sample_rgb(signal_e, bayer_pat)
+        # Spatial inter-pixel diffusion crosstalk: must be applied after CFA sampling
+        # so that the blur acts on the RAW mosaic (R leaking to G/B wells, etc.).
+        # Applied before the noise chain so shot noise is drawn on the correct mean.
+        if si_diffusion_on:
+            signal_e = apply_silicon_diffusion(
+                signal_e, resolve_layout({"layout": bayer_pat}), spatial_xtalk_cfg, _spectral_meta,
+                float(sensor.get("pixel_pitch_um", 1.4)),
+            )  # fmt: skip
+        else:
+            signal_e = apply_cfa_spatial_crosstalk(signal_e, spatial_xtalk_cfg, bayer_pat)
+    elif cfa_layout is not None:
+        signal_e = cfa_sample(signal_e, cfa_layout)
+        if si_diffusion_on:
+            signal_e = apply_silicon_diffusion(
+                signal_e, cfa_layout, spatial_xtalk_cfg, _spectral_meta, float(sensor.get("pixel_pitch_um", 1.4))
+            )
+        else:
+            signal_e = apply_site_crosstalk(signal_e, cfa_layout, spatial_xtalk_cfg)
+    return signal_e
+
+
+def dark_temperature_scale(
+    dark_temp_c: float, dark_ref_temp_c: float, dark_doubling_c: float, dark_activation_energy_eV: float
+) -> float:
+    """Dark-current factor at ``dark_temp_c`` vs the reference: Arrhenius T^1.5 when Ea > 0, else doubling rule."""
+    if dark_activation_energy_eV > 0.0:
+        # Shockley-Read-Hall: J_dark ∝ T^1.5 × exp(−Ea / k_B T).
+        # The T^1.5 pre-exponential (intrinsic carrier concentration ∝ T^1.5) is
+        # significant: at 60 °C vs 20 °C it adds ~16% on top of the exponential.
+        _K_B_EV = 8.617333262e-5
+        _T_K = dark_temp_c + 273.15
+        _T0_K = dark_ref_temp_c + 273.15
+        return float((_T_K / _T0_K) ** 1.5 * np.exp((dark_activation_energy_eV / _K_B_EV) * (1.0 / _T0_K - 1.0 / _T_K)))
+    else:
+        return 2.0 ** ((dark_temp_c - dark_ref_temp_c) / max(1e-6, dark_doubling_c))
+
+
+def fixed_prnu_map(
+    signal_e, bayer_on, bayer_pat, cfa_layout, emva, prnu_std, prnu_std_rgb, prnu_lf_std, prnu_lf_sigma_px, spatial_rng
+) -> np.ndarray:
+    """Per-pixel PRNU gain map (plus the optional low-frequency trend), drawn from the camera-unit ``spatial_rng``."""
+    if signal_e.ndim == 2 and bayer_on:
+        _prnu_phase_std = prnu_std_rgb  # R=0, G=1, B=2
+        _cfa_phase_ch = _BAYER_PHASE[bayer_pat.upper()]
+        prnu_map = np.empty(signal_e.shape, dtype=np.float32)
+        for _pi in range(4):
+            _row_off, _col_off = _pi >> 1, _pi & 1
+            _ch_std = _prnu_phase_std[_cfa_phase_ch[_pi]]
+            _sub = 1.0 + spatial_rng.normal(0.0, _ch_std, size=signal_e[_row_off::2, _col_off::2].shape)
+            prnu_map[_row_off::2, _col_off::2] = _sub
+        prnu_map = np.maximum(prnu_map, 0.0, out=prnu_map)
+    elif cfa_layout is not None:
+        _site_std = site_parameter_map(
+            [channel_parameter(emva, "prnu_std_fraction", ch, prnu_std) for ch in cfa_layout.channels],
+            cfa_layout,
+            signal_e.shape,
+        )
+        prnu_map = np.maximum(1.0 + spatial_rng.normal(0.0, 1.0, size=signal_e.shape) * _site_std, 0.0)
+        prnu_map = prnu_map.astype(np.float32)
+    else:
+        prnu_map = np.maximum(
+            (1.0 + spatial_rng.normal(0.0, prnu_std, size=signal_e.shape)).astype(np.float32),
+            0.0,
+        )
+
+    # Low-frequency PRNU trend: models large-scale gain gradients (lens shading, process
+    # variation across the die).  A smooth random field is added on top of the per-pixel
+    # white-noise PRNU above.  Drawn from spatial_rng so it is fixed per camera unit.
+    # Enabled only when prnu_lf_std_fraction > 0 in the emva config.
+    if prnu_lf_std > 0.0 and prnu_lf_sigma_px > 0.0:
+        from scipy.ndimage import gaussian_filter as _gf  # noqa: PLC0415
+
+        _lf_raw = spatial_rng.normal(0.0, prnu_lf_std, size=signal_e.shape[:2]).astype(np.float32)
+        _lf_smooth = _gf(_lf_raw, sigma=prnu_lf_sigma_px, mode="reflect").astype(np.float32)
+        if signal_e.ndim == 2:
+            prnu_map += _lf_smooth
+        else:
+            prnu_map += _lf_smooth[:, :, None]
+        prnu_map = np.maximum(prnu_map, 0.0, out=prnu_map)
+    return prnu_map
+
+
+def fixed_dsnu_map(
+    signal_e,
+    dark_current_e_per_s,
+    dark_temp_scale,
+    dsnu_rate_std_fraction,
+    dsnu_std_e,
+    dark_mean_e,
+    t_int_s,
+    spatial_rng,
+) -> np.ndarray:
+    """Signed per-pixel dark-signal offset from ``dark_mean_e`` (log-normal), drawn from ``spatial_rng``."""
+    if dsnu_rate_std_fraction > 0.0 and dark_current_e_per_s > 0.0:
+        # Preferred path: per-pixel rates drawn from lognormal, DSNU = (rate_i − mean_rate) × t_int.
+        _mean_rate = dark_current_e_per_s * dark_temp_scale  # e/s, temperature-corrected
+        _sigma_ln_rate = float(np.sqrt(np.log1p(dsnu_rate_std_fraction**2)))
+        _mu_ln_rate = np.log(_mean_rate) - 0.5 * _sigma_ln_rate**2
+        _sp_shape = signal_e.shape if signal_e.ndim == 2 else signal_e.shape[:2]
+        _rate_map = spatial_rng.lognormal(_mu_ln_rate, _sigma_ln_rate, size=_sp_shape).astype(np.float64)
+        _dsnu_e_map = (_rate_map - _mean_rate) * t_int_s  # scale by t_int
+        if signal_e.ndim == 2:
+            dsnu_map = _dsnu_e_map.astype(np.float32)
+        else:
+            dsnu_map = _dsnu_e_map[:, :, None].astype(np.float32)
+    elif dark_mean_e > 1e-9 and dsnu_std_e > 0.0:
+        _v_ratio = dsnu_std_e / dark_mean_e
+        _sigma_ln = float(np.sqrt(np.log1p(_v_ratio**2)))
+        _mu_ln = np.log(dark_mean_e) - 0.5 * _sigma_ln**2
+        if signal_e.ndim == 2:
+            _dsnu_abs = spatial_rng.lognormal(_mu_ln, _sigma_ln, size=signal_e.shape).astype(np.float32)
+            dsnu_map = (_dsnu_abs - dark_mean_e).astype(np.float32)
+        else:
+            _dsnu_abs = spatial_rng.lognormal(_mu_ln, _sigma_ln, size=signal_e.shape[:2]).astype(np.float32)
+            dsnu_map = (_dsnu_abs - dark_mean_e)[:, :, None].astype(np.float32)
+    else:
+        if signal_e.ndim == 2:
+            dsnu_map = np.zeros(signal_e.shape, dtype=np.float32)
+        else:
+            dsnu_map = np.zeros(signal_e.shape[:2] + (1,), dtype=np.float32)
+    return dsnu_map
+
+
+def readout_row_column_offsets_e(
+    signal_e, row_fpn_fixed_std_e, col_fpn_fixed_std_e, row_fpn_std_e, col_fpn_std_e, flicker_noise_std_e,
+    spatial_rng, rng_rowcol, rng_flicker,
+) -> np.ndarray:  # fmt: skip
+    """Fixed + temporal row/column offsets and 1/f row flicker (electrons, broadcastable to ``signal_e``)."""
+    # Fixed row/column FPN: column offset and row gain variation baked into the readout
+    # circuit — the same pattern every frame from the same camera unit.  Drawn from
+    # spatial_rng (fixed seed) after DSNU so PRNU/DSNU patterns are unaffected.
+    row_fpn_fixed, col_fpn_fixed = row_column_fpn_offsets(
+        signal_e.shape, row_fpn_fixed_std_e, col_fpn_fixed_std_e, spatial_rng
+    )
+
+    # Row/column readout amplifier noise: temporal banding that changes every frame.
+    row_fpn, col_fpn = row_column_fpn_offsets(signal_e.shape, row_fpn_std_e, col_fpn_std_e, rng_rowcol)
+
+    # ---- 1/f (flicker) noise: pink-spectrum row offsets ----
+    # Drawn from the temporal rng, so it differs every frame.
+    flicker_row_e = np.zeros(1, dtype=np.float32)
+    if flicker_noise_std_e > 0.0:
+        _pink = flicker_row_offsets(signal_e.shape[0], flicker_noise_std_e, rng_flicker)
+        if signal_e.ndim == 2:
+            flicker_row_e = _pink[:, np.newaxis]
+        else:
+            flicker_row_e = _pink[:, np.newaxis, np.newaxis]
+
+    return row_fpn_fixed + col_fpn_fixed + row_fpn + col_fpn + flicker_row_e
+
+
+def electrons_to_dn(
+    signal_e, total_e, K_e_per_DN, black_dn, bit_depth, adc_clipping, adc_inl_quad_fraction, adc_dnl_std_lsb,
+    spatial_rng,
+) -> tuple[np.ndarray, np.ndarray]:  # fmt: skip
+    """ADC: (noise-free, noisy) DN with black level, clipping, INL and the fixed DNL table."""
+    max_dn = float((1 << bit_depth) - 1)
+    if adc_clipping:
+        dn_clean = np.clip(signal_e / K_e_per_DN + black_dn, 0.0, max_dn)
+        dn_noisy = np.clip(total_e / K_e_per_DN + black_dn, 0.0, max_dn)
+    else:
+        dn_clean = np.clip(signal_e / K_e_per_DN + black_dn, 0.0, None)
+        dn_noisy = np.clip(total_e / K_e_per_DN + black_dn, 0.0, None)
+    dn_noisy = apply_adc_inl(dn_noisy, black_dn=black_dn, max_dn=max_dn, quadratic_fraction=adc_inl_quad_fraction)
+    if adc_dnl_std_lsb > 0.0:
+        # The table comes from spatial_rng (seeded per camera unit) because DNL is a
+        # property of the converter, identical on every frame it ever produces.
+        dn_noisy = apply_adc_dnl(dn_noisy, adc_dnl_table(max_dn, adc_dnl_std_lsb, spatial_rng), max_dn)
+    return dn_clean, dn_noisy
+
+
+def preview_wb_gains(dn: np.ndarray, black_dn: float, method: str) -> np.ndarray:
+    """Preview white-balance gains ("white_patch" or "gray_world") from black-subtracted DN."""
+    src = np.clip(dn - black_dn, 0.0, None)
+    return white_patch_gains(src) if method == "white_patch" else gray_world_gains(src)
+
+
+def preview_ccm_pair(dn_clean, dn_noisy, ref_linear, black_dn, method, wb_gains, highlight_clip_dn):
+    """Fit the preview CCM on the clean frame and apply it (with neutral highlight clipping) to both frames."""
+    ccm = fit_preview_ccm(dn_clean, ref_linear, black_dn, method)
+    dn_clean = apply_preview_ccm_dn(dn_clean, black_dn, ccm)
+    dn_noisy = apply_preview_ccm_dn(dn_noisy, black_dn, ccm)
+    if highlight_clip_dn is not None:
+        _ccm_clip = highlight_clip_dn * float(np.min(wb_gains))
+        dn_clean = clip_preview_ccm_highlights(dn_clean, black_dn, ccm, _ccm_clip)
+        dn_noisy = clip_preview_ccm_highlights(dn_noisy, black_dn, ccm, _ccm_clip)
+    return dn_clean, dn_noisy, ccm
+
+
+def build_arg_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description=__doc__)
     repo_default = Path(__file__).resolve().parent.parent
     ap.add_argument("--repo-root", type=Path, default=repo_default)
@@ -1185,26 +1450,14 @@ def main() -> None:
         action="store_true",
         help="Regenerate and overwrite persistent defect-pixel map when configured.",
     )
-    args = ap.parse_args()
+    return ap
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = build_arg_parser().parse_args(argv)
 
     repo = args.repo_root.resolve()
-    cfg_path = None
-    camera_model: dict = {}
-    if args.camera_model_config is not None:
-        cfg_path = args.camera_model_config.resolve()
-        if not cfg_path.is_file():
-            raise FileNotFoundError(f"missing camera model config: {cfg_path}")
-        camera_model = load_camera_model(cfg_path)
-        cfg = noise_config_from_camera_model(
-            camera_model,
-            linear_rgb_in="out/colorchecker_spectral.exr",
-            raw_out="out/colorchecker_noisy.raw16",
-        )
-    else:
-        cfg_path = (args.config or (repo / "config" / "noise_emva.yaml")).resolve()
-        if not cfg_path.is_file():
-            raise FileNotFoundError(f"missing config: {cfg_path}")
-        cfg = yaml.safe_load(cfg_path.read_text())
+    cfg_path, camera_model, cfg = load_noise_config(args.camera_model_config, args.config, repo)
     sensor = cfg.get("sensor", {})
     qe_cfg = sensor.get("quantum_efficiency", {})
     crosstalk_cfg = sensor.get("crosstalk", {}) or {}
@@ -1235,18 +1488,7 @@ def main() -> None:
         strict_qe_validation=strict_qe_validation,
     )
     ircf_curve = read_csv_curve(ircf_path) if ircf_path is not None else None
-    qe_means = []
-    for q_wl, q_v in (q_r_src, q_g_src, q_b_src):
-        q = np.clip(np.asarray(q_v, dtype=np.float64), 0.0, 1.0)
-        if ircf_curve is not None:
-            ir_i = np.clip(np.interp(q_wl, ircf_curve[0], ircf_curve[1], left=0.0, right=0.0), 0.0, 1.0)
-            q = q * ir_i
-        qe_means.append(float(np.mean(q)))
-    qe_vec = np.array(qe_means, dtype=np.float32)
-    qe_max = float(np.max(qe_vec))
-    if not np.isfinite(qe_max) or qe_max <= 0.0:
-        raise ValueError(f"computed QE response is non-positive; check QE/IRCF curves in camera model {cfg_path}")
-    qe_vec /= qe_max
+    qe_vec = relative_qe_rgb((q_r_src, q_g_src, q_b_src), ircf_curve, cfg_path)
 
     if "full_well_e" not in adc:
         raise KeyError(
@@ -1324,19 +1566,7 @@ def main() -> None:
 
     adc_inl_quad_fraction = float(adc.get("inl_quadratic_fraction", 0.0))
     adc_dnl_std_lsb = float(adc.get("dnl_std_lsb", 0.0))
-    _clipping_raw = adc.get("clipping", True)
-    if isinstance(_clipping_raw, bool):
-        adc_clipping = _clipping_raw
-    elif isinstance(_clipping_raw, str):
-        _cs = _clipping_raw.strip().lower()
-        if _cs in ("hard", "true", "yes", "on", "1"):
-            adc_clipping = True
-        elif _cs in ("soft", "false", "no", "off", "0", "none", "disabled"):
-            adc_clipping = False
-        else:
-            raise ValueError(f"adc.clipping must be a boolean or one of 'hard'/'soft', got {_clipping_raw!r}")
-    else:
-        adc_clipping = bool(_clipping_raw)
+    adc_clipping = parse_adc_clipping(adc.get("clipping", True))
     defect_cfg = emva.get("defect_pixels", {}) or {}
     persistent_map_npz = defect_cfg.get("persistent_map_npz", None)
     persistent_map_path = (repo / str(persistent_map_npz)).resolve() if persistent_map_npz else None
@@ -1368,22 +1598,7 @@ def main() -> None:
         )
 
     crosstalk_enabled = bool(crosstalk_cfg.get("enabled", False))
-    crosstalk_matrix = np.eye(3, dtype=np.float32)
-    if crosstalk_enabled:
-        if "matrix_3x3" not in crosstalk_cfg:
-            print(
-                "warning: sensor.crosstalk.enabled is true but matrix_3x3 is absent; "
-                "falling back to identity (no crosstalk applied). "
-                "Set sensor.crosstalk.matrix_3x3 or disable crosstalk.",
-                file=sys.stderr,
-            )
-        crosstalk_matrix = np.asarray(crosstalk_cfg.get("matrix_3x3", np.eye(3)), dtype=np.float32)
-        if crosstalk_matrix.shape != (3, 3):
-            raise ValueError("sensor.crosstalk.matrix_3x3 must be a 3x3 matrix")
-        if bool(crosstalk_cfg.get("normalize_rows", True)):
-            row_sum = np.sum(crosstalk_matrix, axis=1, keepdims=True)
-            row_sum = np.where(np.abs(row_sum) < 1e-12, 1.0, row_sum)
-            crosstalk_matrix = (crosstalk_matrix / row_sum).astype(np.float32)
+    crosstalk_matrix = crosstalk_matrix_from_cfg(crosstalk_cfg) if crosstalk_enabled else np.eye(3, dtype=np.float32)
 
     _cfa_qe = None
     if cfa_layout is not None:
@@ -1504,42 +1719,20 @@ def main() -> None:
         str(spatial_xtalk_cfg.get("model", "gaussian")).lower() == "silicon_diffusion"
     )
 
-    if bayer_on:
-        signal_e = bayer_sample_rgb(signal_e, bayer_pat)
-        # Spatial inter-pixel diffusion crosstalk: must be applied after CFA sampling
-        # so that the blur acts on the RAW mosaic (R leaking to G/B wells, etc.).
-        # Applied before the noise chain so shot noise is drawn on the correct mean.
-        if si_diffusion_on:
-            signal_e = apply_silicon_diffusion(
-                signal_e, resolve_layout({"layout": bayer_pat}), spatial_xtalk_cfg, _spectral_meta,
-                float(sensor.get("pixel_pitch_um", 1.4)),
-            )  # fmt: skip
-        else:
-            signal_e = apply_cfa_spatial_crosstalk(signal_e, spatial_xtalk_cfg, bayer_pat)
-    elif cfa_layout is not None:
-        signal_e = cfa_sample(signal_e, cfa_layout)
-        if si_diffusion_on:
-            signal_e = apply_silicon_diffusion(
-                signal_e, cfa_layout, spatial_xtalk_cfg, _spectral_meta, float(sensor.get("pixel_pitch_um", 1.4))
-            )
-        else:
-            signal_e = apply_site_crosstalk(signal_e, cfa_layout, spatial_xtalk_cfg)
+    signal_e = sample_cfa(
+        signal_e,
+        bayer_pat if bayer_on else None,
+        cfa_layout,
+        spatial_xtalk_cfg,
+        si_diffusion_on,
+        _spectral_meta,
+        sensor,
+    )
 
     # Dark current mean: computed here (not in the temporal section) so that the DSNU
     # log-normal distribution can be correctly centred on it — ensuring that
     # dark_mean_e + dsnu_map[i] = D_i ≥ 0 for every pixel.
-    if dark_activation_energy_eV > 0.0:
-        # Shockley-Read-Hall: J_dark ∝ T^1.5 × exp(−Ea / k_B T).
-        # The T^1.5 pre-exponential (intrinsic carrier concentration ∝ T^1.5) is
-        # significant: at 60 °C vs 20 °C it adds ~16% on top of the exponential.
-        _K_B_EV = 8.617333262e-5
-        _T_K = dark_temp_c + 273.15
-        _T0_K = dark_ref_temp_c + 273.15
-        dark_temp_scale = float(
-            (_T_K / _T0_K) ** 1.5 * np.exp((dark_activation_energy_eV / _K_B_EV) * (1.0 / _T0_K - 1.0 / _T_K))
-        )
-    else:
-        dark_temp_scale = 2.0 ** ((dark_temp_c - dark_ref_temp_c) / max(1e-6, dark_doubling_c))
+    dark_temp_scale = dark_temperature_scale(dark_temp_c, dark_ref_temp_c, dark_doubling_c, dark_activation_energy_eV)
     dark_mean_e = max(0.0, dark_current_e_per_s * t_int_s * dark_temp_scale)
 
     # ---- Fixed spatial patterns (same for every frame from the same camera) ----
@@ -1552,44 +1745,10 @@ def main() -> None:
     # In CFA mode each Bayer color has its own independent PRNU realisation drawn with
     # an optionally channel-specific sigma (emva.prnu_std_fraction_r/g/b).
     # The map is clipped to [0, ∞) so negative photosensitivity is always excluded.
-    if signal_e.ndim == 2 and bayer_on:
-        _prnu_phase_std = (prnu_std_r, prnu_std_g, prnu_std_b)  # R=0, G=1, B=2
-        _cfa_phase_ch = _BAYER_PHASE[bayer_pat.upper()]
-        prnu_map = np.empty(signal_e.shape, dtype=np.float32)
-        for _pi in range(4):
-            _row_off, _col_off = _pi >> 1, _pi & 1
-            _ch_std = _prnu_phase_std[_cfa_phase_ch[_pi]]
-            _sub = 1.0 + spatial_rng.normal(0.0, _ch_std, size=signal_e[_row_off::2, _col_off::2].shape)
-            prnu_map[_row_off::2, _col_off::2] = _sub
-        prnu_map = np.maximum(prnu_map, 0.0, out=prnu_map)
-    elif cfa_layout is not None:
-        _site_std = site_parameter_map(
-            [channel_parameter(emva, "prnu_std_fraction", ch, prnu_std) for ch in cfa_layout.channels],
-            cfa_layout,
-            signal_e.shape,
-        )
-        prnu_map = np.maximum(1.0 + spatial_rng.normal(0.0, 1.0, size=signal_e.shape) * _site_std, 0.0)
-        prnu_map = prnu_map.astype(np.float32)
-    else:
-        prnu_map = np.maximum(
-            (1.0 + spatial_rng.normal(0.0, prnu_std, size=signal_e.shape)).astype(np.float32),
-            0.0,
-        )
-
-    # Low-frequency PRNU trend: models large-scale gain gradients (lens shading, process
-    # variation across the die).  A smooth random field is added on top of the per-pixel
-    # white-noise PRNU above.  Drawn from spatial_rng so it is fixed per camera unit.
-    # Enabled only when prnu_lf_std_fraction > 0 in the emva config.
-    if prnu_lf_std > 0.0 and prnu_lf_sigma_px > 0.0:
-        from scipy.ndimage import gaussian_filter as _gf  # noqa: PLC0415
-
-        _lf_raw = spatial_rng.normal(0.0, prnu_lf_std, size=signal_e.shape[:2]).astype(np.float32)
-        _lf_smooth = _gf(_lf_raw, sigma=prnu_lf_sigma_px, mode="reflect").astype(np.float32)
-        if signal_e.ndim == 2:
-            prnu_map += _lf_smooth
-        else:
-            prnu_map += _lf_smooth[:, :, None]
-        prnu_map = np.maximum(prnu_map, 0.0, out=prnu_map)
+    prnu_map = fixed_prnu_map(
+        signal_e, bayer_on, bayer_pat, cfa_layout, emva, prnu_std, (prnu_std_r, prnu_std_g, prnu_std_b),
+        prnu_lf_std, prnu_lf_sigma_px, spatial_rng,
+    )  # fmt: skip
 
     # DSNU: per-pixel absolute dark-current variation follows a log-normal distribution.
     # Dark current arises from trap-mediated generation: most pixels are near the mean,
@@ -1607,59 +1766,19 @@ def main() -> None:
     #     condition.  _v_ratio = dsnu_std_e / dark_mean_e gives an implied CV;
     #     when dark_mean_e ≈ 0 (short exposure) the lognormal is ill-conditioned,
     #     so dsnu_map is zeroed in that regime.
-    if dsnu_rate_std_fraction > 0.0 and dark_current_e_per_s > 0.0:
-        # Preferred path: per-pixel rates drawn from lognormal, DSNU = (rate_i − mean_rate) × t_int.
-        _mean_rate = dark_current_e_per_s * dark_temp_scale  # e/s, temperature-corrected
-        _sigma_ln_rate = float(np.sqrt(np.log1p(dsnu_rate_std_fraction**2)))
-        _mu_ln_rate = np.log(_mean_rate) - 0.5 * _sigma_ln_rate**2
-        _sp_shape = signal_e.shape if signal_e.ndim == 2 else signal_e.shape[:2]
-        _rate_map = spatial_rng.lognormal(_mu_ln_rate, _sigma_ln_rate, size=_sp_shape).astype(np.float64)
-        _dsnu_e_map = (_rate_map - _mean_rate) * t_int_s  # scale by t_int
-        if signal_e.ndim == 2:
-            dsnu_map = _dsnu_e_map.astype(np.float32)
-        else:
-            dsnu_map = _dsnu_e_map[:, :, None].astype(np.float32)
-    elif dark_mean_e > 1e-9 and dsnu_std_e > 0.0:
-        _v_ratio = dsnu_std_e / dark_mean_e
-        _sigma_ln = float(np.sqrt(np.log1p(_v_ratio**2)))
-        _mu_ln = np.log(dark_mean_e) - 0.5 * _sigma_ln**2
-        if signal_e.ndim == 2:
-            _dsnu_abs = spatial_rng.lognormal(_mu_ln, _sigma_ln, size=signal_e.shape).astype(np.float32)
-            dsnu_map = (_dsnu_abs - dark_mean_e).astype(np.float32)
-        else:
-            _dsnu_abs = spatial_rng.lognormal(_mu_ln, _sigma_ln, size=signal_e.shape[:2]).astype(np.float32)
-            dsnu_map = (_dsnu_abs - dark_mean_e)[:, :, None].astype(np.float32)
-    else:
-        if signal_e.ndim == 2:
-            dsnu_map = np.zeros(signal_e.shape, dtype=np.float32)
-        else:
-            dsnu_map = np.zeros(signal_e.shape[:2] + (1,), dtype=np.float32)
+    dsnu_map = fixed_dsnu_map(
+        signal_e, dark_current_e_per_s, dark_temp_scale, dsnu_rate_std_fraction, dsnu_std_e, dark_mean_e, t_int_s,
+        spatial_rng,
+    )  # fmt: skip
 
     # ---- Temporal frame noise (varies legitimately per frame) ----
     # dark_mean_e was computed before the spatial-patterns section so the DSNU log-normal
     # could be correctly centred on it.  It is reused directly here.
 
-    # Fixed row/column FPN: column offset and row gain variation baked into the readout
-    # circuit — the same pattern every frame from the same camera unit.  Drawn from
-    # spatial_rng (fixed seed) after DSNU so PRNU/DSNU patterns are unaffected.
-    row_fpn_fixed, col_fpn_fixed = row_column_fpn_offsets(
-        signal_e.shape, row_fpn_fixed_std_e, col_fpn_fixed_std_e, spatial_rng
-    )
-
-    # Row/column readout amplifier noise: temporal banding that changes every frame.
-    row_fpn, col_fpn = row_column_fpn_offsets(signal_e.shape, row_fpn_std_e, col_fpn_std_e, rng_rowcol)
-
-    # ---- 1/f (flicker) noise: pink-spectrum row offsets ----
-    # Drawn from the temporal rng, so it differs every frame.
-    flicker_row_e = np.zeros(1, dtype=np.float32)
-    if flicker_noise_std_e > 0.0:
-        _pink = flicker_row_offsets(signal_e.shape[0], flicker_noise_std_e, rng_flicker)
-        if signal_e.ndim == 2:
-            flicker_row_e = _pink[:, np.newaxis]
-        else:
-            flicker_row_e = _pink[:, np.newaxis, np.newaxis]
-
-    rc_fpn = row_fpn_fixed + col_fpn_fixed + row_fpn + col_fpn + flicker_row_e
+    rc_fpn = readout_row_column_offsets_e(
+        signal_e, row_fpn_fixed_std_e, col_fpn_fixed_std_e, row_fpn_std_e, col_fpn_std_e, flicker_noise_std_e,
+        spatial_rng, rng_rowcol, rng_flicker,
+    )  # fmt: skip
 
     # ---- Poisson shot noise on the true mean ----
     # mean_e is the expected electron count per pixel:
@@ -1725,18 +1844,10 @@ def main() -> None:
     else:
         total_e = np.clip(shot_e + rc_fpn + read_e, 0.0, None)
 
-    max_dn = float((1 << bit_depth) - 1)
-    if adc_clipping:
-        dn_clean = np.clip(signal_e / K_e_per_DN + black_dn, 0.0, max_dn)
-        dn_noisy = np.clip(total_e / K_e_per_DN + black_dn, 0.0, max_dn)
-    else:
-        dn_clean = np.clip(signal_e / K_e_per_DN + black_dn, 0.0, None)
-        dn_noisy = np.clip(total_e / K_e_per_DN + black_dn, 0.0, None)
-    dn_noisy = apply_adc_inl(dn_noisy, black_dn=black_dn, max_dn=max_dn, quadratic_fraction=adc_inl_quad_fraction)
-    if adc_dnl_std_lsb > 0.0:
-        # The table comes from spatial_rng (seeded per camera unit) because DNL is a
-        # property of the converter, identical on every frame it ever produces.
-        dn_noisy = apply_adc_dnl(dn_noisy, adc_dnl_table(max_dn, adc_dnl_std_lsb, spatial_rng), max_dn)
+    dn_clean, dn_noisy = electrons_to_dn(
+        signal_e, total_e, K_e_per_DN, black_dn, bit_depth, adc_clipping, adc_inl_quad_fraction, adc_dnl_std_lsb,
+        spatial_rng,
+    )  # fmt: skip
 
     if cfa_binning == "digital":
         dn_clean = bin_mosaic(dn_clean - black_dn, cfa_layout, mode="mean")[0] + black_dn
@@ -1819,8 +1930,7 @@ def main() -> None:
             ccm_source = "reference_unavailable"
             print(f"warning: preview CCM reference unavailable from {exr_in}: {exc}", file=sys.stderr)
     if wb_enabled and not bayer_on and cfa_layout is None:
-        _wb_src = np.clip(dn_clean - black_dn, 0.0, None)
-        wb_gains = white_patch_gains(_wb_src) if wb_method == "white_patch" else gray_world_gains(_wb_src)
+        wb_gains = preview_wb_gains(dn_clean, black_dn, wb_method)
         dn_clean = apply_preview_wb_dn(dn_clean, black_dn, wb_gains, highlight_clip_dn)
         dn_noisy = apply_preview_wb_dn(dn_noisy, black_dn, wb_gains, highlight_clip_dn)
     if (
@@ -1830,13 +1940,9 @@ def main() -> None:
         and ref_linear is not None
         and ref_linear.shape == dn_clean.shape
     ):
-        ccm = fit_preview_ccm(dn_clean, ref_linear, black_dn, ccm_method)
-        dn_clean = apply_preview_ccm_dn(dn_clean, black_dn, ccm)
-        dn_noisy = apply_preview_ccm_dn(dn_noisy, black_dn, ccm)
-        if highlight_clip_dn is not None:
-            _ccm_clip = highlight_clip_dn * float(np.min(wb_gains))
-            dn_clean = clip_preview_ccm_highlights(dn_clean, black_dn, ccm, _ccm_clip)
-            dn_noisy = clip_preview_ccm_highlights(dn_noisy, black_dn, ccm, _ccm_clip)
+        dn_clean, dn_noisy, ccm = preview_ccm_pair(
+            dn_clean, dn_noisy, ref_linear, black_dn, ccm_method, wb_gains, highlight_clip_dn
+        )
         ccm_source = ccm_method
 
     preview_no_normalize = bool(args.preview_no_normalize)
@@ -1863,18 +1969,13 @@ def main() -> None:
         dn_clean_rgb = _demosaic_fn(dn_clean, bayer_pat)
         dn_noisy_rgb = _demosaic_fn(dn_noisy, bayer_pat)
         if wb_enabled:
-            _wb_src = np.clip(dn_clean_rgb - black_dn, 0.0, None)
-            wb_gains = white_patch_gains(_wb_src) if wb_method == "white_patch" else gray_world_gains(_wb_src)
+            wb_gains = preview_wb_gains(dn_clean_rgb, black_dn, wb_method)
         dn_clean_rgb = apply_preview_wb_dn(dn_clean_rgb, black_dn, wb_gains, highlight_clip_dn)
         dn_noisy_rgb = apply_preview_wb_dn(dn_noisy_rgb, black_dn, wb_gains, highlight_clip_dn)
         if ccm_enabled and ref_linear is not None and ref_linear.shape == dn_clean_rgb.shape:
-            ccm = fit_preview_ccm(dn_clean_rgb, ref_linear, black_dn, ccm_method)
-            dn_clean_rgb = apply_preview_ccm_dn(dn_clean_rgb, black_dn, ccm)
-            dn_noisy_rgb = apply_preview_ccm_dn(dn_noisy_rgb, black_dn, ccm)
-            if highlight_clip_dn is not None:
-                _ccm_clip = highlight_clip_dn * float(np.min(wb_gains))
-                dn_clean_rgb = clip_preview_ccm_highlights(dn_clean_rgb, black_dn, ccm, _ccm_clip)
-                dn_noisy_rgb = clip_preview_ccm_highlights(dn_noisy_rgb, black_dn, ccm, _ccm_clip)
+            dn_clean_rgb, dn_noisy_rgb, ccm = preview_ccm_pair(
+                dn_clean_rgb, dn_noisy_rgb, ref_linear, black_dn, ccm_method, wb_gains, highlight_clip_dn
+            )
             ccm_source = ccm_method
         if highlight_clip_dn is not None and bool(bayer_cfg.get("highlight_desaturation", True)):
             # display only: neutralise the demosaic fringe next to raw-clipped highlights
