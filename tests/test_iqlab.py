@@ -186,3 +186,35 @@ def test_lateral_chromatic_displacement_recovers_shift():
     np.testing.assert_allclose(np.nanmedian(lcd.red_minus_green, axis=0), [1.5, 0.0], atol=0.05)
     np.testing.assert_allclose(np.nanmedian(lcd.blue_minus_green, axis=0), [0.0, -0.5], atol=0.05)
     assert lcd.max_px == pytest.approx(1.5, abs=0.1)
+
+
+def _dead_leaves_reference(size, *, r_min=1.0, r_max=100.0, low=0.25, high=0.75, seed=0):
+    """Original full-image NaN-scan loop, kept to pin the fast counter version bit for bit."""
+    rng = np.random.default_rng(seed)
+    img = np.full((size, size), np.nan)
+    yy, xx = np.mgrid[0:size, 0:size]
+    n = int(40 * size * size / (np.pi * r_min * r_max))
+    u = rng.random(n)
+    radii = 1.0 / np.sqrt(1.0 / r_min**2 - u * (1.0 / r_min**2 - 1.0 / r_max**2))
+    cx = rng.uniform(-r_max, size + r_max, n)
+    cy = rng.uniform(-r_max, size + r_max, n)
+    val = rng.uniform(low, high, n)
+    for r, x, y, v in zip(radii, cx, cy, val, strict=True):
+        x0, x1 = int(max(0, np.floor(x - r))), int(min(size, np.ceil(x + r) + 1))
+        y0, y1 = int(max(0, np.floor(y - r))), int(min(size, np.ceil(y + r) + 1))
+        if x0 >= x1 or y0 >= y1:
+            continue
+        sub = img[y0:y1, x0:x1]
+        m = ((xx[y0:y1, x0:x1] - x) ** 2 + (yy[y0:y1, x0:x1] - y) ** 2 <= r * r) & np.isnan(sub)
+        sub[m] = v
+        if not np.isnan(img).any():
+            break
+    img[np.isnan(img)] = 0.5 * (low + high)
+    return img
+
+
+@pytest.mark.parametrize(("size", "r_max", "seed"), [(128, 100.0, 0), (96, 30.0, 7), (160, 60.0, 3)])
+def test_dead_leaves_counter_matches_full_scan(size, r_max, seed):
+    fast = dead_leaves.dead_leaves(size, r_max=r_max, seed=seed)
+    ref = _dead_leaves_reference(size, r_max=r_max, seed=seed)
+    assert np.array_equal(fast, ref)
