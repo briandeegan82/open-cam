@@ -19,6 +19,7 @@ from pathlib import Path
 
 import lens_ghosts as lg
 import numpy as np
+from _repo import out_dir
 from iqlab import flare
 
 REPO = Path(__file__).resolve().parent.parent
@@ -68,7 +69,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--veiling-exr", type=Path, nargs="*", default=[])
     ap.add_argument("--point-exr", type=Path, nargs="*", default=[])
     ap.add_argument("--exclude-radius-px", type=float, default=10.0)
-    ap.add_argument("--out-dir", type=Path, default=REPO / "out" / "iq_lab" / "flare")
+    ap.add_argument("--out-dir", type=Path, default=out_dir("iq_lab", "flare"))
     args = ap.parse_args(argv)
     args.out_dir.mkdir(parents=True, exist_ok=True)
     report: dict = {}

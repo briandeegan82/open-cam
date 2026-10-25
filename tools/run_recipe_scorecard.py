@@ -46,6 +46,7 @@ import traceback
 from pathlib import Path
 
 import numpy as np
+from _repo import ensure_pbrt_output_dir, out_dir, pbrt_path
 from scipy import ndimage
 
 REPO = Path(__file__).resolve().parent.parent
@@ -71,7 +72,7 @@ from iqlab import cpiq, flare  # noqa: E402
 from iqlab.dead_leaves import dead_leaves, illumination_plane, texture_mtf  # noqa: E402
 
 RECIPE_DIR = REPO / "config" / "camera_recipes"
-PBRT = REPO / "third_party" / "pbrt-v4" / "build" / "pbrt"
+PBRT = pbrt_path()
 FILM_DIAGONAL_MM = 35.0  # pbrt-v4 RealisticCamera default
 VIEW = "monitor_100pct"
 #: Inset of the card ROIs (fraction of the card side); matches ``build_iq_diorama`` ``roi_xyxy``.
@@ -208,6 +209,8 @@ def builder_args(scene: str, optics: dict, xres: int, yres: int, spp: int) -> li
 
 
 def _pbrt(scene_file: Path, *extra: str) -> None:
+    outfile = extra[extra.index("--outfile") + 1] if "--outfile" in extra else None
+    ensure_pbrt_output_dir(scene_file, scene_file.parent, outfile)
     subprocess.run([str(PBRT), "--quiet", *extra, scene_file.name], cwd=scene_file.parent, check=True)
 
 
@@ -936,7 +939,7 @@ def main(argv: list[str] | None = None) -> int:
         default=0,
         help="diorama: re-render the measurement band at this spp for the metrics (0 = off; e.g. 256)",
     )
-    ap.add_argument("--out-dir", type=Path, default=REPO / "out" / "iq_lab" / "scorecard")
+    ap.add_argument("--out-dir", type=Path, default=out_dir("iq_lab", "scorecard"))
     ap.add_argument("--figure", action="store_true")
     ap.add_argument(
         "--no-stray-light",

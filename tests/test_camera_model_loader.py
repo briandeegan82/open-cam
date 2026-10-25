@@ -5,8 +5,7 @@ import unittest
 from pathlib import Path
 
 import yaml
-
-from tools.camera_model import load_camera_model
+from camera_model import load_camera_model
 
 
 class TestCameraModelLoader(unittest.TestCase):

@@ -504,10 +504,8 @@ def demosaic(raw: np.ndarray, layout: CfaLayout, method: str = "gradient") -> np
     if m == "malvar":
         pattern = bayer_pattern(layout)
         if pattern is not None:
-            try:
-                from apply_emva_noise import malvar_demosaic  # noqa: PLC0415 (apply_emva_noise imports this module)
-            except ModuleNotFoundError:  # pragma: no cover - import path variant for tests
-                from tools.apply_emva_noise import malvar_demosaic  # noqa: PLC0415
+            from apply_emva_noise import malvar_demosaic  # noqa: PLC0415 (apply_emva_noise imports this module)
+
             rgb = malvar_demosaic(raw, pattern)
             return rgb[..., ["RGB".index(c) for c in layout.channels]]
         warnings.warn(f"Malvar demosaic is Bayer-only; CFA {layout.name!r} uses the gradient method", stacklevel=2)
