@@ -229,3 +229,87 @@ def test_edge_mtf_noise_floor_grows_with_noise():
         assert 0.0 <= out["edge_mtf_0p4"] <= 1.2
         floors.append(out["edge_mtf_0p4_noise"])
     assert 0 < floors[0] < floors[1]
+
+
+def test_roi_band_covers_rois_on_cfa_grid():
+    rois = {"slanted_edge": [432, 200, 497, 265], "dead_leaves": [268, 200, 332, 266], "white": [71, 256, 81, 266]}
+    band = sc.roi_band(rois, 720, 480)
+    assert all(v % sc.ROI_ALIGN == 0 for v in band)
+    assert band[0] <= 71 - sc.ROI_MARGIN and band[1] <= 200 - sc.ROI_MARGIN
+    assert band[2] >= 497 + sc.ROI_MARGIN and band[3] >= 266 + sc.ROI_MARGIN
+    assert sc.roi_band({"slanted_edge": [2, 3, 718, 477]}, 720, 480) == [0, 0, 720, 480]
+    assert sc.roi_band({"slanted_edge": None}, 720, 480) is None
+
+
+def test_roi_band_pastes_crop_plus_caustics(tmp_path, monkeypatch):
+    h, w, band = 16, 24, [4, 8, 12, 16]
+    split = {"path_scene": "p.pbrt", "caustic_output": "c.exr"}
+    (tmp_path / "diorama.json").write_text(json.dumps({"caustic_split": split}))
+    sc.write_separate_channels_exr(tmp_path / "f.exr", {"S0.500,0nm": np.ones((h, w), np.float32)})
+    sc.write_separate_channels_exr(tmp_path / "c.exr", {"S0.500,0nm": np.full((h, w), 0.25, np.float32)})
+    calls = []
+
+    def fake_pbrt(scene_file, *extra):
+        calls.append(extra)
+        cw = [float(v) for v in extra[extra.index("--cropwindow") + 1].split(",")]
+        x0, x1, y0, y1 = (int(np.ceil(c * r)) for c, r in zip(cw, (w, w, h, h)))
+        crop = np.full((y1 - y0, x1 - x0), 3.0, np.float32)
+        sc.write_separate_channels_exr(tmp_path / extra[extra.index("--outfile") + 1], {"S0.500,0nm": crop})
+
+    monkeypatch.setattr(sc, "_pbrt", fake_pbrt)
+    out = sc.render_roi_band(tmp_path, tmp_path / "f.exr", band, 256, 7)
+    img = sc.read_separate_exr_channels(out)["S0.500,0nm"]
+    x0, y0, x1, y1 = band
+    np.testing.assert_allclose(img[y0:y1, x0:x1], 3.25)
+    img[y0:y1, x0:x1] = 1.0
+    np.testing.assert_allclose(img, 1.0)
+    assert calls[0][:4] == ("--seed", "7", "--spp", "256")
+
+
+def test_failed_recipe_is_an_error_row_in_the_csv_and_exit_code_1(tmp_path, monkeypatch):
+    import csv
+
+    def score(recipe, renders, work, seed):
+        if recipe == "default":
+            raise RuntimeError("boom")
+        return {"recipe": recipe, "cfa": "bayer", "hdr": False, "edge_mtf50_cy_px": 0.3}
+
+    monkeypatch.setattr(sc, "render_scene", lambda *a, **k: {})
+    monkeypatch.setattr(sc, "score_recipe", score)
+    rc = sc.main(["--recipes", "default", "iphone_8", "--scenes", "skin", "--out-dir", str(tmp_path)])
+    assert rc == 1
+    rows = {r["recipe"]: r for r in csv.DictReader((tmp_path / "scorecard.csv").open())}
+    assert rows["default"]["error"] == "RuntimeError: boom"
+    assert rows["iphone_8"]["error"] == "" and rows["iphone_8"]["edge_mtf50_cy_px"] == "0.3"
+    assert "## Failed recipes" in (tmp_path / "scorecard.md").read_text()
+
+
+def test_noise_spread_is_half_the_plus_minus_difference_and_nan_on_failure():
+    assert sc.noise_spread(lambda a: a.sum(), np.ones(4), np.full(4, 0.25)) == pytest.approx(1.0)
+
+    def fails(a):
+        raise ValueError("no edge")
+
+    assert np.isnan(sc.noise_spread(fails, np.ones(4), np.ones(4)))
+
+
+def test_score_diorama_texture_acutance_matches_ground_truth():
+    """The ROI sees the card inset by CARD_ROI_MARGIN; the reference must be that region at full resolution.
+    (Zooming the whole card into the ROI read ~0.25 low with ~0.2 seed scatter.)"""
+    from iqlab import cpiq
+    from iqlab.dead_leaves import dead_leaves
+    from scipy import ndimage
+
+    n, sigma = 96, 1.0
+    f = np.linspace(0, 0.5, 2001)
+    t = np.exp(-2 * np.pi**2 * sigma**2 * f**2) * np.abs(np.sinc(f))
+    view = cpiq.viewing_condition(sc.VIEW, 480)
+    truth = cpiq.acutance(f, t / t[(f > 0) & (f <= 0.05)].mean(), view)
+    for seed in (0, 1):
+        sub = dead_leaves(1024, seed=seed)[51:973, 51:973]
+        hi = ndimage.zoom(ndimage.gaussian_filter(sub, sigma * sub.shape[0] / n), 10 * n / sub.shape[0], order=1)
+        cap = hi.reshape(n, 10, n, 10).mean((1, 3)) * (1 + 0.16 * (0.5 - (np.arange(n) + 0.5) / n))[:, None]
+        rgb = np.full((480, 720, 3), cap.mean())
+        rgb[100 : 100 + n, 200 : 200 + n] = cap[..., None]
+        out = sc.score_diorama(rgb, {"dead_leaves": [200, 100, 200 + n, 100 + n]}, seed=seed)
+        assert out["texture_acutance"] == pytest.approx(truth, abs=0.05)

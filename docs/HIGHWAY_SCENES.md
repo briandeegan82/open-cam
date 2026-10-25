@@ -34,6 +34,19 @@ relative to the sky), converts the sky to pbrt's equal-area format, converts the
 vegetation to PLY, and indexes the car scenes' materials and meshes. The Bitterli car zips
 also contain an `envmap.pfm` that is *not* CC0; it is never used.
 
+Cars of the same model share their geometry (`instance_car_bodies` in `build_highway_scene.py`,
+also used by the urban and garage builders): every mesh whose material is identical in all
+copies of the model goes into one `ObjectBegin "<first car>:shared"` definition, which each
+`cars/carNN.pbrt` places with `ObjectInstance`; the paint, and any mix material that refers to
+it, stays a per-car mesh. Motion blur (`--animate`) still works, because pbrt applies the
+instance's animated transform. On the night wet highway (1280x720, 64 spp, 3 alternating runs)
+peak pbrt memory drops from 3.56 to 2.87 GB with unchanged render time (70.2 +/- 2.1 s vs
+70.3 +/- 6.7 s) and an unchanged image (frame mean ratio 0.9998, every 4x4-tile mean within
+1.2 sigma of the 3-seed noise). On the day highway (256 spp) it drops from 2.89 to 2.19 GB
+(175.7 +/- 3.4 s vs 172.8 +/- 2.0 s, frame mean ratio 1.00003, tiles within 0.9 sigma); scene load
+for the garage goes from 3.99 GB / 7.5 s to 0.83 GB / 3.0 s and for the urban scene from
+1.70 GB / 3.9 s to 0.85 GB / 1.3 s.
+
 ## Build, render, convert
 
 ```bash
@@ -73,6 +86,22 @@ to an uncached build.
 Road-wear entries hold the float32 maps (about 180 MB per level/seed/geometry). Delete the directory
 at any time to reclaim the space; it is rebuilt on demand.
 
+### Eight wavelengths per path (opt-in build, pbrt patch 0029)
+
+Stock pbrt carries 4 wavelengths per camera path (`NSpectrumSamples`). Patch 0029 makes this a build
+macro, `PBRT_NSPECTRUM` (default 4), so an 8-wavelength binary can be built next to the default one:
+
+```bash
+PBRT_NATIVE=OFF PBRT_NSPECTRUM=8 PBRT_BUILD_DIR=third_party/pbrt-v4/build-ns8 tools/build_pbrt.sh
+```
+
+The estimator is unchanged. Each path just splats twice as many stratified wavelengths, so both builds
+converge to the same image. Measured on the night wet-highway lead-car crop (`0.38,0.62,0.45,0.75` of
+1280x720, zsobol 256 spp, 32 buckets, seeds 1–4): crop mean ratio 1.0006 and largest per-bucket |z| 1.8.
+Time per render was 35.5 ± 1.6 → 37.1 ± 0.9 s (+5 %). Median per-pixel seed noise in the 500–600 nm band
+was 14.5 → 9.4 % on the lead car and 43 → 32 % on the flat road. On the sparkling wet road, the
+firefly-dominated noise was not resolved with 4 seeds (46 → 54 % at 500–600 nm, 38 → 30 % at 600–700 nm).
+
 ### Path regularization (`--regularize`, off by default)
 
 The highway, urban, rural, garage and tunnel builders write pbrt's unbiased path tracer by default.
@@ -100,6 +129,24 @@ Whole frames (1024 spp, same exclusion) change by at most 1.2 % (highway night, 
 the tunnel `outside_in` view show no 1/64-frame tile that differs by more than the seed-to-seed noise.
 Unbiased renders converge more slowly where these paths matter (night scenes on wet roads especially),
 so raise `--pixelsamples` there rather than switch regularization back on.
+
+### Pixel sampler (`--sampler`)
+
+The highway scene uses pbrt's `pmj02bn` sampler by default; `--sampler zsobol` restores the old
+default. Both are unbiased. Measured with the main pbrt binary and 32 buckets on two crops: night wet
+(`cropwindow 0.38,0.62,0.45,0.75`, 1024 spp, 4 seeds) and day (`0.25,0.75,0.40,0.80`, 256 spp,
+16 seeds). Noise is the median over lit pixels of the per-pixel seed-to-seed std / mean of a band sum.
+
+| | night zsobol | night pmj02bn | day zsobol | day pmj02bn |
+|---|---:|---:|---:|---:|
+| render time | 115.0 ± 3.6 s | 98.3 ± 1.2 s | 52.6 ± 1.2 s | 43.3 ± 0.7 s |
+| noise 400-500 / 500-600 / 600-700 nm | 18.8 / 13.0 / 13.8 % | 18.0 / 11.8 / 13.1 % | 8.5 / 6.1 / 4.7 % | 8.3 / 5.9 / 4.5 % |
+| crop mean, pmj02bn vs zsobol | | -0.04 % (-0.7 σ) | | -0.04 % (-1.4 σ) |
+
+pmj02bn is 15-18 % faster per sample (cheaper sample generation) and slightly less noisy, so it
+reaches zsobol's per-band noise in 0.71-0.79x the time. Single-bucket noise is the same for both
+(ratio 0.96-1.00), and the wet-road sparkle is unchanged. pmj02bn works best at power-of-4 sample
+counts (pbrt warns otherwise). Other scene builders still use zsobol.
 
 ### Light sampling of headlamps and street lights (pbrt patch 0022)
 
@@ -162,6 +209,13 @@ to the same answer. The exact scoring costs one intensity lookup per goniometric
 It is used when a scene has 1-256 goniometric lamps; above that `"bvh"` falls back to the patch 0022
 mixture. `"bvhbeam"` selects the 0022 mixture and `"bvhmean"` the stock sampler.
 
+Patch 0027 drops a redundant pmf evaluation from that sampler: each half's sampling routine already
+returns its own pmf for the light it drew, so `Sample()` only evaluates the other half's pmf
+(`PMFOne` after an exact draw, `PMFExact` after a stock draw) instead of both. The pmf is the same
+expression, so the image converges to the same answer. Night wet highway crop
+(`cropwindow 0.38,0.62,0.45,0.75`, zsobol 256 spp, 6 seeds, alternating binaries): 32.9 ± 0.7 s ->
+30.1 ± 0.9 s (0.91x); crop mean -0.001 % (0.0 σ), every bucket within 0.1 σ, noise unchanged (24.3 %).
+
 Same lead-car crop at 256 spp and `maxdepth` 8, 2 seeds (with patch 0023's per-pixel wavelength
 offsets). The rear-road crop is the wet road below the car, `cropwindow [0.40 0.60 0.68 0.85]`, 4 seeds.
 Per-pixel noise is the seed-to-seed RMS difference over the region mean; the camera channels are the
@@ -181,6 +235,17 @@ Region means agree within 1 % (rear road: 5.95 / 3.54 / 1.82 against 5.99 / 3.54
 standard error 0.01). The road just in front of the car converges to the same value: at 16384 spp
 it is 0.915 ± 0.003 (4 seeds) against 0.928 ± 0.009 with patch 0022. At equal render time (full frame +37 %) the lead car's per-pixel variance is about 5.6x lower
 than with patch 0022.
+
+#### Shared goniometric maps (pbrt patch 0028)
+
+All headlamps of one lamp model use the same goniometric map. Stock pbrt loaded the map and
+built its sampling distribution once per lamp; patch 0028 keeps one copy per map file
+(`GoniometricData`), shared by every lamp that names it, and takes `Phi()`/`Bounds()` from the
+stored mean instead of re-summing the image. Emission is unchanged. Night wet highway: pbrt's
+"Light image and distributions" memory drops from 701 to 36 MiB and peak RSS from 2.80 to
+2.16 GB (5 alternating 1-spp loads); scene load time is unchanged (5.4 +/- 0.6 s vs
+5.1 +/- 0.6 s); on the lead-car crop (64 spp, 3 seeds) the mean ratio is 1.00001, every
+spectral bucket agrees within 0.03 sigma and the per-pixel seed noise is the same (35.1 %).
 
 ## Radiometry
 

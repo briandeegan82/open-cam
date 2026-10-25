@@ -68,12 +68,14 @@ from exr_multispectral import (  # noqa: E402
     write_separate_channels_exr,
 )
 from iqlab import cpiq, flare  # noqa: E402
-from iqlab.dead_leaves import dead_leaves, texture_mtf  # noqa: E402
+from iqlab.dead_leaves import dead_leaves, illumination_plane, texture_mtf  # noqa: E402
 
 RECIPE_DIR = REPO / "config" / "camera_recipes"
 PBRT = REPO / "third_party" / "pbrt-v4" / "build" / "pbrt"
 FILM_DIAGONAL_MM = 35.0  # pbrt-v4 RealisticCamera default
 VIEW = "monitor_100pct"
+#: Inset of the card ROIs (fraction of the card side); matches ``build_iq_diorama`` ``roi_xyxy``.
+CARD_ROI_MARGIN = 0.05
 CC_WHITE = 18  # ColorChecker "white 9.5"
 HDR_MIN_SPP = 128  # the chart is rendered once; MC noise must stay well below sensor noise for CDP
 HDR_MIN_XRES = 960  # HDR-chart patches are ~2 % of the width; 4x4 CFA tiles (quad Bayer) need >= 4 guide sites
@@ -98,6 +100,7 @@ METRICS = (
     ("snr_at_18pct_db", "SNR @ 18 % sat. dB", "{:.1f}"),
     ("cdp_min_level_db_at_0p9", "CDP≥0.9 from dB", "{:.1f}"),
     ("edge_mtf50_cy_px", "MTF50 cy/px", "{:.3f}"),
+    ("edge_mtf50_noise", "MTF50 noise ±", "{:.3f}"),
     ("edge_acutance", "Edge acutance", "{:.3f}"),
     ("edge_mtf_rebound", "MTF rebound", "{:.2f}"),
     ("edge_mtf_0p4", "MTF @0.4 cy/px", "{:.3f}"),
@@ -105,6 +108,7 @@ METRICS = (
     ("edge_mtf50_sensor_cy_px", "Sensor MTF50 cy/px", "{:.3f}"),
     ("edge_acutance_sensor", "Sensor edge acutance", "{:.3f}"),
     ("texture_acutance", "Texture acutance", "{:.3f}"),
+    ("texture_acutance_noise", "Texture acutance noise ±", "{:.3f}"),
     ("skin_de00_mean", "Skin ΔE00 mean", "{:.2f}"),
     ("skin_de00_max", "Skin ΔE00 max", "{:.2f}"),
     ("veiling_glare_pct", "Veiling glare %", "{:.2f}"),
@@ -246,6 +250,54 @@ def world_roi(P: np.ndarray, rect: list[float], z: float, margin: float = 0.15) 
 # ROI border than at the edge), which flattens the measured MTF near 0.5 and makes MTF50 noise-driven.
 # Charts are scored under the uniform fill panel alone, as in a lab; the HDR and flare scenes cover glare.
 DIORAMA_UNIFORM_LIGHT = ["--lamp-radiance", "0", "--window-radiance", "0"]
+ROI_ALIGN = 4  # band corners on multiples of the largest CFA tile (quad Bayer 4x4): CFA phase unchanged
+ROI_MARGIN = 8
+
+
+def roi_band(rois: dict, xres: int, yres: int, margin: int = ROI_MARGIN, align: int = ROI_ALIGN) -> list[int] | None:
+    """``[x0, y0, x1, y1]``: the slanted-edge, dead-leaves and white ROIs plus ``margin``, on ``align``."""
+    boxes = [rois[k] for k in ("slanted_edge", "dead_leaves", "white") if rois.get(k)]
+    if not boxes:
+        return None
+    x0 = max(0, (min(b[0] for b in boxes) - margin) // align * align)
+    y0 = max(0, (min(b[1] for b in boxes) - margin) // align * align)
+    x1 = min(xres, -(-(max(b[2] for b in boxes) + margin) // align) * align)
+    y1 = min(yres, -(-(max(b[3] for b in boxes) + margin) // align) * align)
+    return [x0, y0, x1, y1]
+
+
+def render_roi_band(out: Path, frame: Path, band: list[int], spp: int, seed: int, tag: str = "") -> Path:
+    """``frame`` with ``band`` re-rendered at ``spp``; returns the new EXR (``*_roi<tag>.exr``).
+
+    Only the path pass is re-rendered (``--cropwindow``); the full frame's caustic pass is added back
+    in the band, so the band stays an unbiased estimate of the same image (caustics are < 0.1 % of the
+    ROI signal, so their lower spp adds no visible noise)."""
+    meta = json.loads((out / "diorama.json").read_text())
+    split = meta.get("caustic_split")
+    scene = split["path_scene"] if split else "iq_diorama.pbrt"
+    full = read_separate_exr_channels(frame)
+    k0 = next(iter(full))
+    yres, xres = full[k0].shape
+    x0, y0, x1, y1 = band
+    # pbrt's crop pixels are ceil(res * window): a quarter pixel below each edge rounds to it exactly
+    cw = ",".join(f"{(v - 0.25) / r:.9f}" for v, r in ((x0, xres), (x1, xres), (y0, yres), (y1, yres)))
+    crop_exr = f"roi_path{tag}.exr"
+    _pbrt(out / scene, "--seed", str(seed), "--spp", str(spp), "--cropwindow", cw, "--outfile", crop_exr)
+    crop = read_separate_exr_channels(out / crop_exr)
+    caus = read_separate_exr_channels(out / combine_caustics.tagged(split["caustic_output"], tag)) if split else {}
+    res = {}
+    for k, v in full.items():
+        c = crop[k].astype(np.float64)
+        if c.shape != (y1 - y0, x1 - x0):
+            raise ValueError(f"ROI crop is {c.shape}, expected {(y1 - y0, x1 - x0)} for band {band}")
+        if k in caus:
+            c += caus[k][y0:y1, x0:x1]
+        v = v.copy()
+        v[y0:y1, x0:x1] = c
+        res[k] = v
+    path = out / f"{frame.stem}_roi.exr"
+    write_separate_channels_exr(path, res)
+    return path
 
 
 def add_lens_stray_light(exr: Path, optics: dict, focus_m: float, cfg: dict | None = None) -> tuple[Path, dict]:
@@ -285,8 +337,21 @@ def add_lens_stray_light(exr: Path, optics: dict, focus_m: float, cfg: dict | No
     return out, report
 
 
-def render_scene(scene: str, optics: dict, out: Path, xres: int, yres: int, spp: int, stray_light: bool = True) -> dict:
-    """Build + render ``scene`` for one optics group; returns EXR path, manifest and raster ROIs."""
+def render_scene(
+    scene: str,
+    optics: dict,
+    out: Path,
+    xres: int,
+    yres: int,
+    spp: int,
+    stray_light: bool = True,
+    roi_spp: int = 0,
+    render_seed: int = 0,
+) -> dict:
+    """Build + render ``scene`` for one optics group; returns EXR path, manifest and raster ROIs.
+
+    Diorama: ``roi_spp`` > 0 re-renders the measurement band (``roi_band``) at that spp for both
+    captures (``render_roi_band``); ``render_seed`` is pbrt's seed (the twin uses ``render_seed + 1``)."""
     out.mkdir(parents=True, exist_ok=True)
     if scene == "hdr":
         spp = max(spp, HDR_MIN_SPP)
@@ -312,7 +377,8 @@ def render_scene(scene: str, optics: dict, out: Path, xres: int, yres: int, spp:
         scene_file, film = out / sc["scene"], sc["film_output"]
     t0 = time.time()
     if scene == "diorama":
-        combine_caustics.render(out, PBRT)  # two passes with the default caustic photon split
+        seed0 = ["--seed", str(render_seed)] if render_seed else []
+        combine_caustics.render(out, PBRT, seed0)  # two passes with the default caustic photon split
     else:
         _pbrt(scene_file)
     res = {"exr": out / film, "meta": meta, "render_s": time.time() - t0, "rois": {}, "shape": (yres, xres)}
@@ -322,14 +388,14 @@ def render_scene(scene: str, optics: dict, out: Path, xres: int, yres: int, spp:
     if scene == "diorama":
         # Second, independent render (pbrt --seed 1): the twin capture then differs in MC noise too,
         # so the texture metric's noise PSD removes render noise as well as sensor noise.
-        twin = combine_caustics.render(out, PBRT, ["--seed", "1"], tag="_seed1")
+        twin = combine_caustics.render(out, PBRT, ["--seed", str(render_seed + 1)], tag="_seed1")
         res["exr_twin"] = twin
     if scene in ("diorama", "skin") and optics["camera"] == "realistic":
         P = gbuffer_world_positions(scene_file, xres, yres)
         if scene == "diorama":
             for name in ("slanted_edge", "dead_leaves"):
                 w = meta["cards"][name]["world"]
-                res["rois"][name] = world_roi(P, w, w[4], 0.05)
+                res["rois"][name] = world_roi(P, w, w[4], CARD_ROI_MARGIN)
             w = meta["colorchecker"][CC_WHITE]["world"]
             res["rois"]["white"] = world_roi(P, w, w[4], 0.2)
         else:
@@ -341,6 +407,11 @@ def render_scene(scene: str, optics: dict, out: Path, xres: int, yres: int, spp:
         res["rois"]["patches"] = [p["roi_xyxy"] for p in meta["patches"]]
     if scene == "skin":
         res["rois"]["white"] = res["rois"]["patches"][meta["white_index"]]
+    if scene == "diorama" and roi_spp > 0 and (band := roi_band(res["rois"], xres, yres)) is not None:
+        t1 = time.time()
+        res["exr"] = render_roi_band(out, res["exr"], band, roi_spp, render_seed)
+        res["exr_twin"] = render_roi_band(out, res["exr_twin"], band, roi_spp, render_seed + 1, "_seed1")
+        res["roi_band"], res["roi_render_s"] = band, time.time() - t1
     radiometry = {
         "camera": {"type": optics["camera"], **({"lensfile": optics["lensfile"]} if "lensfile" in optics else {})}
     }
@@ -601,19 +672,12 @@ def score_diorama(
         out["edge_mtf_rebound"] = mtf_rebound(r.frequency_cy_per_px, r.mtf)
         out["edge_mtf_0p4"] = float(np.interp(0.4, r.frequency_cy_per_px, r.mtf))
         if noise is not None:
-            # Noise floor of the fine-detail reading: SFRs of the edge with the measured noise
-            # realisation added and subtracted differ by twice its effect at 0.4 cy/px.
-            try:
-                nz = _luma(noise)[y0:y1, x0:x1]
-                ed = y[y0:y1, x0:x1]
-                rp = sfr.slanted_edge_sfr(despeckle(ed + nz))
-                rm = sfr.slanted_edge_sfr(despeckle(ed - nz))
-                out["edge_mtf_0p4_noise"] = 0.5 * abs(
-                    float(np.interp(0.4, rp.frequency_cy_per_px, rp.mtf))
-                    - float(np.interp(0.4, rm.frequency_cy_per_px, rm.mtf))
-                )
-            except ValueError:
-                out["edge_mtf_0p4_noise"] = float("nan")
+            nz = _luma(noise)[y0:y1, x0:x1]
+            ed = y[y0:y1, x0:x1]
+            out["edge_mtf50_noise"] = noise_spread(lambda e: sfr.slanted_edge_sfr(despeckle(e)).mtf50_cy_per_px, ed, nz)
+            out["edge_mtf_0p4_noise"] = noise_spread(
+                lambda e: np.interp(0.4, *_freq_mtf(sfr.slanted_edge_sfr(despeckle(e)))), ed, nz
+            )
         if sensor is not None:
             try:
                 rs = sfr.slanted_edge_sfr(despeckle(sensor[y0:y1, x0:x1]))
@@ -624,16 +688,51 @@ def score_diorama(
     if rois.get("dead_leaves"):
         x0, y0, x1, y1 = rois["dead_leaves"]
         crop = y[y0:y1, x0:x1]
-        ideal = dead_leaves(1024, seed=seed)
-        ideal = ndimage.zoom(ideal, (crop.shape[0] / ideal.shape[0], crop.shape[1] / ideal.shape[1]), order=0)
-        ideal = ideal[: crop.shape[0], : crop.shape[1]] * crop.mean() / ideal.mean()
-        noise_patch = _luma(noise)[y0:y1, x0:x1] if noise is not None else None
-        f, m = texture_mtf(crop, ideal, noise_patch)
-        low = (f > 0) & (f <= 0.05)
-        ref = float(m[low].mean()) if low.any() else 1.0
-        # Noise PSD >= capture PSD at low frequency: the texture is buried in noise and unmeasurable.
-        out["texture_acutance"] = float(cpiq.acutance(f, m / ref, view)) if ref > 0 else float("nan")
+        plane = illumination_plane(crop)
+        crop = crop / plane
+        # Reference: the part of the full-resolution card that the ROI sees (inset by the ROI margin).
+        card = dead_leaves(1024, seed=seed)
+        m = int(round(CARD_ROI_MARGIN * card.shape[0]))
+        ideal = card[m:-m, m:-m]
+        noise_patch = _luma(noise)[y0:y1, x0:x1] / plane if noise is not None else None
+        out["texture_acutance"] = _texture_acutance(crop, ideal, noise_patch, view)
+        if noise_patch is not None:
+            out["texture_acutance_noise"] = twin_spread(
+                lambda c: _texture_acutance(c, ideal, noise_patch, view), crop, noise_patch
+            )
     return out
+
+
+def _freq_mtf(r) -> tuple[np.ndarray, np.ndarray]:
+    return r.frequency_cy_per_px, r.mtf
+
+
+def _texture_acutance(crop: np.ndarray, ideal: np.ndarray, noise_patch: np.ndarray | None, view) -> float:
+    f, m = texture_mtf(crop, ideal, noise_patch)
+    low = (f > 0) & (f <= 0.05)
+    ref = float(m[low].mean()) if low.any() else 1.0
+    # Noise PSD >= capture PSD at low frequency: the texture is buried in noise and unmeasurable.
+    return float(cpiq.acutance(f, m / ref, view)) if ref > 0 else float("nan")
+
+
+def twin_spread(metric, img: np.ndarray, noise: np.ndarray) -> float:
+    """Scatter of ``metric`` between two captures: ``img - sqrt(2) * noise`` is the twin capture (same
+    scene, the other noise draw), so this is |metric(img) - metric(twin)| / sqrt 2. Used where ``metric``
+    already subtracts the noise power, so adding or removing noise (``noise_spread``) would misstate it."""
+    try:
+        return float(abs(float(metric(img)) - float(metric(img - np.sqrt(2.0) * noise))) / np.sqrt(2.0))
+    except ValueError:
+        return float("nan")
+
+
+def noise_spread(metric, img: np.ndarray, noise: np.ndarray) -> float:
+    """Noise floor of ``metric(img)``: half the difference of the metric with the capture's own noise
+    realisation (difference of two noise draws / sqrt 2) added and subtracted. NaN if either reading
+    fails or is NaN."""
+    try:
+        return float(0.5 * abs(float(metric(img + noise)) - float(metric(img - noise))))
+    except ValueError:
+        return float("nan")
 
 
 def score_skin(rgb: np.ndarray, chart: dict, rois: list) -> dict:
@@ -747,7 +846,7 @@ def _fmt(v, f: str) -> str:
 def write_report(rows: list[dict], groups: dict, args: argparse.Namespace, timing: dict) -> None:
     out = args.out_dir
     out.mkdir(parents=True, exist_ok=True)
-    keys = ["recipe", "optics", "cfa", "hdr"] + [k for k, _, _ in METRICS]
+    keys = ["recipe", "optics", "cfa", "hdr"] + [k for k, _, _ in METRICS] + ["error"]
     with (out / "scorecard.csv").open("w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=keys, extrasaction="ignore")
         w.writeheader()
@@ -830,6 +929,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--yres", type=int, default=480)
     ap.add_argument("--pixelsamples", type=int, default=64)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--render-seed", type=int, default=0, help="pbrt --seed of the renders (diorama twin: +1)")
+    ap.add_argument(
+        "--roi-spp",
+        type=int,
+        default=0,
+        help="diorama: re-render the measurement band at this spp for the metrics (0 = off; e.g. 256)",
+    )
     ap.add_argument("--out-dir", type=Path, default=REPO / "out" / "iq_lab" / "scorecard")
     ap.add_argument("--figure", action="store_true")
     ap.add_argument(
@@ -844,6 +950,8 @@ def main(argv: list[str] | None = None) -> int:
     work = args.out_dir / "work"
     rows, timing = [], {"render": 0.0, "sensor": 0.0}
     settings = {"xres": args.xres, "yres": args.yres, "pixelsamples": args.pixelsamples, "seed": args.seed}
+    if args.roi_spp or args.render_seed:
+        settings |= {"roi_spp": args.roi_spp, "render_seed": args.render_seed}
     settings["scenes"] = sorted(args.scenes)
     settings["stray_light"] = None if args.no_stray_light else STRAY_LIGHT
     cache_dir = work / "rows"
@@ -872,7 +980,15 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 d = work / re.sub(r"[^A-Za-z0-9._-]", "_", key) / scene
                 renders[scene] = render_scene(
-                    scene, g["optics"], d, args.xres, args.yres, args.pixelsamples, not args.no_stray_light
+                    scene,
+                    g["optics"],
+                    d,
+                    args.xres,
+                    args.yres,
+                    args.pixelsamples,
+                    not args.no_stray_light,
+                    args.roi_spp,
+                    args.render_seed,
                 )
         timing["render"] += time.time() - t0
         t0 = time.time()
@@ -892,7 +1008,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.figure:
         plot(rows, args.out_dir / "scorecard.png")
     print(f"{len(rows)} recipes, {len(groups)} optics groups -> {args.out_dir}", file=sys.stderr)
-    return 0
+    failed = [r["recipe"] for r in rows if r.get("error")]
+    if failed:
+        print(f"{len(failed)} recipe(s) failed: {', '.join(failed)}", file=sys.stderr)
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

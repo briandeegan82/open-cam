@@ -1,0 +1,19 @@
+diff --git a/src/pbrt/util/spectrum.h b/src/pbrt/util/spectrum.h
+index e075b7e..8b11d1e 100644
+--- a/src/pbrt/util/spectrum.h
++++ b/src/pbrt/util/spectrum.h
+@@ -38,7 +38,13 @@ namespace pbrt {
+ #endif
+ constexpr Float Lambda_min = 360, Lambda_max = PBRT_LAMBDA_MAX_NM;
+ 
+-static constexpr int NSpectrumSamples = 4;
++// open-cam: wavelengths carried per path; build with -DPBRT_NSPECTRUM=8 (tools/build_pbrt.sh,
++// PBRT_NSPECTRUM env): less colour noise per path, at a higher cost per path.
++#ifndef PBRT_NSPECTRUM
++#define PBRT_NSPECTRUM 4
++#endif
++static_assert(PBRT_NSPECTRUM >= 1, "PBRT_NSPECTRUM must be positive");
++static constexpr int NSpectrumSamples = PBRT_NSPECTRUM;
+ 
+ static constexpr Float CIE_Y_integral = 106.856895;
+ 
