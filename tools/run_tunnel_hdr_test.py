@@ -32,6 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import build_tunnel_scene as bts  # noqa: E402
 import run_recipe_scorecard as sc  # noqa: E402
 from exr_multispectral import linear_rgb_from_exr  # noqa: E402
+from image_io import write_png
 
 REPO = sc.REPO
 DEFAULT_RECIPES = ["default", "default_hdr_dcg", "default_hdr_split_pixel", "default_hdr_lofic"]
@@ -118,10 +119,8 @@ def tonemap(rgb: np.ndarray, white: float, k: float = 1000.0) -> np.ndarray:
 
 
 def save_png(rgb01: np.ndarray, path: Path) -> None:
-    from PIL import Image
-
     v = np.where(rgb01 <= 0.0031308, 12.92 * rgb01, 1.055 * np.power(np.clip(rgb01, 0, 1), 1 / 2.4) - 0.055)
-    Image.fromarray((np.clip(v, 0, 1) * 255 + 0.5).astype(np.uint8)).save(path)
+    write_png(path, (np.clip(v, 0, 1) * 255 + 0.5).astype(np.uint8))
 
 
 def wb_gains(e: np.ndarray, layout, shape: tuple, roi: list[int] | None) -> np.ndarray:

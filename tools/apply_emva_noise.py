@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 import hdr_pixel
+import image_io
 import numpy as np
 import yaml
 from camera_model import (
@@ -277,13 +278,7 @@ def to_png8_preview(
 
 
 def write_png(path: Path, arr: np.ndarray) -> None:
-    try:
-        import imageio.v3 as iio
-    except ImportError as exc:
-        raise RuntimeError("imageio is required to write PNG outputs.") from exc
-    path.parent.mkdir(parents=True, exist_ok=True)
-    # PNG is lossless at any level; level 1 is ~5x faster than the default 6 for slightly larger files.
-    iio.imwrite(path, arr, compress_level=1)
+    image_io.write_png(path, arr, compress_level=1)  # level 1: ~5x faster than 6, still lossless
 
 
 def write_raw16(path: Path, raw_u16: np.ndarray) -> None:

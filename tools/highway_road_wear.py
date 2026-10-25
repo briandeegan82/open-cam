@@ -48,6 +48,7 @@ from pathlib import Path
 
 import derived_cache
 import numpy as np
+from image_io import write_exr, write_png
 
 # Per-level parameters. Spacings/frequencies are typical of an ageing (~10-15 year old) interstate
 # surface; see the LTPP Distress Identification Manual for the distress definitions.
@@ -134,19 +135,11 @@ def periodic_noise(rng: np.random.Generator, shape, spacing, corr) -> np.ndarray
 
 
 def write_float_exr(path: Path, a: np.ndarray) -> None:
-    import OpenEXR
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    header = {"compression": OpenEXR.ZIP_COMPRESSION, "type": OpenEXR.scanlineimage}
-    with OpenEXR.File(header, {"Y": np.ascontiguousarray(a, dtype=np.float16)}) as f:
-        f.write(str(path))
+    write_exr(path, {"Y": a}, np.float16)
 
 
 def _write_normal_png(path: Path, n: np.ndarray) -> None:
-    from PIL import Image
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    Image.fromarray(np.clip(np.round((n + 1.0) * 127.5), 0, 255).astype(np.uint8)).save(path)
+    write_png(path, np.clip(np.round((n + 1.0) * 127.5), 0, 255).astype(np.uint8))
 
 
 def linear_normal_map(src: Path, out_dir: Path) -> Path:

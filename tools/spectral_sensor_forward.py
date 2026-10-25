@@ -18,6 +18,7 @@ from camera_model import (
     load_camera_model,
     sensor_forward_config_from_camera_model,
 )
+from image_io import write_png
 from qe_curves import load_qe_curves_rgb, read_csv_curve
 from sensor_radiometry import (
     cos4_vignetting_from_pinhole,
@@ -536,12 +537,7 @@ def main() -> None:
         illuminance_input_lux=np.float64(float(illuminance_input_lux) if illuminance_input_lux is not None else np.nan),
         illuminance_scale=np.float64(illuminance_scale),
     )
-    try:
-        import imageio.v3 as iio
-
-        iio.imwrite(out_npz.with_suffix(".png"), preview_u8)
-    except Exception:
-        pass
+    write_png(out_npz.with_suffix(".png"), preview_u8)
 
     print(f"Wrote electrons npz: {out_npz}")
     print(f"Wrote preview png: {out_npz.with_suffix('.png')}")

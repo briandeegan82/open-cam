@@ -57,6 +57,7 @@ from highway_sky import (
     write_rgb_exr,
 )
 from highway_spectra import reflectance
+from image_io import write_exr
 
 TIMES = ("day", "dusk", "night")
 LIGHT_WL = np.arange(360.0, 831.0, 1.0)  # emission spectra are written at 1 nm (sharp lines)
@@ -308,12 +309,7 @@ def streetlight_map(n: int, flux: float) -> np.ndarray:
 
 
 def write_y_exr(path: Path, y: np.ndarray) -> None:
-    import OpenEXR
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    header = {"compression": OpenEXR.ZIP_COMPRESSION, "type": OpenEXR.scanlineimage}
-    with OpenEXR.File(header, {"Y": np.ascontiguousarray(y, dtype=np.float32)}) as f:
-        f.write(str(path))
+    write_exr(path, {"Y": y})
 
 
 def equal_area_sphere_to_square(d: np.ndarray) -> np.ndarray:
