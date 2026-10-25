@@ -17,7 +17,15 @@ except ModuleNotFoundError:  # pragma: no cover - import path variant for tests
 
 LEGACY_REALISTIC_LENSFILE = "scenes/lenses/wide_22mm.dat"
 DEFAULT_REALISTIC_LENSFILE = "config/lenses/wide_22mm.dat"
-DEFAULT_ILLUMINANT_CSV = "spectra/illuminant/interpolated/D55.csv"
+DEFAULT_ILLUMINANT_CSV = "spectra/illuminant/interpolated/D65.csv"
+
+
+def resolve_illuminant_rel(render: dict) -> str:
+    """``render.illuminant``, or the default when it is unset, empty, ``null`` or ``none``."""
+    illum = render.get("illuminant")
+    if illum is None or not str(illum).strip() or str(illum).strip().lower() in ("null", "none"):
+        return DEFAULT_ILLUMINANT_CSV
+    return str(illum).strip()
 
 
 def resolve_camera_model_path(repo: Path, paths: dict) -> tuple[str, Path]:
@@ -121,10 +129,7 @@ def main() -> None:
     export("SPECTRAL_NBUCKETS", int(render.get("spectral_nbuckets", 32)))
     export("SPECTRAL_LAMBDA_MIN", float(render.get("spectral_lambda_min", 360.0)))
     export("SPECTRAL_LAMBDA_MAX", float(render.get("spectral_lambda_max", 830.0)))
-    illum = render.get("illuminant", None)
-    if illum is None or not str(illum).strip() or str(illum).strip().lower() in ("null", "none"):
-        illum = DEFAULT_ILLUMINANT_CSV
-    export("RENDER_ILLUMINANT_REL", str(illum).strip())
+    export("RENDER_ILLUMINANT_REL", resolve_illuminant_rel(render))
     bea = render.get("builder_extra_args", [])
     if bea is None:
         bea = []

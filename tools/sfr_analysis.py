@@ -442,9 +442,10 @@ def mtf_from_lsf(
 ) -> tuple[np.ndarray, np.ndarray]:
     """FFT the LSF into a normalised MTF sampled in cycles per pixel.
 
-    The centred-difference derivative is itself a low-pass filter with response
-    ``sinc(f * bin_width)``; dividing it out is what lets the recovered MTF match
-    theory instead of drooping at high frequency.
+    The centred-difference derivative (``np.gradient``, taps 2 bins apart) is
+    itself a low-pass filter with response ``sinc(2 * f * bin_width)``; dividing
+    it out is what lets the recovered MTF match theory instead of drooping at
+    high frequency.
     """
     lsf_arr = np.asarray(lsf, dtype=np.float64)
     n = lsf_arr.size
@@ -456,7 +457,7 @@ def mtf_from_lsf(
 
     freq = np.fft.rfftfreq(n, d=bin_width_px)
     if correct_differentiation:
-        correction = np.sinc(freq * bin_width_px)
+        correction = np.sinc(2.0 * freq * bin_width_px)
         mtf = mtf / np.where(np.abs(correction) < 1e-6, 1.0, correction)
     return freq, mtf
 

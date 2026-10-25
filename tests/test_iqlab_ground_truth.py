@@ -27,14 +27,15 @@ def test_true_edge_mtf50_is_half_power_point():
         assert v.true_edge_mtf(np.array([f50]), sigma)[0] == pytest.approx(0.5, abs=1e-9)
 
 
-def test_sharp_edge_bias_is_from_4x_binning():
-    """At MTF50 ~ 0.32 cy/px the ISO-default 4x ESF binning reads ~2.5 % low; 8x removes it."""
+def test_sharp_edge_mtf50_is_unbiased_at_4x_and_8x_binning():
+    """At MTF50 ~ 0.32 cy/px the derivative correction sinc(2 f bw) leaves no binning bias
+    (sinc(f bw) read ~2.5 % low at 4x)."""
     sigma = 0.5
     truth = v.true_edge_mtf50(sigma)
     img = v.blurred_slanted_edge(sigma, 5.0)
     bias4 = sfr.slanted_edge_sfr(img, oversampling=4).mtf50_cy_per_px / truth - 1
     bias8 = sfr.slanted_edge_sfr(img, oversampling=8).mtf50_cy_per_px / truth - 1
-    assert -0.035 < bias4 < -0.015
+    assert abs(bias4) < 0.01
     assert abs(bias8) < 0.01
 
 

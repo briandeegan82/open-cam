@@ -1,0 +1,256 @@
+diff --git a/src/pbrt/lights.cpp b/src/pbrt/lights.cpp
+index bb91527..4254be3 100644
+--- a/src/pbrt/lights.cpp
++++ b/src/pbrt/lights.cpp
+@@ -524,26 +524,38 @@ ProjectionLight *ProjectionLight::Create(const Transform &renderFromLight, Mediu
+ }
+ 
+ // GoniometricLight Method Definitions
++const GoniometricData *GoniometricData::Create(Image im, Allocator alloc) {
++    CHECK_EQ(1, im.NChannels());
++    CHECK_EQ(im.Resolution().x, im.Resolution().y);
++    GoniometricData *data = alloc.new_object<GoniometricData>(alloc);
++    data->image = std::move(im);
++    // Compute sampling distribution for _GoniometricLight_
++    Array2D<Float> d = data->image.GetSamplingDistribution();
++    data->distrib = PiecewiseConstant2D(d, alloc);
++    for (int y = 0; y < data->image.Resolution().y; ++y)
++        for (int x = 0; x < data->image.Resolution().x; ++x)
++            data->meanY += data->image.GetChannel({x, y}, 0);
++    data->meanY /= data->image.Resolution().x * data->image.Resolution().y;
++
++    imageBytes += data->image.BytesUsed() + data->distrib.BytesUsed();
++    return data;
++}
++
+ GoniometricLight::GoniometricLight(const Transform &renderFromLight,
+                                    const MediumInterface &mediumInterface, Spectrum Iemit,
+                                    Float scale, Image im, Allocator alloc)
++    : GoniometricLight(renderFromLight, mediumInterface, Iemit, scale,
++                       GoniometricData::Create(std::move(im), alloc)) {}
++
++GoniometricLight::GoniometricLight(const Transform &renderFromLight,
++                                   const MediumInterface &mediumInterface, Spectrum Iemit,
++                                   Float scale, const GoniometricData *data)
+     : LightBase(LightType::DeltaPosition, renderFromLight, mediumInterface),
+       Iemit(LookupSpectrum(Iemit)),
+       scale(scale),
+-      image(std::move(im)),
+-      distrib(alloc) {
+-    CHECK_EQ(1, image.NChannels());
+-    CHECK_EQ(image.Resolution().x, image.Resolution().y);
+-    // Compute sampling distribution for _GoniometricLight_
+-    Array2D<Float> d = image.GetSamplingDistribution();
+-    distrib = PiecewiseConstant2D(d);
+-    for (int y = 0; y < image.Resolution().y; ++y)
+-        for (int x = 0; x < image.Resolution().x; ++x)
+-            meanY += image.GetChannel({x, y}, 0);
+-    meanY /= image.Resolution().x * image.Resolution().y;
+-
+-    imageBytes += image.BytesUsed() + distrib.BytesUsed();
+-}
++      image(&data->image),
++      distrib(&data->distrib),
++      meanY(data->meanY) {}
+ 
+ PBRT_CPU_GPU pstd::optional<LightLiSample> GoniometricLight::SampleLi(LightSampleContext ctx,
+                                                          Point2f u,
+@@ -562,21 +574,11 @@ PBRT_CPU_GPU Float GoniometricLight::PDF_Li(LightSampleContext, Vector3f,
+ }
+ 
+ SampledSpectrum GoniometricLight::Phi(SampledWavelengths lambda) const {
+-    Float sumY = 0;
+-    for (int y = 0; y < image.Resolution().y; ++y)
+-        for (int x = 0; x < image.Resolution().x; ++x)
+-            sumY += image.GetChannel({x, y}, 0);
+-    return scale * Iemit->Sample(lambda) * 4 * Pi * sumY /
+-           (image.Resolution().x * image.Resolution().y);
++    return scale * Iemit->Sample(lambda) * 4 * Pi * meanY;
+ }
+ 
+ pstd::optional<LightBounds> GoniometricLight::Bounds() const {
+-    Float sumY = 0;
+-    for (int y = 0; y < image.Resolution().y; ++y)
+-        for (int x = 0; x < image.Resolution().x; ++x)
+-            sumY += image.GetChannel({x, y}, 0);
+-    Float phi = scale * Iemit->MaxValue() * 4 * Pi * sumY /
+-                (image.Resolution().x * image.Resolution().y);
++    Float phi = scale * Iemit->MaxValue() * 4 * Pi * meanY;
+ 
+     Point3f p = renderFromLight(Point3f(0, 0, 0));
+     // Bound it as an isotropic point light.
+@@ -590,7 +592,7 @@ pstd::optional<LightBounds> GoniometricLight::PeakBounds() const {
+     // light sampler pick a beam-peaked lamp far too rarely where its beam dominates
+     // (fireflies). Importance only sets the sampling pmf, so this is unbiased provided it is
+     // nonzero wherever the lamp emits, which both cone forms below guarantee.
+-    Point2i res = image.Resolution();
++    Point2i res = image->Resolution();
+     auto texelDir = [&](int x, int y) {
+         return EqualAreaSquareToSphere(Point2f((x + 0.5f) / res.x, (y + 0.5f) / res.y));
+     };
+@@ -598,7 +600,7 @@ pstd::optional<LightBounds> GoniometricLight::PeakBounds() const {
+     Vector3f axis(0, 0, 0);
+     for (int y = 0; y < res.y; ++y)
+         for (int x = 0; x < res.x; ++x) {
+-            Float v = image.GetChannel({x, y}, 0);
++            Float v = image->GetChannel({x, y}, 0);
+             maxY = std::max(maxY, v);
+             if (v > 0)
+                 axis += v * texelDir(x, y);
+@@ -612,7 +614,7 @@ pstd::optional<LightBounds> GoniometricLight::PeakBounds() const {
+     Float cosMax = 1;
+     for (int y = 0; y < res.y; ++y)
+         for (int x = 0; x < res.x; ++x)
+-            if (image.GetChannel({x, y}, 0) > 0)
++            if (image->GetChannel({x, y}, 0) > 0)
+                 cosMax = std::min(cosMax, Dot(axis, texelDir(x, y)));
+     // emitting half-angle plus two texel widths for the nearest-texel lookup
+     Float margin = 2 * std::sqrt(4 * Pi / (res.x * res.y));
+@@ -641,7 +643,7 @@ PBRT_CPU_GPU pstd::optional<LightLeSample> GoniometricLight::SampleLe(Point2f u1
+                                                          Float time) const {
+     // Sample direction and PDF for ray leaving goniometric light
+     Float pdf;
+-    Point2f uv = distrib.Sample(u1, &pdf);
++    Point2f uv = distrib->Sample(u1, &pdf);
+     Vector3f wLight = EqualAreaSquareToSphere(uv);
+     Float pdfDir = pdf / (4 * Pi);
+ 
+@@ -654,7 +656,7 @@ PBRT_CPU_GPU void GoniometricLight::PDF_Le(const Ray &ray, Float *pdfPos, Float
+     *pdfPos = 0.f;
+     Vector3f wLight = Normalize(renderFromLight.ApplyInverse(ray.d));
+     Point2f uv = EqualAreaSphereToSquare(wLight);
+-    *pdfDir = distrib.PDF(uv) / (4 * Pi);
++    *pdfDir = distrib->PDF(uv) / (4 * Pi);
+ }
+ 
+ std::string GoniometricLight::ToString() const {
+@@ -672,11 +674,24 @@ GoniometricLight *GoniometricLight::Create(const Transform &renderFromLight,
+     Float sc = parameters.GetOneFloat("scale", 1);
+ 
+     Image image(alloc);
++    const GoniometricData *data = nullptr;
+ 
++    // open-cam: lamps that share a goniometric map share its image and sampling
++    // distribution instead of each loading and building their own copy.
++    static std::mutex cacheMutex;
++    static std::map<std::string, const GoniometricData *> cache;
+     std::string texname = ResolveFilename(parameters.GetOneString("filename", ""));
+     if (texname.empty())
+         Warning(loc, "No \"filename\" parameter provided for goniometric light.");
+-    else {
++    // Lights are created by parallel jobs, and a thread that waits on a job may run another
++    // light's creation, so no lock is held while loading: a map loaded twice at once is
++    // built twice and the copy that loses the race is freed.
++    if (!texname.empty()) {
++        std::lock_guard<std::mutex> lock(cacheMutex);
++        if (auto it = cache.find(texname); it != cache.end())
++            data = it->second;
++    }
++    if (!data && !texname.empty()) {
+         ImageAndMetadata imageAndMetadata = Image::Read(texname, alloc);
+ 
+         if (imageAndMetadata.image.HasAnyInfinitePixels())
+@@ -722,6 +737,20 @@ GoniometricLight *GoniometricLight::Create(const Transform &renderFromLight,
+                       texname);
+     }
+ 
++    if (!data) {
++        data = GoniometricData::Create(std::move(image), alloc);
++        if (!texname.empty()) {
++            std::lock_guard<std::mutex> lock(cacheMutex);
++            auto [it, inserted] = cache.insert({texname, data});
++            if (!inserted) {
++                imageBytes -= data->image.BytesUsed() + data->distrib.BytesUsed();
++                alloc.delete_object(const_cast<GoniometricData *>(data));
++                data = it->second;
++            }
++        }
++    }
++    const Image *im = &data->image;
++
+     // open-cam: "bool photometric" false keeps I in absolute radiometric units (NIR-only
+     // emitters have a ~0 photometric integral).
+     if (parameters.GetOneBool("photometric", true))
+@@ -730,10 +759,10 @@ GoniometricLight *GoniometricLight::Create(const Transform &renderFromLight,
+     Float phi_v = parameters.GetOneFloat("power", -1);
+     if (phi_v > 0) {
+         Float sumY = 0;
+-        for (int y = 0; y < image.Resolution().y; ++y)
+-            for (int x = 0; x < image.Resolution().x; ++x)
+-                sumY += image.GetChannel({x, y}, 0);
+-        Float k_e = 4 * Pi * sumY / (image.Resolution().x * image.Resolution().y);
++        for (int y = 0; y < im->Resolution().y; ++y)
++            for (int x = 0; x < im->Resolution().x; ++x)
++                sumY += im->GetChannel({x, y}, 0);
++        Float k_e = 4 * Pi * sumY / (im->Resolution().x * im->Resolution().y);
+         sc *= phi_v / k_e;
+     }
+ 
+@@ -742,7 +771,7 @@ GoniometricLight *GoniometricLight::Create(const Transform &renderFromLight,
+     Transform finalRenderFromLight = renderFromLight * t;
+ 
+     return alloc.new_object<GoniometricLight>(finalRenderFromLight, medium, I, sc,
+-                                              std::move(image), alloc);
++                                              data);
+ }
+ 
+ // DiffuseAreaLight Method Definitions
+diff --git a/src/pbrt/lights.h b/src/pbrt/lights.h
+index fe1f04d..807eccd 100644
+--- a/src/pbrt/lights.h
++++ b/src/pbrt/lights.h
+@@ -349,6 +349,16 @@ class ProjectionLight : public LightBase {
+     PiecewiseConstant2D distrib;
+ };
+ 
++// open-cam: goniometric image, its sampling distribution and mean, shared by all
++// lamps that use the same map.
++struct GoniometricData {
++    GoniometricData(Allocator alloc) : image(alloc), distrib(alloc) {}
++    static const GoniometricData *Create(Image image, Allocator alloc);
++    Image image;
++    PiecewiseConstant2D distrib;
++    Float meanY = 0;
++};
++
+ // GoniometricLight Definition
+ class GoniometricLight : public LightBase {
+   public:
+@@ -356,6 +366,9 @@ class GoniometricLight : public LightBase {
+     GoniometricLight(const Transform &renderFromLight,
+                      const MediumInterface &mediumInterface, Spectrum I, Float scale,
+                      Image image, Allocator alloc);
++    GoniometricLight(const Transform &renderFromLight,
++                     const MediumInterface &mediumInterface, Spectrum I, Float scale,
++                     const GoniometricData *data);
+ 
+     static GoniometricLight *Create(const Transform &renderFromLight, Medium medium,
+                                     const ParameterDictionary &parameters,
+@@ -394,7 +407,7 @@ class GoniometricLight : public LightBase {
+     PBRT_CPU_GPU
+     SampledSpectrum I(Vector3f w, const SampledWavelengths &lambda) const {
+         Point2f uv = EqualAreaSphereToSquare(w);
+-        return scale * Iemit->Sample(lambda) * image.LookupNearestChannel(uv, 0);
++        return scale * Iemit->Sample(lambda) * image->LookupNearestChannel(uv, 0);
+     }
+ 
+     // open-cam: intensity toward p over the image mean that Bounds() assumes; 0 where
+@@ -405,15 +418,15 @@ class GoniometricLight : public LightBase {
+         Vector3f w = renderFromLight.ApplyInverse(p - renderFromLight(Point3f(0, 0, 0)));
+         if (ref <= 0 || LengthSquared(w) == 0)
+             return 1;
+-        return image.LookupNearestChannel(EqualAreaSphereToSquare(Normalize(w)), 0) / ref;
++        return image->LookupNearestChannel(EqualAreaSphereToSquare(Normalize(w)), 0) / ref;
+     }
+ 
+   private:
+     // GoniometricLight Private Members
+     const DenselySampledSpectrum *Iemit;
+     Float scale;
+-    Image image;
+-    PiecewiseConstant2D distrib;
++    const Image *image;
++    const PiecewiseConstant2D *distrib;
+     Float meanY = 0;
+ };
+ 

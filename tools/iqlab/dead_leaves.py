@@ -49,14 +49,20 @@ def dead_leaves(
     return img
 
 
-def radial_psd(img: np.ndarray, n_bins: int | None = None) -> tuple[np.ndarray, np.ndarray]:
-    """Radially averaged power spectrum of a 2-D image (Hann-windowed, mean removed); freq in cy/px."""
+def radial_psd(
+    img: np.ndarray, n_bins: int | None = None, px_scale: tuple[float, float] = (1.0, 1.0)
+) -> tuple[np.ndarray, np.ndarray]:
+    """Radially averaged power spectrum of a 2-D image (Hann-windowed, mean removed); freq in cy/px.
+
+    *px_scale* = image pixels per output pixel along (y, x): frequencies are reported in cycles per
+    output pixel, so a high-resolution reference can be binned on a coarser capture's frequency axis.
+    """
     a = np.asarray(img, dtype=np.float64)
     h, w = a.shape
     win = np.outer(np.hanning(h), np.hanning(w))
     spec = np.abs(np.fft.fftshift(np.fft.fft2((a - a.mean()) * win))) ** 2 / np.sum(win**2)
-    fy = np.fft.fftshift(np.fft.fftfreq(h))[:, None]
-    fx = np.fft.fftshift(np.fft.fftfreq(w))[None, :]
+    fy = np.fft.fftshift(np.fft.fftfreq(h))[:, None] * px_scale[0]
+    fx = np.fft.fftshift(np.fft.fftfreq(w))[None, :] * px_scale[1]
     fr = np.hypot(fx, fy)
     n_bins = n_bins or min(h, w) // 2
     edges = np.linspace(0.0, 0.5, n_bins + 1)
@@ -70,14 +76,35 @@ def radial_psd(img: np.ndarray, n_bins: int | None = None) -> tuple[np.ndarray, 
 def texture_mtf(
     captured: np.ndarray, ideal: np.ndarray, noise_patch: np.ndarray | None = None, n_bins: int | None = None
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Texture MTF from captured vs ideal dead-leaves (same size, registered, linear units)."""
+    """Texture MTF from captured vs ideal dead-leaves (linear units).
+
+    *ideal* must cover the same field as *captured* but may be sampled more finely (e.g. the chart
+    texture itself): its PSD is then evaluated on the capture's frequency axis, so the reference is the
+    unfiltered, unaliased texture and the result includes the pixel aperture, like the edge SFR.
+    Only the PSD shape matters; callers normalise the curve at low frequency.
+    """
+    n_bins = n_bins or min(captured.shape) // 2
     f, p_cap = radial_psd(captured, n_bins)
-    _, p_ref = radial_psd(ideal, n_bins)
+    scale = (ideal.shape[0] / captured.shape[0], ideal.shape[1] / captured.shape[1])
+    _, p_ref = radial_psd(ideal, n_bins, scale)
     if noise_patch is not None:
         _, p_n = radial_psd(noise_patch, n_bins)
         p_cap = p_cap - p_n
     mtf = np.sqrt(np.clip(p_cap, 0.0, None) / np.maximum(p_ref, 1e-30))
     return f, mtf
+
+
+def illumination_plane(img: np.ndarray) -> np.ndarray:
+    """Least-squares plane through *img*, normalised to mean 1.
+
+    Uneven chart lighting is multiplicative; dividing it out keeps its gradient from leaking power
+    into the lowest PSD bins, which set the texture-MTF normalisation."""
+    a = np.asarray(img, dtype=np.float64)
+    yy, xx = np.mgrid[0 : a.shape[0], 0 : a.shape[1]]
+    A = np.stack([np.ones(a.size), yy.ravel(), xx.ravel()], 1)
+    plane = (A @ np.linalg.lstsq(A, a.ravel(), rcond=None)[0]).reshape(a.shape)
+    plane /= plane.mean()
+    return np.where(plane > 0.05, plane, 1.0)
 
 
 def texture_acutance(
