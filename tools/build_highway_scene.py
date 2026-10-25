@@ -1250,7 +1250,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
     scene_path.write_text("\n".join(L) + "\n")
 
     manifest = {
-        "scene": _rel(repo, scene_path),
+        "scene": scene_path.name,  # relative to this manifest, like film.filename and spd/
         "generator": "tools/build_highway_scene.py",
         "units": "metres; y up; road along +z; +x image-right",
         "film": {

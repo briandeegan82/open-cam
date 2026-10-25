@@ -376,3 +376,21 @@ def test_leaf_luminance_normalised_over_leaves_not_background(tmp_path):
         leaf = y[8:24, 8:24]
         np.testing.assert_allclose(leaf.mean(), want, rtol=0.02)
         assert np.all(y[40:, 40:] < 1e-6)
+
+
+def test_two_builds_are_byte_identical(tmp_path):
+    """Same arguments into two sibling out-dirs: every file (manifest included) is byte-identical."""
+    import filecmp
+
+    for k in "ab":
+        (tmp_path / k).mkdir()
+        build_without_assets(tmp_path / k)
+    sa, sb = tmp_path / "a" / "scene", tmp_path / "b" / "scene"
+    assert json.loads((sa / "highway_manifest.json").read_text())["scene"] == "highway.pbrt"
+    files = sorted(q.relative_to(sa) for q in sa.rglob("*") if q.is_file())
+    assert files and files == sorted(q.relative_to(sb) for q in sb.rglob("*") if q.is_file())
+    _, mismatch, errors = filecmp.cmpfiles(sa, sb, [str(f) for f in files], shallow=False)
+    assert (mismatch, errors) == ([], [])
+    for f in files:
+        if f.suffix in (".pbrt", ".json"):
+            assert str(tmp_path) not in (sa / f).read_text(), f
