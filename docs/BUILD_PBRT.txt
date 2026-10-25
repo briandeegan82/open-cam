@@ -44,6 +44,11 @@ Patches:
   probability Fr or otherwise continues unrefracted. Used for the cabin cornea so that the LED
   lights the retina and iris (build_cabin_scene.py --retina on).
   Used by the rear lamps (--rear-lamp-beam shaped; docs/HIGHWAY_SCENES.md).
+- 0026-spectral-film-splat-units.patch: SpectralFilm::AddSplat stores splats in the units of
+  AddSample (bucket mean x CIE_Y_integral instead of L / pdf / N, which was the bucket integral),
+  and GetImage writes splats in pixels that got no camera sample. Without it the spectral
+  buckets of lightpath and MLT were all 0 and BDPT's light-traced share was too dim (bucket
+  sum 0.68x the path tracer on a diffuse test scene); tests/test_pbrt_spectral_splat_units.py.
 - pbrt-v4-spectral-basis-infinite-light.patch: an "infinite" light may give both
   "filename" and n "L" spectra; the equal-area image then has channels B0..B{n-1}, each
   a per-pixel luminance weight of the corresponding (unit-luminance-normalised) spectrum,

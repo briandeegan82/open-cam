@@ -69,12 +69,14 @@ from exr_multispectral import (  # noqa: E402
     write_separate_channels_exr,
 )
 from iqlab import cpiq, flare  # noqa: E402
-from iqlab.dead_leaves import dead_leaves, texture_mtf  # noqa: E402
+from iqlab.dead_leaves import dead_leaves, illumination_plane, texture_mtf  # noqa: E402
 
 RECIPE_DIR = REPO / "config" / "camera_recipes"
 PBRT = pbrt_path()
 FILM_DIAGONAL_MM = 35.0  # pbrt-v4 RealisticCamera default
 VIEW = "monitor_100pct"
+#: Inset of the card ROIs (fraction of the card side); matches ``build_iq_diorama`` ``roi_xyxy``.
+CARD_ROI_MARGIN = 0.05
 CC_WHITE = 18  # ColorChecker "white 9.5"
 HDR_MIN_SPP = 128  # the chart is rendered once; MC noise must stay well below sensor noise for CDP
 HDR_MIN_XRES = 960  # HDR-chart patches are ~2 % of the width; 4x4 CFA tiles (quad Bayer) need >= 4 guide sites
@@ -99,6 +101,7 @@ METRICS = (
     ("snr_at_18pct_db", "SNR @ 18 % sat. dB", "{:.1f}"),
     ("cdp_min_level_db_at_0p9", "CDP≥0.9 from dB", "{:.1f}"),
     ("edge_mtf50_cy_px", "MTF50 cy/px", "{:.3f}"),
+    ("edge_mtf50_noise", "MTF50 noise ±", "{:.3f}"),
     ("edge_acutance", "Edge acutance", "{:.3f}"),
     ("edge_mtf_rebound", "MTF rebound", "{:.2f}"),
     ("edge_mtf_0p4", "MTF @0.4 cy/px", "{:.3f}"),
@@ -106,6 +109,7 @@ METRICS = (
     ("edge_mtf50_sensor_cy_px", "Sensor MTF50 cy/px", "{:.3f}"),
     ("edge_acutance_sensor", "Sensor edge acutance", "{:.3f}"),
     ("texture_acutance", "Texture acutance", "{:.3f}"),
+    ("texture_acutance_noise", "Texture acutance noise ±", "{:.3f}"),
     ("skin_de00_mean", "Skin ΔE00 mean", "{:.2f}"),
     ("skin_de00_max", "Skin ΔE00 max", "{:.2f}"),
     ("veiling_glare_pct", "Veiling glare %", "{:.2f}"),
@@ -332,7 +336,7 @@ def render_scene(scene: str, optics: dict, out: Path, xres: int, yres: int, spp:
         if scene == "diorama":
             for name in ("slanted_edge", "dead_leaves"):
                 w = meta["cards"][name]["world"]
-                res["rois"][name] = world_roi(P, w, w[4], 0.05)
+                res["rois"][name] = world_roi(P, w, w[4], CARD_ROI_MARGIN)
             w = meta["colorchecker"][CC_WHITE]["world"]
             res["rois"]["white"] = world_roi(P, w, w[4], 0.2)
         else:
@@ -604,19 +608,12 @@ def score_diorama(
         out["edge_mtf_rebound"] = mtf_rebound(r.frequency_cy_per_px, r.mtf)
         out["edge_mtf_0p4"] = float(np.interp(0.4, r.frequency_cy_per_px, r.mtf))
         if noise is not None:
-            # Noise floor of the fine-detail reading: SFRs of the edge with the measured noise
-            # realisation added and subtracted differ by twice its effect at 0.4 cy/px.
-            try:
-                nz = _luma(noise)[y0:y1, x0:x1]
-                ed = y[y0:y1, x0:x1]
-                rp = sfr.slanted_edge_sfr(despeckle(ed + nz))
-                rm = sfr.slanted_edge_sfr(despeckle(ed - nz))
-                out["edge_mtf_0p4_noise"] = 0.5 * abs(
-                    float(np.interp(0.4, rp.frequency_cy_per_px, rp.mtf))
-                    - float(np.interp(0.4, rm.frequency_cy_per_px, rm.mtf))
-                )
-            except ValueError:
-                out["edge_mtf_0p4_noise"] = float("nan")
+            nz = _luma(noise)[y0:y1, x0:x1]
+            ed = y[y0:y1, x0:x1]
+            out["edge_mtf50_noise"] = noise_spread(lambda e: sfr.slanted_edge_sfr(despeckle(e)).mtf50_cy_per_px, ed, nz)
+            out["edge_mtf_0p4_noise"] = noise_spread(
+                lambda e: np.interp(0.4, *_freq_mtf(sfr.slanted_edge_sfr(despeckle(e)))), ed, nz
+            )
         if sensor is not None:
             try:
                 rs = sfr.slanted_edge_sfr(despeckle(sensor[y0:y1, x0:x1]))
@@ -627,16 +624,51 @@ def score_diorama(
     if rois.get("dead_leaves"):
         x0, y0, x1, y1 = rois["dead_leaves"]
         crop = y[y0:y1, x0:x1]
-        ideal = dead_leaves(1024, seed=seed)
-        ideal = ndimage.zoom(ideal, (crop.shape[0] / ideal.shape[0], crop.shape[1] / ideal.shape[1]), order=0)
-        ideal = ideal[: crop.shape[0], : crop.shape[1]] * crop.mean() / ideal.mean()
-        noise_patch = _luma(noise)[y0:y1, x0:x1] if noise is not None else None
-        f, m = texture_mtf(crop, ideal, noise_patch)
-        low = (f > 0) & (f <= 0.05)
-        ref = float(m[low].mean()) if low.any() else 1.0
-        # Noise PSD >= capture PSD at low frequency: the texture is buried in noise and unmeasurable.
-        out["texture_acutance"] = float(cpiq.acutance(f, m / ref, view)) if ref > 0 else float("nan")
+        plane = illumination_plane(crop)
+        crop = crop / plane
+        # Reference: the part of the full-resolution card that the ROI sees (inset by the ROI margin).
+        card = dead_leaves(1024, seed=seed)
+        m = int(round(CARD_ROI_MARGIN * card.shape[0]))
+        ideal = card[m:-m, m:-m]
+        noise_patch = _luma(noise)[y0:y1, x0:x1] / plane if noise is not None else None
+        out["texture_acutance"] = _texture_acutance(crop, ideal, noise_patch, view)
+        if noise_patch is not None:
+            out["texture_acutance_noise"] = twin_spread(
+                lambda c: _texture_acutance(c, ideal, noise_patch, view), crop, noise_patch
+            )
     return out
+
+
+def _freq_mtf(r) -> tuple[np.ndarray, np.ndarray]:
+    return r.frequency_cy_per_px, r.mtf
+
+
+def _texture_acutance(crop: np.ndarray, ideal: np.ndarray, noise_patch: np.ndarray | None, view) -> float:
+    f, m = texture_mtf(crop, ideal, noise_patch)
+    low = (f > 0) & (f <= 0.05)
+    ref = float(m[low].mean()) if low.any() else 1.0
+    # Noise PSD >= capture PSD at low frequency: the texture is buried in noise and unmeasurable.
+    return float(cpiq.acutance(f, m / ref, view)) if ref > 0 else float("nan")
+
+
+def twin_spread(metric, img: np.ndarray, noise: np.ndarray) -> float:
+    """Scatter of ``metric`` between two captures: ``img - sqrt(2) * noise`` is the twin capture (same
+    scene, the other noise draw), so this is |metric(img) - metric(twin)| / sqrt 2. Used where ``metric``
+    already subtracts the noise power, so adding or removing noise (``noise_spread``) would misstate it."""
+    try:
+        return float(abs(float(metric(img)) - float(metric(img - np.sqrt(2.0) * noise))) / np.sqrt(2.0))
+    except ValueError:
+        return float("nan")
+
+
+def noise_spread(metric, img: np.ndarray, noise: np.ndarray) -> float:
+    """Noise floor of ``metric(img)``: half the difference of the metric with the capture's own noise
+    realisation (difference of two noise draws / sqrt 2) added and subtracted. NaN if either reading
+    fails or is NaN."""
+    try:
+        return float(0.5 * abs(float(metric(img + noise)) - float(metric(img - noise))))
+    except ValueError:
+        return float("nan")
 
 
 def score_skin(rgb: np.ndarray, chart: dict, rois: list) -> dict:
@@ -750,7 +782,7 @@ def _fmt(v, f: str) -> str:
 def write_report(rows: list[dict], groups: dict, args: argparse.Namespace, timing: dict) -> None:
     out = args.out_dir
     out.mkdir(parents=True, exist_ok=True)
-    keys = ["recipe", "optics", "cfa", "hdr"] + [k for k, _, _ in METRICS]
+    keys = ["recipe", "optics", "cfa", "hdr"] + [k for k, _, _ in METRICS] + ["error"]
     with (out / "scorecard.csv").open("w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=keys, extrasaction="ignore")
         w.writeheader()
@@ -895,7 +927,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.figure:
         plot(rows, args.out_dir / "scorecard.png")
     print(f"{len(rows)} recipes, {len(groups)} optics groups -> {args.out_dir}", file=sys.stderr)
-    return 0
+    failed = [r["recipe"] for r in rows if r.get("error")]
+    if failed:
+        print(f"{len(failed)} recipe(s) failed: {', '.join(failed)}", file=sys.stderr)
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

@@ -27,6 +27,7 @@ real thing and is used only when ``cfa.layout`` is set (opt-in; the Bayer path i
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -490,11 +491,26 @@ def demosaic_edge(raw: np.ndarray, layout: CfaLayout, guide: int | None = None) 
     return out.astype(np.float32)
 
 
+def bayer_pattern(layout: CfaLayout) -> str | None:
+    """``"RGGB"``/``"BGGR"``/``"GRBG"``/``"GBRG"`` for a 2x2 R/G/B Bayer layout, else ``None``."""
+    flat = "".join(layout.tile[0] + layout.tile[1]) if layout.period == (2, 2) else ""
+    return flat if flat in ("RGGB", "BGGR", "GRBG", "GBRG") else None
+
+
 def demosaic(raw: np.ndarray, layout: CfaLayout, method: str = "gradient") -> np.ndarray:
     m = str(method).lower()
     if m == "bilinear":
         return demosaic_bilinear(raw, layout)
-    if m in ("gradient", "malvar"):  # Malvar is Bayer-specific; generic layouts use the gradient method.
+    if m == "malvar":
+        pattern = bayer_pattern(layout)
+        if pattern is not None:
+            from apply_emva_noise import malvar_demosaic  # noqa: PLC0415 (apply_emva_noise imports this module)
+
+            rgb = malvar_demosaic(raw, pattern)
+            return rgb[..., ["RGB".index(c) for c in layout.channels]]
+        warnings.warn(f"Malvar demosaic is Bayer-only; CFA {layout.name!r} uses the gradient method", stacklevel=2)
+        return demosaic_gradient(raw, layout)
+    if m == "gradient":
         return demosaic_gradient(raw, layout)
     if m == "edge":
         return demosaic_edge(raw, layout)

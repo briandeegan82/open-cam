@@ -14,10 +14,11 @@ from pathlib import Path
 import yaml
 from _repo import ensure_pbrt_output_dir
 from camera_model import load_camera_model
-
-LEGACY_REALISTIC_LENSFILE = "scenes/lenses/wide_22mm.dat"
-DEFAULT_REALISTIC_LENSFILE = "config/lenses/wide_22mm.dat"
-DEFAULT_ILLUMINANT_CSV = "spectra/illuminant/interpolated/D65.csv"
+from pipeline_shell_env import (
+    DEFAULT_REALISTIC_LENSFILE,
+    canonicalize_lensfile_rel,
+    resolve_illuminant_rel,
+)
 
 
 def sha256_file(path: Path) -> str:
@@ -77,23 +78,6 @@ def parse_render_pbrt_args(render: dict, gpu_available: bool = False) -> list[st
     if gpu_enabled and gpu_available and "--gpu" not in args:
         args = ["--gpu", *args]
     return args
-
-
-def resolve_illuminant_rel(render: dict) -> str:
-    illuminant = render.get("illuminant")
-    if illuminant is None:
-        return DEFAULT_ILLUMINANT_CSV
-    illum_s = str(illuminant).strip()
-    if not illum_s or illum_s.lower() in ("null", "none"):
-        return DEFAULT_ILLUMINANT_CSV
-    return illum_s
-
-
-def canonicalize_lensfile_rel(path_value: object) -> str:
-    lensfile = str(path_value)
-    if lensfile == LEGACY_REALISTIC_LENSFILE:
-        return DEFAULT_REALISTIC_LENSFILE
-    return lensfile
 
 
 def resolve_camera_model_path(repo: Path, paths: dict, cli_path: Path | None) -> Path:
