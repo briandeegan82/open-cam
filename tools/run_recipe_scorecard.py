@@ -246,6 +246,54 @@ def world_roi(P: np.ndarray, rect: list[float], z: float, margin: float = 0.15) 
 # ROI border than at the edge), which flattens the measured MTF near 0.5 and makes MTF50 noise-driven.
 # Charts are scored under the uniform fill panel alone, as in a lab; the HDR and flare scenes cover glare.
 DIORAMA_UNIFORM_LIGHT = ["--lamp-radiance", "0", "--window-radiance", "0"]
+ROI_ALIGN = 4  # band corners on multiples of the largest CFA tile (quad Bayer 4x4): CFA phase unchanged
+ROI_MARGIN = 8
+
+
+def roi_band(rois: dict, xres: int, yres: int, margin: int = ROI_MARGIN, align: int = ROI_ALIGN) -> list[int] | None:
+    """``[x0, y0, x1, y1]``: the slanted-edge, dead-leaves and white ROIs plus ``margin``, on ``align``."""
+    boxes = [rois[k] for k in ("slanted_edge", "dead_leaves", "white") if rois.get(k)]
+    if not boxes:
+        return None
+    x0 = max(0, (min(b[0] for b in boxes) - margin) // align * align)
+    y0 = max(0, (min(b[1] for b in boxes) - margin) // align * align)
+    x1 = min(xres, -(-(max(b[2] for b in boxes) + margin) // align) * align)
+    y1 = min(yres, -(-(max(b[3] for b in boxes) + margin) // align) * align)
+    return [x0, y0, x1, y1]
+
+
+def render_roi_band(out: Path, frame: Path, band: list[int], spp: int, seed: int, tag: str = "") -> Path:
+    """``frame`` with ``band`` re-rendered at ``spp``; returns the new EXR (``*_roi<tag>.exr``).
+
+    Only the path pass is re-rendered (``--cropwindow``); the full frame's caustic pass is added back
+    in the band, so the band stays an unbiased estimate of the same image (caustics are < 0.1 % of the
+    ROI signal, so their lower spp adds no visible noise)."""
+    meta = json.loads((out / "diorama.json").read_text())
+    split = meta.get("caustic_split")
+    scene = split["path_scene"] if split else "iq_diorama.pbrt"
+    full = read_separate_exr_channels(frame)
+    k0 = next(iter(full))
+    yres, xres = full[k0].shape
+    x0, y0, x1, y1 = band
+    # pbrt's crop pixels are ceil(res * window): a quarter pixel below each edge rounds to it exactly
+    cw = ",".join(f"{(v - 0.25) / r:.9f}" for v, r in ((x0, xres), (x1, xres), (y0, yres), (y1, yres)))
+    crop_exr = f"roi_path{tag}.exr"
+    _pbrt(out / scene, "--seed", str(seed), "--spp", str(spp), "--cropwindow", cw, "--outfile", crop_exr)
+    crop = read_separate_exr_channels(out / crop_exr)
+    caus = read_separate_exr_channels(out / combine_caustics.tagged(split["caustic_output"], tag)) if split else {}
+    res = {}
+    for k, v in full.items():
+        c = crop[k].astype(np.float64)
+        if c.shape != (y1 - y0, x1 - x0):
+            raise ValueError(f"ROI crop is {c.shape}, expected {(y1 - y0, x1 - x0)} for band {band}")
+        if k in caus:
+            c += caus[k][y0:y1, x0:x1]
+        v = v.copy()
+        v[y0:y1, x0:x1] = c
+        res[k] = v
+    path = out / f"{frame.stem}_roi.exr"
+    write_separate_channels_exr(path, res)
+    return path
 
 
 def add_lens_stray_light(exr: Path, optics: dict, focus_m: float, cfg: dict | None = None) -> tuple[Path, dict]:
@@ -285,8 +333,21 @@ def add_lens_stray_light(exr: Path, optics: dict, focus_m: float, cfg: dict | No
     return out, report
 
 
-def render_scene(scene: str, optics: dict, out: Path, xres: int, yres: int, spp: int, stray_light: bool = True) -> dict:
-    """Build + render ``scene`` for one optics group; returns EXR path, manifest and raster ROIs."""
+def render_scene(
+    scene: str,
+    optics: dict,
+    out: Path,
+    xres: int,
+    yres: int,
+    spp: int,
+    stray_light: bool = True,
+    roi_spp: int = 0,
+    render_seed: int = 0,
+) -> dict:
+    """Build + render ``scene`` for one optics group; returns EXR path, manifest and raster ROIs.
+
+    Diorama: ``roi_spp`` > 0 re-renders the measurement band (``roi_band``) at that spp for both
+    captures (``render_roi_band``); ``render_seed`` is pbrt's seed (the twin uses ``render_seed + 1``)."""
     out.mkdir(parents=True, exist_ok=True)
     if scene == "hdr":
         spp = max(spp, HDR_MIN_SPP)
@@ -312,7 +373,8 @@ def render_scene(scene: str, optics: dict, out: Path, xres: int, yres: int, spp:
         scene_file, film = out / sc["scene"], sc["film_output"]
     t0 = time.time()
     if scene == "diorama":
-        combine_caustics.render(out, PBRT)  # two passes with the default caustic photon split
+        seed0 = ["--seed", str(render_seed)] if render_seed else []
+        combine_caustics.render(out, PBRT, seed0)  # two passes with the default caustic photon split
     else:
         _pbrt(scene_file)
     res = {"exr": out / film, "meta": meta, "render_s": time.time() - t0, "rois": {}, "shape": (yres, xres)}
@@ -322,7 +384,7 @@ def render_scene(scene: str, optics: dict, out: Path, xres: int, yres: int, spp:
     if scene == "diorama":
         # Second, independent render (pbrt --seed 1): the twin capture then differs in MC noise too,
         # so the texture metric's noise PSD removes render noise as well as sensor noise.
-        twin = combine_caustics.render(out, PBRT, ["--seed", "1"], tag="_seed1")
+        twin = combine_caustics.render(out, PBRT, ["--seed", str(render_seed + 1)], tag="_seed1")
         res["exr_twin"] = twin
     if scene in ("diorama", "skin") and optics["camera"] == "realistic":
         P = gbuffer_world_positions(scene_file, xres, yres)
@@ -341,6 +403,11 @@ def render_scene(scene: str, optics: dict, out: Path, xres: int, yres: int, spp:
         res["rois"]["patches"] = [p["roi_xyxy"] for p in meta["patches"]]
     if scene == "skin":
         res["rois"]["white"] = res["rois"]["patches"][meta["white_index"]]
+    if scene == "diorama" and roi_spp > 0 and (band := roi_band(res["rois"], xres, yres)) is not None:
+        t1 = time.time()
+        res["exr"] = render_roi_band(out, res["exr"], band, roi_spp, render_seed)
+        res["exr_twin"] = render_roi_band(out, res["exr_twin"], band, roi_spp, render_seed + 1, "_seed1")
+        res["roi_band"], res["roi_render_s"] = band, time.time() - t1
     radiometry = {
         "camera": {"type": optics["camera"], **({"lensfile": optics["lensfile"]} if "lensfile" in optics else {})}
     }
@@ -830,6 +897,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--yres", type=int, default=480)
     ap.add_argument("--pixelsamples", type=int, default=64)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--render-seed", type=int, default=0, help="pbrt --seed of the renders (diorama twin: +1)")
+    ap.add_argument(
+        "--roi-spp",
+        type=int,
+        default=0,
+        help="diorama: re-render the measurement band at this spp for the metrics (0 = off; e.g. 256)",
+    )
     ap.add_argument("--out-dir", type=Path, default=REPO / "out" / "iq_lab" / "scorecard")
     ap.add_argument("--figure", action="store_true")
     ap.add_argument(
@@ -844,6 +918,8 @@ def main(argv: list[str] | None = None) -> int:
     work = args.out_dir / "work"
     rows, timing = [], {"render": 0.0, "sensor": 0.0}
     settings = {"xres": args.xres, "yres": args.yres, "pixelsamples": args.pixelsamples, "seed": args.seed}
+    if args.roi_spp or args.render_seed:
+        settings |= {"roi_spp": args.roi_spp, "render_seed": args.render_seed}
     settings["scenes"] = sorted(args.scenes)
     settings["stray_light"] = None if args.no_stray_light else STRAY_LIGHT
     cache_dir = work / "rows"
@@ -872,7 +948,15 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 d = work / re.sub(r"[^A-Za-z0-9._-]", "_", key) / scene
                 renders[scene] = render_scene(
-                    scene, g["optics"], d, args.xres, args.yres, args.pixelsamples, not args.no_stray_light
+                    scene,
+                    g["optics"],
+                    d,
+                    args.xres,
+                    args.yres,
+                    args.pixelsamples,
+                    not args.no_stray_light,
+                    args.roi_spp,
+                    args.render_seed,
                 )
         timing["render"] += time.time() - t0
         t0 = time.time()
