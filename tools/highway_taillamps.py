@@ -447,7 +447,25 @@ class _Grid:
         return float((dx * dy)[cells].sum())
 
 
+_GRID_CACHE: dict[tuple, tuple[RearSurface, _Grid]] = {}
+
+
 def _grid(
+    surf: RearSurface | None, x0: float, x1: float, y0: float, y1: float, rear_z: float, lens: tuple[str, ...]
+) -> _Grid:
+    """Lamp cells on ``surf``; repeated vehicles of one model reuse the ray casts (read-only arrays)."""
+    if surf is None:
+        return _grid_cells(surf, x0, x1, y0, y1, rear_z, lens)
+    key = (id(surf), x0, x1, y0, y1, rear_z, tuple(lens))
+    hit = _GRID_CACHE.get(key)
+    if hit is None or hit[0] is not surf:
+        g = _grid_cells(surf, x0, x1, y0, y1, rear_z, lens)
+        g.corners.flags.writeable = g.mask.flags.writeable = False
+        hit = _GRID_CACHE[key] = (surf, g)  # surf kept alive so its id is not reused
+    return hit[1]
+
+
+def _grid_cells(
     surf: RearSurface | None, x0: float, x1: float, y0: float, y1: float, rear_z: float, lens: tuple[str, ...]
 ) -> _Grid:
     nx, ny = max(1, round(abs(x1 - x0) / CELL_M)), max(1, round((y1 - y0) / CELL_M))
