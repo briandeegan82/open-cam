@@ -48,6 +48,7 @@ from build_highway_scene import (  # noqa: E402
     proxy_car,
     quads_mesh,
     sun_world,
+    write_car_includes,
     write_spd,
 )
 from fetch_highway_assets import cache_root, load_asset_manifest  # noqa: E402
@@ -893,6 +894,8 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
 
     # ---- cars: parked along both kerbs, one waiting on the cross street, one oncoming
     cars_meta: list[dict] = []
+    car_bodies: dict[str, list[str]] = {}
+    car_l0 = len(L)
     paints = ("silver", "red", "blue", "black", "white", "gray", "darkgreen")
 
     def car(inst: str, model: str, paint: str, x: float, z: float, heading: float, lane: int) -> None:
@@ -903,7 +906,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         yaw = 90.0 if ca else 0.0
         inc = out_dir / "cars" / f"{inst}.pbrt"
         inc.parent.mkdir(exist_ok=True)
-        inc.write_text("\n".join(body) + "\n")
+        car_bodies[inst] = body
         nonlocal L
         L += [
             "AttributeBegin",
@@ -957,6 +960,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         -90.0,
         5,
     )
+    write_car_includes(L, car_l0, car_bodies, out_dir / "cars")
 
     two_wheeler_meta: list[dict] = []
     if args.two_wheelers != "none":

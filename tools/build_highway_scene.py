@@ -420,6 +420,15 @@ def instance_car_bodies(bodies: dict[str, list[str]]) -> tuple[list[str], dict[s
     return defs, out
 
 
+def write_car_includes(L: list[str], at: int, bodies: dict[str, list[str]], car_dir: Path) -> None:
+    """Writes ``car_dir/<inst>.pbrt`` for every body, sharing repeated models (``instance_car_bodies``);
+    the object definitions go into ``L`` at index ``at``, before the cars' ``Include`` lines."""
+    defs, bodies = instance_car_bodies(bodies)
+    for inst, body in bodies.items():
+        (car_dir / f"{inst}.pbrt").write_text("\n".join(body) + "\n")
+    L[at:at] = defs
+
+
 def proxy_car(paint_spd: str, inst: str) -> list[str]:
     """Box-and-cylinder stand-in (front towards +z, ground at y=0) when car assets are absent."""
     out = [
@@ -1250,10 +1259,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
             )
             if fx.animated:
                 cars_meta[-1].update(motion_meta)
-        car_defs, car_bodies = instance_car_bodies(car_bodies)
-        for inst, body in car_bodies.items():
-            (car_dir / f"{inst}.pbrt").write_text("\n".join(body) + "\n")
-        L[car_l0:car_l0] = car_defs
+        write_car_includes(L, car_l0, car_bodies, car_dir)
         if args.spray:
             heavy = [m in variety.HEAVY for _, _, m, _, _ in traffic]
             v_spray = [v or wet.nominal_speed_kmh(c[0]) for v, c in zip(speeds, traffic)]  # static scene: lane speed
