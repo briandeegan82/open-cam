@@ -7,9 +7,8 @@ import unittest
 from pathlib import Path
 
 import yaml
-
-from tools.pipeline_shell_env import resolve_camera_model_path as resolve_shell_camera_model_path
-from tools.run_pipeline import resolve_camera_model_path as resolve_run_pipeline_camera_model_path
+from pipeline_shell_env import resolve_camera_model_path as resolve_shell_camera_model_path
+from run_pipeline import resolve_camera_model_path as resolve_run_pipeline_camera_model_path
 
 
 def _minimal_camera_model_yaml() -> dict:

@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+from _repo import ensure_pbrt_output_dir
 
 # The CIE 1931 observer and the tristimulus integral live in colour_science,
 # shared with the ISP demo so the validator and the demo cannot disagree.
@@ -94,6 +95,7 @@ def main() -> None:
         if not scene.is_file():
             print(f"error: scene missing {scene}; run tools/build_colorchecker_scene.py", file=sys.stderr)
             sys.exit(2)
+        ensure_pbrt_output_dir(scene, repo)
         r = subprocess.run([str(pbrt_bin), str(scene)], cwd=str(repo), check=False)
         if r.returncode != 0:
             sys.exit(r.returncode)

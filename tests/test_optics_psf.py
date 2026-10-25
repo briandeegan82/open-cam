@@ -7,9 +7,8 @@ import unittest
 from pathlib import Path
 
 import numpy as np
-
-from tools.apply_spectral_psf import separable_gaussian_blur_2d
-from tools.exr_multispectral import read_separate_exr_channels, write_separate_channels_exr
+from apply_spectral_psf import separable_gaussian_blur_2d
+from exr_multispectral import read_separate_exr_channels, write_separate_channels_exr
 
 
 class TestOpticsPsf(unittest.TestCase):

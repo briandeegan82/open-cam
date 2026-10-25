@@ -9,11 +9,7 @@ import sys
 from pathlib import Path
 
 import yaml
-
-try:
-    from camera_model import load_camera_model
-except ModuleNotFoundError:  # pragma: no cover - import path variant for tests
-    from tools.camera_model import load_camera_model
+from camera_model import load_camera_model
 
 LEGACY_REALISTIC_LENSFILE = "scenes/lenses/wide_22mm.dat"
 DEFAULT_REALISTIC_LENSFILE = "config/lenses/wide_22mm.dat"

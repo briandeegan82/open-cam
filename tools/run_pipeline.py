@@ -12,11 +12,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
-
-try:
-    from camera_model import load_camera_model
-except ModuleNotFoundError:  # pragma: no cover - import path variant for tests
-    from tools.camera_model import load_camera_model
+from _repo import ensure_pbrt_output_dir
+from camera_model import load_camera_model
 
 LEGACY_REALISTIC_LENSFILE = "scenes/lenses/wide_22mm.dat"
 DEFAULT_REALISTIC_LENSFILE = "config/lenses/wide_22mm.dat"
@@ -304,6 +301,8 @@ def main() -> None:
             file=sys.stderr,
         )
     pbrt_cmd = [str(pbrt_bin), *parse_render_pbrt_args(render, gpu_available), str(scene_file)]
+    if not args.dry_run:
+        ensure_pbrt_output_dir(scene_file, repo)
     log.append(run_cmd(pbrt_cmd, repo, args.dry_run))
 
     # 2a) Optional Monte Carlo denoiser (render.denoise, tools/denoise_spectral_exr.py; display renders only).

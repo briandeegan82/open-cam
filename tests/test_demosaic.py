@@ -3,8 +3,7 @@ from __future__ import annotations
 import unittest
 
 import numpy as np
-
-from tools.apply_emva_noise import (
+from apply_emva_noise import (
     bayer_sample_rgb,
     bilinear_demosaic,
     demosaic_requested,

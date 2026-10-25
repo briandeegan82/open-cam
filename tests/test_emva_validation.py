@@ -3,8 +3,7 @@ from __future__ import annotations
 import unittest
 
 import numpy as np
-
-from tools.emva_theory import (
+from emva_theory import (
     compare_config_to_datasheet,
     dark_floor_clip_mean_var_dn,
     dsnu_offset_map,
@@ -19,7 +18,7 @@ from tools.emva_theory import (
     spatial_std_electrons,
     temporal_variance_dn_squared,
 )
-from tools.validate_emva_model import _effective_mean_tol_dn
+from validate_emva_model import _effective_mean_tol_dn
 
 
 class TestEmvaTheory(unittest.TestCase):

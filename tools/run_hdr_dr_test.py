@@ -27,6 +27,7 @@ from pathlib import Path
 
 import hdr_pixel as hp
 import numpy as np
+from _repo import out_dir
 from build_hdr_dr_chart import build_parser as chart_parser
 from build_hdr_dr_chart import layout
 from camera_model import load_camera_model, noise_config_from_camera_model
@@ -228,7 +229,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--pixels-per-patch", type=int, default=4096)
     ap.add_argument("--epsilon", type=float, default=0.5, help="CDP tolerance")
     ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--out-dir", type=Path, default=REPO / "out" / "iq_lab" / "hdr_dr")
+    ap.add_argument("--out-dir", type=Path, default=out_dir("iq_lab", "hdr_dr"))
     ap.add_argument("--figure", action="store_true", help="also write snr_cdp.png")
     args = ap.parse_args(argv)
 

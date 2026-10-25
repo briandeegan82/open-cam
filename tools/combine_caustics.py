@@ -18,6 +18,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+from _repo import ensure_pbrt_output_dir
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from exr_multispectral import read_separate_exr_channels, write_separate_channels_exr  # noqa: E402
@@ -67,6 +68,7 @@ def render(scene_dir: Path, pbrt: Path, extra: list[str] = (), tag: str = "") ->
         )
     for scene, output in passes:
         outfile = ["--outfile", tagged(output, tag)] if tag else []
+        ensure_pbrt_output_dir(scene_dir / scene, scene_dir, outfile[1] if outfile else None)
         subprocess.run([str(pbrt), "--quiet", *extra, *outfile, scene], cwd=scene_dir, check=True)
     return combine(scene_dir, tag) if split else scene_dir / tagged(meta["film_output"], tag)
 

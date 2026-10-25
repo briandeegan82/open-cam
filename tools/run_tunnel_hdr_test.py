@@ -26,6 +26,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+from _repo import out_dir
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -226,7 +227,7 @@ def write_report(res: dict, path: Path) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--out-dir", type=Path, default=REPO / "out" / "iq_lab" / "tunnel_hdr")
+    ap.add_argument("--out-dir", type=Path, default=out_dir("iq_lab", "tunnel_hdr"))
     ap.add_argument("--recipes", nargs="+", default=DEFAULT_RECIPES)
     ap.add_argument("--xres", type=int, default=960)
     ap.add_argument("--yres", type=int, default=640)
