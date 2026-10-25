@@ -129,16 +129,19 @@ live only in the CPU integrators; patch 0030 reports them instead of dropping th
 - 0009 spectral SPPM: wavefront always runs volpath and already warns that "sppm" is ignored.
 Not tested on a GPU (no CUDA on the dev VM): the PBRT_CPU_GPU code of 0006/0012 (film) and
 0022/0024 (light sampling). --wavefront on a CPU-only build runs but is much slower than the
-CPU integrator (about 5x in an earlier measurement), so it is only useful for checks.
+CPU integrator, so it is only useful for checks.
 
-Build flags (measured on an 8-core VM, GCC 11.4, -O3)
-------------------------------------------------------
-- PBRT_NATIVE=ON (-march=native, the local default of tools/build_pbrt.sh): night highway,
-  128 spp, 3 seeds alternating: portable 18.37 / 18.50 / 18.57 s vs native 16.93 / 17.20 /
-  16.94 s (-7.6 %), image mean unchanged. Day crop, 32 spp: within +-3 % (no gain).
-- -march=x86-64-v3 and LTO: within +-3 % of portable on the day crop; not worth a variant.
+Build flags (measured on an 8-core VM, GCC 11.4, -O3 -DNDEBUG, wall seconds)
+------------------------------------------------------------------------------
+- PBRT_NATIVE=ON (-march=native, the local default of tools/build_pbrt.sh): night lead-car
+  crop, 64 spp, 2 alternating repeats: portable 11.36 / 11.35 s vs native 10.67 / 10.67 s
+  (-6 % wall, -7.5 % CPU; FMA in the goniometric direction maths). Day crop (0.25-0.75),
+  32 spp, 3 alternating repeats: portable 9.56 / 9.53 / 9.43 s vs native 9.39 / 8.98 /
+  10.89 s, i.e. no gain within the +-3 % run-to-run spread.
+- -march=x86-64-v3 (10.05 / 9.11 / 9.89 s) and LTO (9.81 / 9.72 / 9.91 s) on the same day
+  crop: within +-3 % of portable; not worth a variant.
 - CI builds with PBRT_NATIVE=OFF so the cached binary runs on any runner.
-- PGO: not measured (estimate 5-10 % at night; needs a two-stage build that the cached CI
-  binary cannot use).
+- PGO: not measured (ESTIMATE 5-10 %; needs a two-stage build that the cached CI binary
+  cannot use).
 
 Reference: https://pbrt.org/fileformat-v4.html
