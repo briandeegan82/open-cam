@@ -88,6 +88,24 @@ the tunnel `outside_in` view show no 1/64-frame tile that differs by more than t
 Unbiased renders converge more slowly where these paths matter (night scenes on wet roads especially),
 so raise `--pixelsamples` there rather than switch regularization back on.
 
+### Pixel sampler (`--sampler`)
+
+The highway scene uses pbrt's `pmj02bn` sampler by default; `--sampler zsobol` restores the old
+default. Both are unbiased. Measured with the main pbrt binary and 32 buckets on two crops: night wet
+(`cropwindow 0.38,0.62,0.45,0.75`, 1024 spp, 4 seeds) and day (`0.25,0.75,0.40,0.80`, 256 spp,
+16 seeds). Noise is the median over lit pixels of the per-pixel seed-to-seed std / mean of a band sum.
+
+| | night zsobol | night pmj02bn | day zsobol | day pmj02bn |
+|---|---:|---:|---:|---:|
+| render time | 115.0 ± 3.6 s | 98.3 ± 1.2 s | 52.6 ± 1.2 s | 43.3 ± 0.7 s |
+| noise 400-500 / 500-600 / 600-700 nm | 18.8 / 13.0 / 13.8 % | 18.0 / 11.8 / 13.1 % | 8.5 / 6.1 / 4.7 % | 8.3 / 5.9 / 4.5 % |
+| crop mean, pmj02bn vs zsobol | | -0.04 % (-0.7 σ) | | -0.04 % (-1.4 σ) |
+
+pmj02bn is 15-18 % faster per sample (cheaper sample generation) and slightly less noisy, so it
+reaches zsobol's per-band noise in 0.71-0.79x the time. Single-bucket noise is the same for both
+(ratio 0.96-1.00), and the wet-road sparkle is unchanged. pmj02bn works best at power-of-4 sample
+counts (pbrt warns otherwise). Other scene builders still use zsobol.
+
 ### Light sampling of headlamps and street lights (pbrt patch 0022)
 
 pbrt's BVH light sampler picks one light per shading point with probability proportional to a bound on
