@@ -207,6 +207,17 @@ standard error 0.01). The road just in front of the car converges to the same va
 it is 0.915 ± 0.003 (4 seeds) against 0.928 ± 0.009 with patch 0022. At equal render time (full frame +37 %) the lead car's per-pixel variance is about 5.6x lower
 than with patch 0022.
 
+#### Shared goniometric maps (pbrt patch 0028)
+
+All headlamps of one lamp model use the same goniometric map. Stock pbrt loaded the map and
+built its sampling distribution once per lamp; patch 0028 keeps one copy per map file
+(`GoniometricData`), shared by every lamp that names it, and takes `Phi()`/`Bounds()` from the
+stored mean instead of re-summing the image. Emission is unchanged. Night wet highway: pbrt's
+"Light image and distributions" memory drops from 701 to 36 MiB and peak RSS from 2.80 to
+2.16 GB (5 alternating 1-spp loads); scene load time is unchanged (5.4 +/- 0.6 s vs
+5.1 +/- 0.6 s); on the lead-car crop (64 spp, 3 seeds) the mean ratio is 1.00001, every
+spectral bucket agrees within 0.03 sigma and the per-pixel seed noise is the same (35.1 %).
+
 ## Radiometry
 
 - Sun: `distant` light with a spectral direct-normal SPD (5778 K envelope x Rayleigh, aerosol,
