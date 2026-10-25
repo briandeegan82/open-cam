@@ -42,7 +42,7 @@ from scipy.stats import norm
 #: trials, ``rms`` / ``*_abs`` limits to sqrt(bias^2 + std^2) (colour: max |bias| + max std over patches).
 TOLERANCES = {
     "edge": {
-        "clean": {"mtf50_bias_pct": 3.5, "mtf50_rms_pct": 4.0, "mtf_rms_abs": 0.02, "acutance_abs": 0.015},
+        "clean": {"mtf50_bias_pct": 1.5, "mtf50_rms_pct": 4.0, "mtf_rms_abs": 0.02, "acutance_abs": 0.015},
         "noisy": {"mtf50_bias_pct": 7.0, "mtf50_rms_pct": 8.0, "mtf_rms_abs": 0.05, "acutance_abs": 0.02},
     },
     "texture": {
