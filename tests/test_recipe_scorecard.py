@@ -231,6 +231,41 @@ def test_edge_mtf_noise_floor_grows_with_noise():
     assert 0 < floors[0] < floors[1]
 
 
+def test_roi_band_covers_rois_on_cfa_grid():
+    rois = {"slanted_edge": [432, 200, 497, 265], "dead_leaves": [268, 200, 332, 266], "white": [71, 256, 81, 266]}
+    band = sc.roi_band(rois, 720, 480)
+    assert all(v % sc.ROI_ALIGN == 0 for v in band)
+    assert band[0] <= 71 - sc.ROI_MARGIN and band[1] <= 200 - sc.ROI_MARGIN
+    assert band[2] >= 497 + sc.ROI_MARGIN and band[3] >= 266 + sc.ROI_MARGIN
+    assert sc.roi_band({"slanted_edge": [2, 3, 718, 477]}, 720, 480) == [0, 0, 720, 480]
+    assert sc.roi_band({"slanted_edge": None}, 720, 480) is None
+
+
+def test_roi_band_pastes_crop_plus_caustics(tmp_path, monkeypatch):
+    h, w, band = 16, 24, [4, 8, 12, 16]
+    split = {"path_scene": "p.pbrt", "caustic_output": "c.exr"}
+    (tmp_path / "diorama.json").write_text(json.dumps({"caustic_split": split}))
+    sc.write_separate_channels_exr(tmp_path / "f.exr", {"S0.500,0nm": np.ones((h, w), np.float32)})
+    sc.write_separate_channels_exr(tmp_path / "c.exr", {"S0.500,0nm": np.full((h, w), 0.25, np.float32)})
+    calls = []
+
+    def fake_pbrt(scene_file, *extra):
+        calls.append(extra)
+        cw = [float(v) for v in extra[extra.index("--cropwindow") + 1].split(",")]
+        x0, x1, y0, y1 = (int(np.ceil(c * r)) for c, r in zip(cw, (w, w, h, h)))
+        crop = np.full((y1 - y0, x1 - x0), 3.0, np.float32)
+        sc.write_separate_channels_exr(tmp_path / extra[extra.index("--outfile") + 1], {"S0.500,0nm": crop})
+
+    monkeypatch.setattr(sc, "_pbrt", fake_pbrt)
+    out = sc.render_roi_band(tmp_path, tmp_path / "f.exr", band, 256, 7)
+    img = sc.read_separate_exr_channels(out)["S0.500,0nm"]
+    x0, y0, x1, y1 = band
+    np.testing.assert_allclose(img[y0:y1, x0:x1], 3.25)
+    img[y0:y1, x0:x1] = 1.0
+    np.testing.assert_allclose(img, 1.0)
+    assert calls[0][:4] == ("--seed", "7", "--spp", "256")
+
+
 def test_failed_recipe_is_an_error_row_in_the_csv_and_exit_code_1(tmp_path, monkeypatch):
     import csv
 
