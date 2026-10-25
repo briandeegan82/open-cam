@@ -89,7 +89,7 @@ def model_qe_paths(repo: Path, model_path: Path) -> tuple[Path, Path, Path]:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    repo_default = Path(__file__).resolve().parent.parent
+    repo_default = Path(__file__).resolve().parents[2]
     ap.add_argument("--repo-root", type=Path, default=repo_default)
     ap.add_argument("--models-dir", type=Path, default=Path("config/camera_models"))
     ap.add_argument("--csv-out", type=Path, default=None, help="Optional CSV report path")

@@ -77,14 +77,14 @@ lens model override in the camera recipe YAML.
 
 Assignment tool
 ---------------
-tools/assign_lens_models.py automates lens model assignment for every camera
+tools/legacy/assign_lens_models.py automates lens model assignment for every camera
 recipe.  Run it whenever new recipes are added or pixel-pitch data is updated.
 
   # preview changes without writing
-  python tools/assign_lens_models.py --dry-run
+  python tools/legacy/assign_lens_models.py --dry-run
 
   # apply
-  python tools/assign_lens_models.py
+  python tools/legacy/assign_lens_models.py
 
 Assignment logic (highest priority first):
 

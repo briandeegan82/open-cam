@@ -37,7 +37,7 @@ def _write_index(path: Path, title: str, names: list[str]) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    repo_default = Path(__file__).resolve().parent.parent
+    repo_default = Path(__file__).resolve().parents[2]
     ap.add_argument("--repo-root", type=Path, default=repo_default)
     ap.add_argument("--src-dir", type=Path, default=None, help="Defaults to config/camera_models")
     ap.add_argument("--lens-dir", type=Path, default=None, help="Defaults to config/lens_models")
