@@ -27,7 +27,9 @@ import argparse
 import json
 import math
 import os
+import re
 import sys
+from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
@@ -329,6 +331,93 @@ def car_include(info: dict, raw_dir: Path, out_dir: Path, inst: str, paint_spd: 
         ply = os.path.relpath(raw_dir / sh["ply"], out_dir)
         lines += [f'NamedMaterial "{inst}:{sh["material"]}"', f'Shape "plymesh" "string filename" "{ply}"']
     return lines
+
+
+_MATERIAL_REF = re.compile(r'"@:([^"]+)"')
+
+
+def _statements(lines: list[str]) -> list[list[str]]:
+    out: list[list[str]] = []
+    for ln in lines:
+        if out and ln[:1].isspace():
+            out[-1].append(ln)
+        else:
+            out.append([ln])
+    return out
+
+
+def _parse_car_body(inst: str, lines: list[str]) -> tuple[dict[str, str], tuple, tuple] | None:
+    """(materials as instance-free text, leading transforms, (material, shape) pairs), or ``None`` if the
+    body holds anything but per-instance materials, leading transforms and NamedMaterial + Shape pairs."""
+    mats: dict[str, str] = {}
+    xf: list[str] = []
+    shapes: list[tuple[str, str]] = []
+    current = None
+    prefix = f'"{inst}:'
+    for st in _statements(lines):
+        head = st[0]
+        if head.startswith("MakeNamedMaterial") and head.startswith(f"MakeNamedMaterial {prefix}") and not shapes:
+            name = head.split('"')[1][len(inst) + 1 :]
+            mats[name] = "\n".join(st).replace(prefix, '"@:')
+        elif head.split(" ", 1)[0] in ("Scale", "Translate", "Rotate") and len(st) == 1 and not shapes:
+            xf.append(head)
+        elif head.startswith(f"NamedMaterial {prefix}") and len(st) == 1:
+            current = head.split('"')[1][len(inst) + 1 :]
+        elif head.startswith("Shape ") and current is not None:
+            shapes.append((current, "\n".join(st)))
+        else:
+            return None
+    return mats, tuple(xf), tuple(shapes)
+
+
+def _shared_material(m: str, same: set[str], mats: dict[str, str], seen: set[str]) -> bool:
+    """``m`` and every material it refers to are identical across the group (adds them to ``seen``)."""
+    if m not in same:
+        return False
+    if m in seen:
+        return True
+    seen.add(m)
+    return all(_shared_material(r, same, mats, seen) for r in _MATERIAL_REF.findall(mats[m]) if r != m)
+
+
+def instance_car_bodies(bodies: dict[str, list[str]]) -> tuple[list[str], dict[str, list[str]]]:
+    """Shares the geometry of identical car models through ``ObjectBegin``/``ObjectInstance``.
+
+    Cars whose transforms and shape lists match form a group. A shape goes into the group's object when its
+    material (and every material a mix of it refers to) is the same in every car of the group up to the
+    instance prefix; paint and anything else that differs stays per car. Returns the object definitions (to
+    emit at world level before the cars) and the rewritten bodies; other bodies are returned unchanged."""
+    parsed = {i: p for i, b in bodies.items() if (p := _parse_car_body(i, b)) is not None}
+    groups: dict[tuple, list[str]] = defaultdict(list)
+    for inst, (_, xf, shapes) in parsed.items():
+        if shapes:
+            groups[(xf, shapes)].append(inst)
+    defs: list[str] = []
+    out = dict(bodies)
+    for (xf, shapes), insts in groups.items():
+        if len(insts) < 2:
+            continue
+        mats = [parsed[i][0] for i in insts]
+        same = {m for m in mats[0] if all(mt.get(m) == mats[0][m] for mt in mats[1:])}
+        need: set[str] = set()
+        shared = [k for k, (m, _) in enumerate(shapes) if _shared_material(m, same, mats[0], need)]
+        if not shared:
+            continue
+        obj = f"{insts[0]}:shared"
+        defs += ["AttributeBegin", "Identity"]
+        defs += [mats[0][m].replace('"@:', f'"{obj}:') for m in sorted(need)]
+        defs += [f'ObjectBegin "{obj}"', *xf]
+        for k in shared:
+            defs += [f'NamedMaterial "{obj}:{shapes[k][0]}"', shapes[k][1]]
+        defs += ["ObjectEnd", "AttributeEnd"]
+        keep = [k for k in range(len(shapes)) if k not in set(shared)]
+        for inst in insts:
+            body = [mats_text.replace('"@:', f'"{inst}:') for mats_text in parsed[inst][0].values()]
+            body += [f'ObjectInstance "{obj}"', *xf]
+            for k in keep:
+                body += [f'NamedMaterial "{inst}:{shapes[k][0]}"', shapes[k][1]]
+            out[inst] = body
+    return defs, out
 
 
 def proxy_car(paint_spd: str, inst: str) -> list[str]:
@@ -1102,6 +1191,8 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         traffic = var.traffic or DEFAULT_TRAFFIC
         traffic, vru_cleared = vru.clear_traffic(args, traffic)
         speeds = fx.car_speeds_kmh([c[0] for c in traffic])
+        car_bodies: dict[str, list[str]] = {}
+        car_l0 = len(L)
         for k, (lane, z, model, paint, yaw) in enumerate(traffic):
             if paint not in CAR_PAINTS and paint not in var.paints:
                 raise ValueError(paint)
@@ -1126,7 +1217,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
             if coat is not None:
                 body = coat.lines(body, model)
             inc = car_dir / f"{inst}.pbrt"
-            inc.write_text("\n".join(body) + "\n")
+            car_bodies[inst] = body
             motion, motion_meta = fx.car_lines(inst, lane, speeds[k], "\n".join(body))
             x = Layout.lane_center(lane)
             L += [
@@ -1159,6 +1250,10 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
             )
             if fx.animated:
                 cars_meta[-1].update(motion_meta)
+        car_defs, car_bodies = instance_car_bodies(car_bodies)
+        for inst, body in car_bodies.items():
+            (car_dir / f"{inst}.pbrt").write_text("\n".join(body) + "\n")
+        L[car_l0:car_l0] = car_defs
         if args.spray:
             heavy = [m in variety.HEAVY for _, _, m, _, _ in traffic]
             v_spray = [v or wet.nominal_speed_kmh(c[0]) for v, c in zip(speeds, traffic)]  # static scene: lane speed
