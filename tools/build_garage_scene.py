@@ -40,6 +40,7 @@ from build_highway_scene import (  # noqa: E402
     mesh,
     proxy_car,
     quads_mesh,
+    write_car_includes,
     write_spd,
 )
 from fetch_highway_assets import cache_root, load_asset_manifest  # noqa: E402
@@ -391,6 +392,8 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
 
     bay_meta = bays()
     cars = []
+    car_bodies: dict[str, list[str]] = {}
+    car_l0 = len(L)
     for k, b in enumerate(bay_meta):
         b["occupied"] = bool(rng.random() < args.occupancy)
         if not b["occupied"]:
@@ -402,7 +405,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         body = car_include(*ca, out_dir, b["id"], paint_spd, length) if ca else proxy_car(paint_spd, b["id"])
         inc = out_dir / "cars" / f"{b['id']}.pbrt"
         inc.parent.mkdir(exist_ok=True)
-        inc.write_text("\n".join(body) + "\n")
+        car_bodies[b["id"]] = body
         heading = 90.0 if b["side"] > 0 else -90.0  # nose to the wall
         x = b["side"] * (AISLE_W / 2 + BAY_D - min(length, BAY_D - 0.2) / 2 - 0.15)
         z = b["centre"][1]
@@ -422,6 +425,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
                 **night.car_geometry(ca[0] if ca else None, length, x, heading),
             }
         )
+    write_car_includes(L, car_l0, car_bodies, out_dir / "cars")
 
     scene_path = out_dir / "garage.pbrt"
     scene_path.write_text("\n".join(L) + "\n")
