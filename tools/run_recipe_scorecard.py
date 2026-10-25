@@ -68,12 +68,14 @@ from exr_multispectral import (  # noqa: E402
     write_separate_channels_exr,
 )
 from iqlab import cpiq, flare  # noqa: E402
-from iqlab.dead_leaves import dead_leaves, texture_mtf  # noqa: E402
+from iqlab.dead_leaves import dead_leaves, illumination_plane, texture_mtf  # noqa: E402
 
 RECIPE_DIR = REPO / "config" / "camera_recipes"
 PBRT = REPO / "third_party" / "pbrt-v4" / "build" / "pbrt"
 FILM_DIAGONAL_MM = 35.0  # pbrt-v4 RealisticCamera default
 VIEW = "monitor_100pct"
+#: Inset of the card ROIs (fraction of the card side); matches ``build_iq_diorama`` ``roi_xyxy``.
+CARD_ROI_MARGIN = 0.05
 CC_WHITE = 18  # ColorChecker "white 9.5"
 HDR_MIN_SPP = 128  # the chart is rendered once; MC noise must stay well below sensor noise for CDP
 HDR_MIN_XRES = 960  # HDR-chart patches are ~2 % of the width; 4x4 CFA tiles (quad Bayer) need >= 4 guide sites
@@ -391,7 +393,7 @@ def render_scene(
         if scene == "diorama":
             for name in ("slanted_edge", "dead_leaves"):
                 w = meta["cards"][name]["world"]
-                res["rois"][name] = world_roi(P, w, w[4], 0.05)
+                res["rois"][name] = world_roi(P, w, w[4], CARD_ROI_MARGIN)
             w = meta["colorchecker"][CC_WHITE]["world"]
             res["rois"]["white"] = world_roi(P, w, w[4], 0.2)
         else:
@@ -691,10 +693,13 @@ def score_diorama(
     if rois.get("dead_leaves"):
         x0, y0, x1, y1 = rois["dead_leaves"]
         crop = y[y0:y1, x0:x1]
-        ideal = dead_leaves(1024, seed=seed)
-        ideal = ndimage.zoom(ideal, (crop.shape[0] / ideal.shape[0], crop.shape[1] / ideal.shape[1]), order=0)
-        ideal = ideal[: crop.shape[0], : crop.shape[1]] * crop.mean() / ideal.mean()
-        noise_patch = _luma(noise)[y0:y1, x0:x1] if noise is not None else None
+        plane = illumination_plane(crop)
+        crop = crop / plane
+        # Reference: the part of the full-resolution card that the ROI sees (inset by the ROI margin).
+        card = dead_leaves(1024, seed=seed)
+        m = int(round(CARD_ROI_MARGIN * card.shape[0]))
+        ideal = card[m:-m, m:-m]
+        noise_patch = _luma(noise)[y0:y1, x0:x1] / plane if noise is not None else None
         f, m = texture_mtf(crop, ideal, noise_patch)
         low = (f > 0) & (f <= 0.05)
         ref = float(m[low].mean()) if low.any() else 1.0

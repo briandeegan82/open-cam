@@ -192,6 +192,23 @@ class TestMtf(unittest.TestCase):
         _, corrected = sfr.mtf_from_lsf(lsf, bin_width, correct_differentiation=True)
         self.assertTrue(np.all(corrected[1:] >= raw[1:] - 1e-12))
 
+    def test_differentiation_correction_matches_the_gradient_response(self):
+        """np.gradient taps are 2 bins apart: its response is sinc(2 f bw), not sinc(f bw)."""
+        bw = 0.25
+        n = 512
+        x = np.arange(n) * bw
+        f = 0.75
+        wave = np.sin(2 * np.pi * f * x)
+        gain = np.abs(np.gradient(wave, bw)[8:-8]).max() / (2 * np.pi * f)
+        self.assertAlmostEqual(gain, float(np.sinc(2 * f * bw)), places=3)
+
+    def test_sharp_edge_mtf50_has_no_derivative_bias(self):
+        """sigma 0.3-0.5 px reads MTF50 within 1 % (sinc(f bw) read 2.4-4.8 % low)."""
+        for sigma in (0.3, 0.5):
+            measured = sfr.slanted_edge_sfr(_exact_blurred_edge(sigma)).mtf50_cy_per_px
+            theory = _theory_mtf50(sigma)
+            self.assertAlmostEqual(measured / theory, 1.0, delta=0.01, msg=f"sigma={sigma}")
+
     def test_a_sharper_edge_resolves_more_at_nyquist(self):
         sharp = sfr.slanted_edge_sfr(_blurred_edge(0.8)).mtf_at_nyquist
         soft = sfr.slanted_edge_sfr(_blurred_edge(2.5)).mtf_at_nyquist
@@ -259,6 +276,17 @@ def _theory_mtf50(sigma_px: float) -> float:
     return sfr.mtf50(
         THEORY_FREQ, sfr.system_mtf(sfr.gaussian_mtf(THEORY_FREQ, sigma_px), sfr.pixel_aperture_mtf(THEORY_FREQ))
     )
+
+
+def _exact_blurred_edge(sigma_px: float, size: int = 100, angle_deg: float = 5.0, s: int = 16) -> np.ndarray:
+    """Area-sampled edge blurred by an exact continuous Gaussian (no sampled-kernel error at small sigma)."""
+    from scipy.special import erfc
+
+    yy, xx = np.mgrid[0 : size * s, 0 : size * s].astype(np.float64)
+    x, y = (xx + 0.5) / s, (yy + 0.5) / s
+    edge_x = size / 2 + (y - size / 2) * math.tan(math.radians(angle_deg))
+    fine = 0.1 + 0.8 * 0.5 * erfc((x - edge_x) / (sigma_px * math.sqrt(2)))
+    return fine.reshape(size, s, size, s).mean(axis=(1, 3))
 
 
 def _legacy_angle(roi: np.ndarray) -> float:

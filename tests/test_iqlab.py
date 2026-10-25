@@ -218,3 +218,30 @@ def test_dead_leaves_counter_matches_full_scan(size, r_max, seed):
     fast = dead_leaves.dead_leaves(size, r_max=r_max, seed=seed)
     ref = _dead_leaves_reference(size, r_max=r_max, seed=seed)
     assert np.array_equal(fast, ref)
+
+
+def _card_capture(card: np.ndarray, n: int, sigma_px: float) -> np.ndarray:
+    """Gaussian-blur *card* (sigma in capture px) and area-sample it onto an n x n capture."""
+    from scipy import ndimage
+
+    k = card.shape[0] // n
+    hi = ndimage.gaussian_filter(card[: n * k, : n * k], sigma_px * k, mode="reflect")
+    return hi.reshape(n, k, n, k).mean((1, 3))
+
+
+def test_texture_mtf_against_a_high_resolution_reference_includes_the_pixel_aperture():
+    card = dead_leaves.dead_leaves(768, seed=1)
+    f, m = dead_leaves.texture_mtf(_card_capture(card, 96, 1.0), card)
+    band = (f > 0.03) & (f < 0.4)
+    truth = np.exp(-2 * np.pi**2 * f**2) * np.abs(np.sinc(f))
+    m = m / m[(f > 0) & (f <= 0.05)].mean()
+    assert np.abs(m[band] - truth[band]).mean() < 0.05
+
+
+def test_illumination_plane_divides_out_a_linear_gradient():
+    rng = np.random.default_rng(0)
+    tex = 1 + 0.2 * rng.standard_normal((64, 64))
+    ramp = (1 - 0.16 * (np.arange(64) / 63 - 0.5))[:, None]
+    flat = tex * ramp / dead_leaves.illumination_plane(tex * ramp)
+    rows = flat.mean(axis=1)
+    assert np.polyfit(np.arange(64), rows, 1)[0] * 64 < 0.01

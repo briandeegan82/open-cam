@@ -264,3 +264,25 @@ def test_roi_band_pastes_crop_plus_caustics(tmp_path, monkeypatch):
     img[y0:y1, x0:x1] = 1.0
     np.testing.assert_allclose(img, 1.0)
     assert calls[0][:4] == ("--seed", "7", "--spp", "256")
+
+
+def test_score_diorama_texture_acutance_matches_ground_truth():
+    """The ROI sees the card inset by CARD_ROI_MARGIN; the reference must be that region at full resolution.
+    (Zooming the whole card into the ROI read ~0.25 low with ~0.2 seed scatter.)"""
+    from iqlab import cpiq
+    from iqlab.dead_leaves import dead_leaves
+    from scipy import ndimage
+
+    n, sigma = 96, 1.0
+    f = np.linspace(0, 0.5, 2001)
+    t = np.exp(-2 * np.pi**2 * sigma**2 * f**2) * np.abs(np.sinc(f))
+    view = cpiq.viewing_condition(sc.VIEW, 480)
+    truth = cpiq.acutance(f, t / t[(f > 0) & (f <= 0.05)].mean(), view)
+    for seed in (0, 1):
+        sub = dead_leaves(1024, seed=seed)[51:973, 51:973]
+        hi = ndimage.zoom(ndimage.gaussian_filter(sub, sigma * sub.shape[0] / n), 10 * n / sub.shape[0], order=1)
+        cap = hi.reshape(n, 10, n, 10).mean((1, 3)) * (1 + 0.16 * (0.5 - (np.arange(n) + 0.5) / n))[:, None]
+        rgb = np.full((480, 720, 3), cap.mean())
+        rgb[100 : 100 + n, 200 : 200 + n] = cap[..., None]
+        out = sc.score_diorama(rgb, {"dead_leaves": [200, 100, 200 + n, 100 + n]}, seed=seed)
+        assert out["texture_acutance"] == pytest.approx(truth, abs=0.05)
