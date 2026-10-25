@@ -409,6 +409,7 @@ def test_car_instancing_shares_only_shapes_whose_materials_match():
     assert "glass.ply" in text and "tyre.ply" in text
     assert "body.ply" not in text and "trim.ply" not in text
     assert 'MakeNamedMaterial "car00:shared:Glass"' in text and "carpaint" not in text
+
     for inst in ("car00", "car01"):
         body = "\n".join(out[inst])
         assert 'ObjectInstance "car00:shared"' in body
@@ -420,3 +421,20 @@ def test_car_instancing_shares_only_shapes_whose_materials_match():
 def test_car_instancing_leaves_single_cars_alone():
     bodies = {"car00": _car_body("car00", "red")}
     assert hw.instance_car_bodies(bodies) == ([], bodies)
+
+
+def test_car_instancing_defines_mix_parts_before_the_mix():
+    def body(inst: str, paint: str) -> list[str]:
+        return [
+            f'MakeNamedMaterial "{inst}:Paint" "string type" "coateddiffuse" "spectrum reflectance" "spd/{paint}.spd"',
+            f'MakeNamedMaterial "{inst}:L-black" "string type" "diffuse"',
+            f'MakeNamedMaterial "{inst}:L-white" "string type" "diffuse"',
+            f'MakeNamedMaterial "{inst}:L" "string type" "mix" "string materials" [ "{inst}:L-black" "{inst}:L-white" ]',
+            f'NamedMaterial "{inst}:Paint"',
+            'Shape "plymesh" "string filename" "body.ply"',
+            f'NamedMaterial "{inst}:L"',
+            'Shape "plymesh" "string filename" "seat.ply"',
+        ]
+
+    text = "\n".join(hw.instance_car_bodies({"a": body("a", "red"), "b": body("b", "blue")})[0])
+    assert text.index('"a:shared:L-black"') < text.index('MakeNamedMaterial "a:shared:L"')

@@ -405,7 +405,7 @@ def instance_car_bodies(bodies: dict[str, list[str]]) -> tuple[list[str], dict[s
             continue
         obj = f"{insts[0]}:shared"
         defs += ["AttributeBegin", "Identity"]
-        defs += [mats[0][m].replace('"@:', f'"{obj}:') for m in sorted(need)]
+        defs += [t.replace('"@:', f'"{obj}:') for m, t in mats[0].items() if m in need]  # mixes after parts
         defs += [f'ObjectBegin "{obj}"', *xf]
         for k in shared:
             defs += [f'NamedMaterial "{obj}:{shapes[k][0]}"', shapes[k][1]]
