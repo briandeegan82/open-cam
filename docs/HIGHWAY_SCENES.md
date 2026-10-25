@@ -149,6 +149,13 @@ to the same answer. The exact scoring costs one intensity lookup per goniometric
 It is used when a scene has 1-256 goniometric lamps; above that `"bvh"` falls back to the patch 0022
 mixture. `"bvhbeam"` selects the 0022 mixture and `"bvhmean"` the stock sampler.
 
+Patch 0027 drops a redundant pmf evaluation from that sampler: each half's sampling routine already
+returns its own pmf for the light it drew, so `Sample()` only evaluates the other half's pmf
+(`PMFOne` after an exact draw, `PMFExact` after a stock draw) instead of both. The pmf is the same
+expression, so the image converges to the same answer. Night wet highway crop
+(`cropwindow 0.38,0.62,0.45,0.75`, zsobol 256 spp, 6 seeds, alternating binaries): 32.9 ± 0.7 s ->
+30.1 ± 0.9 s (0.91x); crop mean -0.001 % (0.0 σ), every bucket within 0.1 σ, noise unchanged (24.3 %).
+
 Same lead-car crop at 256 spp and `maxdepth` 8, 2 seeds (with patch 0023's per-pixel wavelength
 offsets). The rear-road crop is the wet road below the car, `cropwindow [0.40 0.60 0.68 0.85]`, 4 seeds.
 Per-pixel noise is the seed-to-seed RMS difference over the region mean; the camera channels are the
