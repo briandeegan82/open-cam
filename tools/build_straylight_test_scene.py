@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 
 from lens_glass import pbrt_camera_lines
+from pbrt_scene_common import spectral_film_lines
 
 LEGACY_REALISTIC_LENSFILE = "scenes/lenses/wide_22mm.dat"
 DEFAULT_REALISTIC_LENSFILE = "config/lenses/wide_22mm.dat"
@@ -61,16 +62,14 @@ def _film_block(args: argparse.Namespace) -> list[str]:
             '    "bool savefp16" false',
             '    "float iso" [100]',
         ]
-    return [
-        'Film "spectral"',
-        f'    "string filename" ["{args.film_output}"]',
-        f'    "integer xresolution" [{int(args.xres)}]',
-        f'    "integer yresolution" [{int(args.yres)}]',
-        '    "bool savefp16" false',
-        f'    "integer nbuckets" [{int(args.spectral_nbuckets)}]',
-        f'    "float lambdamin" [{float(args.spectral_lambda_min):.6g}]',
-        f'    "float lambdamax" [{float(args.spectral_lambda_max):.6g}]',
-    ]
+    return spectral_film_lines(
+        args.film_output,
+        args.xres,
+        args.yres,
+        args.spectral_nbuckets,
+        args.spectral_lambda_min,
+        args.spectral_lambda_max,
+    )
 
 
 def main() -> None:
