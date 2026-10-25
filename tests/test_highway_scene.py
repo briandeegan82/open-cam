@@ -356,3 +356,23 @@ def test_regularize_is_opt_in(tmp_path):
         build_without_assets(tmp_path / d, *a)
         scene = (tmp_path / d / "scene" / "highway.pbrt").read_text()
         assert ('"bool regularize" true' in scene) == bool(a)
+
+
+def test_leaf_luminance_normalised_over_leaves_not_background(tmp_path):
+    """A leaf atlas that is 75 % black background must average 1 over the leaf texels; averaging the
+    whole atlas multiplied the leaves by 4x (and their R + T far above 1)."""
+    import OpenEXR
+    from PIL import Image
+
+    rgb = np.zeros((64, 64, 3), np.uint8)
+    rgb[:32, :32] = (60, 140, 40)  # one quarter of the atlas is leaf
+    src = tmp_path / "leaf.png"
+    Image.fromarray(rgb).save(src)
+    for fg, want in ((None, 4.0), (hw.LEAF_BACKGROUND_Y, 1.0)):
+        dst = tmp_path / f"leaf_{fg}.exr"
+        hw.luminance_texture(src, dst, size=64, foreground_y=fg)
+        with OpenEXR.File(str(dst)) as f:
+            y = np.asarray(f.channels()["Y"].pixels)
+        leaf = y[8:24, 8:24]
+        np.testing.assert_allclose(leaf.mean(), want, rtol=0.02)
+        assert np.all(y[40:, 40:] < 1e-6)
