@@ -1,0 +1,80 @@
+diff --git a/src/pbrt/film.cpp b/src/pbrt/film.cpp
+index 59c016f..15d3d17 100644
+--- a/src/pbrt/film.cpp
++++ b/src/pbrt/film.cpp
+@@ -1068,6 +1068,10 @@ SpectralFilm *SpectralFilm::Create(const ParameterDictionary &parameters,
+         ErrorExit(loc, "%s: unknown \"wavelengthjitter\" (use \"pixel\" or \"sample\")",
+                   wlJitter);
+     film->pixelRotatedWavelengths = wlJitter == "pixel";
++    if (film->pixelRotatedWavelengths && (Options->wavefront || Options->useGPU))  // open-cam patch 0030
++        Warning(loc, "per-pixel rotated wavelengths (patch 0023) are CPU-only; the "
++                     "wavefront/GPU integrator uses per-sample jitter (unbiased, noisier "
++                     "buckets). Set \"wavelengthjitter\" \"sample\" to silence this.");
+     std::vector<Float> bucketWeights = parameters.GetFloatArray("bucketweights");
+     if (!bucketWeights.empty()) {
+         if (int(bucketWeights.size()) != nBuckets)
+diff --git a/src/pbrt/materials.cpp b/src/pbrt/materials.cpp
+index 02c6d11..3628705 100644
+--- a/src/pbrt/materials.cpp
++++ b/src/pbrt/materials.cpp
+@@ -4,6 +4,8 @@
+ 
+ #include <pbrt/materials.h>
+ 
++#include <pbrt/options.h>
++
+ #include <pbrt/bsdf.h>
+ #include <pbrt/bssrdf.h>
+ #include <pbrt/interaction.h>
+@@ -69,6 +71,9 @@ DielectricMaterial *DielectricMaterial::Create(
+     FloatTexture displacement = parameters.GetFloatTextureOrNull("displacement", alloc);
+     bool remapRoughness = parameters.GetOneBool("remaproughness", true);
+     bool passthrough = parameters.GetOneBool("passthrough", false);
++    if (passthrough && (Options->wavefront || Options->useGPU))  // open-cam patch 0030
++        Warning(loc, "\"passthrough\" (patches 0017/0020) is CPU-only; the wavefront/GPU "
++                     "integrator renders this dielectric without it.");
+ 
+     return alloc.new_object<DielectricMaterial>(uRoughness, vRoughness, eta, displacement,
+                                                 normalMap, remapRoughness, passthrough);
+@@ -95,6 +100,9 @@ ThinDielectricMaterial *ThinDielectricMaterial::Create(
+     FloatTexture displacement = parameters.GetFloatTextureOrNull("displacement", alloc);
+ 
+     bool passthrough = parameters.GetOneBool("passthrough", false);
++    if (passthrough && (Options->wavefront || Options->useGPU))  // open-cam patch 0030
++        Warning(loc, "\"passthrough\" (patches 0017/0020) is CPU-only; the wavefront/GPU "
++                     "integrator renders this thin dielectric without it.");
+ 
+     return alloc.new_object<ThinDielectricMaterial>(eta, displacement, normalMap,
+                                                     passthrough);
+@@ -836,8 +844,12 @@ Material Material::Create(const std::string &name,
+         material = ConductorMaterial::Create(parameters, normalMap, loc, alloc);
+     else if (name == "measured")
+         material = MeasuredMaterial::Create(parameters, normalMap, loc, alloc);
+-    else if (name == "fluorescent")
++    else if (name == "fluorescent") {
++        if ((Options->wavefront || Options->useGPU))  // open-cam patch 0030
++            Warning(loc, "\"fluorescent\" re-emission (patch 0002) is applied by the CPU "
++                         "integrators only; the wavefront/GPU integrator renders no fluorescence.");
+         material = FluorescentMaterial::Create(parameters, normalMap, loc, alloc);
++    }
+     else if (name == "roadrtable")
+         material = RoadRTableMaterial::Create(parameters, normalMap, loc, alloc);
+     else if (name == "retroreflective")
+diff --git a/src/pbrt/wavefront/integrator.cpp b/src/pbrt/wavefront/integrator.cpp
+index 94aa0f3..6bb1e73 100644
+--- a/src/pbrt/wavefront/integrator.cpp
++++ b/src/pbrt/wavefront/integrator.cpp
+@@ -196,6 +196,13 @@ WavefrontPathIntegrator::WavefrontPathIntegrator(
+     // Integrator parameters
+     regularize = scene.integrator.parameters.GetOneBool("regularize", false);
+     maxDepth = scene.integrator.parameters.GetOneInt("maxdepth", 5);
++    // open-cam patch 0030: the caustic split (patch 0021) lives in the CPU volpath only;
++    // ignoring it would count the caustic twice when the two passes are summed.
++    if (scene.integrator.parameters.GetOneBool("skipcaustics", false) ||
++        scene.integrator.parameters.GetOneBool("causticsonly", false))
++        ErrorExit(&scene.integrator.loc,
++                  "\"skipcaustics\"/\"causticsonly\" (patch 0021) are CPU-only; the wavefront/GPU "
++                  "integrator would render the full light transport. Use the CPU integrator.");
+ 
+     initializeVisibleSurface = film.UsesVisibleSurface();
+     samplesPerPixel = sampler.SamplesPerPixel();
