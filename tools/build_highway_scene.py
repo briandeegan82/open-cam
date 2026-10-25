@@ -197,11 +197,18 @@ def luminance_texture(src: Path, dst: Path, size: int = 1024, foreground_y: floa
     leaf atlas whose cards are mostly black background is normalised over the leaves themselves
     (``foreground_y=LEAF_BACKGROUND_Y``). Normalising over the whole atlas scaled the leaves of
     ``veg_island_tree_02`` (75 % background) by 1/0.03 instead of 1/0.12."""
-    if dst.is_file():
-        return
+    import derived_cache
     import OpenEXR
     from PIL import Image
 
+    def make(ps: list[Path]) -> None:
+        _luminance_exr(src, ps[0], size, foreground_y, OpenEXR, Image)
+
+    k = derived_cache.key("lum", [luminance_texture, _luminance_exr], [src], size=size, foreground_y=foreground_y)
+    derived_cache.materialize(k, [dst], make)
+
+
+def _luminance_exr(src: Path, dst: Path, size: int, foreground_y: float | None, OpenEXR, Image) -> None:
     im = np.asarray(Image.open(src).convert("RGB").resize((size, size), Image.LANCZOS), dtype=np.float64) / 255.0
     lin = np.where(im <= 0.04045, im / 12.92, ((im + 0.055) / 1.055) ** 2.4)
     y = lin @ np.array([0.2126, 0.7152, 0.0722])
