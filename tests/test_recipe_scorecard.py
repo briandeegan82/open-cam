@@ -313,3 +313,37 @@ def test_score_diorama_texture_acutance_matches_ground_truth():
         rgb[100 : 100 + n, 200 : 200 + n] = cap[..., None]
         out = sc.score_diorama(rgb, {"dead_leaves": [200, 100, 200 + n, 100 + n]}, seed=seed)
         assert out["texture_acutance"] == pytest.approx(truth, abs=0.05)
+
+
+def test_flare_ignores_noise_blobs_in_vignetted_corners():
+    # Measured on google_pixel_3: noise fragments the dark corners into small blobs at ~78 % "glare"; the
+    # median over 9 holes + 10 blobs read 75.9 % instead of 0.1 %.
+    img = np.ones((120, 180))
+    for cy in (25, 60, 95):
+        for cx in (35, 90, 145):
+            img[cy - 5 : cy + 5, cx - 5 : cx + 5] = 0.001
+    for cy, cx in (
+        (4, 4),
+        (4, 12),
+        (12, 4),
+        (4, 172),
+        (12, 172),
+        (112, 4),
+        (112, 172),
+        (104, 172),
+        (112, 12),
+        (4, 164),
+    ):
+        img[cy - 2 : cy + 3, cx - 2 : cx + 3] = 0.45
+    assert len(sc.flare.black_hole_glare(img)) == 19
+    out = sc.score_flare(np.repeat(img[..., None], 3, -1))
+    assert out["n_holes"] == 9 and 0 < out["veiling_glare_pct"] < 1
+
+
+def test_flare_is_nan_when_the_white_field_luma_is_negative():
+    img = -np.ones((90, 90))
+    for cy in (15, 45, 75):
+        for cx in (15, 45, 75):
+            img[cy - 3 : cy + 3, cx - 3 : cx + 3] = -5.0
+    out = sc.score_flare(np.repeat(img[..., None], 3, -1))
+    assert np.isnan(out["veiling_glare_pct"])
