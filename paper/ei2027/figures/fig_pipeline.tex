@@ -1,0 +1,29 @@
+% open-cam pipeline (TikZ). Included by open_cam_ei2027.tex.
+\begin{tikzpicture}[
+  font=\scriptsize, >=latex, node distance=9mm and 4mm,
+  stage/.style={draw, rounded corners=1.5pt, fill=black!4, align=center, minimum height=15mm, text width=25mm, inner sep=2pt},
+  data/.style={align=center, font=\tiny, text=black!70},
+  cfg/.style={draw, dashed, rounded corners=1.5pt, align=center, text width=34mm, inner sep=3pt, minimum height=9mm},
+  arr/.style={->, thick}, carr/.style={->, densely dashed, black!60}]
+\node[stage] (scene) {\textbf{Scene builders}\\ColorChecker, IQ targets,\\Munsell, road scenes,\\IQ-lab charts};
+\node[stage, right=of scene] (render) {\textbf{pbrt-v4 render}\\(patched) pinhole,\\thin-lens or traced\\lens prescription};
+\node[stage, right=of render] (psf) {\textbf{Post-render optics}\\(optional) spectral PSF,\\lateral CA, ghosts,\\stray light};
+\node[stage, right=of psf] (elec) {\textbf{Radiance to electrons}\\camera equation,\\QE\,$\times$\,IRCF\,$\times\,\lambda/hc$,\\vignetting};
+\node[stage, right=of elec] (sensor) {\textbf{Sensor model}\\EMVA1288 noise, FPN,\\defects, HDR pixel,\\ADC $\rightarrow$ raw DN};
+\node[stage, below=of sensor] (isp) {\textbf{CFA and ISP}\\mosaic, demosaic,\\white balance, CCM};
+\node[stage, below=of psf] (metrics) {\textbf{Metrics and validators}\\IQ lab: SNR, DR, CDP,\\MTF, $\Delta E_{00}$, glare;\\EMVA checks};
+\node[cfg, below=of render, xshift=-9mm] (recipe) {\textbf{Camera recipe} (YAML)\\sensor model + lens model};
+\draw[arr] (scene) -- node[data, above] {.pbrt} (render);
+\draw[arr] (render) -- node[data, above] {EXR} (psf);
+\draw[arr] (psf) -- node[data, above] {EXR} (elec);
+\draw[arr] (elec) -- node[data, above] {e$^-$} (sensor);
+\draw[arr] (sensor) -- node[data, right] {raw DN} (isp);
+\draw[arr] (isp) -- node[data, above] {RGB} (metrics);
+\coordinate (bus) at ([yshift=4.5mm]recipe.north);
+\draw[densely dashed, black!60] (recipe.north) -- (bus);
+\draw[carr] (bus) -| (render.south);
+\draw[carr] (bus) -| (elec.south);
+\draw[carr] (bus) -| ([xshift=-6mm]sensor.south);
+\coordinate (low) at ([yshift=-4mm]metrics.south);
+\draw[carr] (scene.south) |- node[data, pos=0.75, above] {ROI JSON} (low) -- (metrics.south);
+\end{tikzpicture}

@@ -5,6 +5,8 @@
 \usepackage{microtype}
 \usepackage{booktabs}
 \usepackage{graphicx}
+\usepackage{tikz}
+\usetikzlibrary{positioning}
 \usepackage{amsmath}
 \usepackage{url}
 \usepackage[hidelinks]{hyperref}
@@ -41,6 +43,13 @@ Camera simulation is used to prototype sensors, to evaluate image signal process
 
 Many questions that matter in automotive and mobile imaging cannot be answered from an RGB render: how a red--clear--clear--blue (RCCB) or red--yellow--yellow--cyan (RYYCy) mosaic changes low-light signal-to-noise ratio (SNR), how the infrared-cut filter (IRCF) interacts with an LED or tungsten illuminant, or how a lens with longitudinal chromatic aberration blurs each colour channel. All require the spectral radiance at the sensor. open-cam~\cite{opencam} is a Python toolkit built to answer such questions with free tools. Its contributions are: (i) a spectral pipeline from pbrt-v4~\cite{pharr2023pbrt,pbrtv4code} spectral film to photoelectrons, with every radiometric factor explicit; (ii) an EMVA1288-style~\cite{emva1288std} sensor model with analytic validators and real-renderer end-to-end tests; (iii) a library of camera recipes, measured spectral data and traced lens prescriptions; (iv) generic periodic colour filter arrays (CFAs), sampled per site from the spectral render; and (v) a measured account of renderer bias and of what is not yet implemented.
 
+\begin{figure*}[t]
+\centering
+\resizebox{\textwidth}{!}{\input{figures/fig_pipeline.tex}}
+\caption{The open-cam pipeline. Solid arrows carry data: pbrt-v4 scene files, spectral OpenEXR radiance (one channel per wavelength bucket), mean photoelectrons, raw DN and output RGB. The camera recipe sets the optics of the render and the radiometry, sensor and ISP stages; the scene builders' ROI descriptions go directly to the metrics.}
+\label{fig:pipeline}
+\end{figure*}
+
 \section{Related work}
 \textbf{Image-systems simulation.} ISETCam (MATLAB, MIT licence) keeps scene spectral radiance, optical-image irradiance and sensor photoelectrons and voltages in physical units, and includes models of CFAs, optics and displays~\cite{isetcam,farrell2012digital}. ISET3D (MIT) adds 3D rendering with pbrt-v4~\cite{iset3d}; it has been validated against measured cameras~\cite{lyu2021cornell,lyu2022validation} and extended with ray-transfer functions for lenses whose design is hidden~\cite{goossens2022ray}. ISETAuto (Apache-2.0) applies the stack to driving scenes and network evaluation~\cite{isetauto,blasinski2018optimizing,liu2019soft}. open-cam is closest to this family; it differs in being pure Python, in its configuration-driven catalogue of 73 camera recipes, and in its EMVA1288-oriented validators and continuous-integration tests that run the real renderer. It does not yet offer the breadth of ISETCam's optics, display and human-vision models.
 
@@ -76,7 +85,7 @@ Imatest, emva1288 & -- (measurement) & -- & EMVA1288 analysis of measured data &
 \end{table*}
 
 \section{Architecture}
-open-cam is a set of command-line tools orchestrated by \texttt{tools/run\_pipeline.py}. A single YAML file (\texttt{config/pipeline.yaml}) selects a camera recipe and drives four stages: scene generation, pbrt-v4 rendering, spectral-to-electron conversion and the sensor/noise/CFA stage, followed by validators. A recipe in \texttt{config/camera\_recipes/} (73 are provided: phone, compact, interchangeable-lens and research cameras) references a sensor model (QE curves, pixel pitch, fill factor, exposure, EMVA parameters, CFA) and a lens model. Sensor models are written as deltas from \texttt{config/sensor\_models/default.yaml}, so a new sensor needs only its overrides.
+open-cam is a set of command-line tools orchestrated by \texttt{tools/run\_pipeline.py}. A single YAML file (\texttt{config/pipeline.yaml}) selects a camera recipe and drives four stages (Fig.~\ref{fig:pipeline}): scene generation, pbrt-v4 rendering, spectral-to-electron conversion and the sensor/noise/CFA stage, followed by validators. A recipe in \texttt{config/camera\_recipes/} (88 are provided: phone, compact, interchangeable-lens, automotive, research and SWIR cameras, plus reference HDR and CFA variants) references a sensor model (QE curves, pixel pitch, fill factor, exposure, EMVA parameters, CFA) and a lens model. Sensor models are written as deltas from \texttt{config/sensor\_models/default.yaml}, so a new sensor needs only its overrides.
 
 \textbf{Scenes.} \texttt{build\_colorchecker\_scene.py} builds a 24-patch ColorChecker from measured X-Rite reflectances lit by a tabulated illuminant (D50--D75, A, C, fluorescent and LED spectra are included). \texttt{build\_image\_quality\_targets.py} generates slanted-edge, Siemens-star and ISO-style noise targets, and \texttt{build\_munsell\_scenes.py} builds charts from 1269 measured Munsell chips (380--800\,nm at 1\,nm).
 
