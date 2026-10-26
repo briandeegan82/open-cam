@@ -113,11 +113,12 @@ glass-sphere caustic ([IQ_LAB_DIORAMA.md](IQ_LAB_DIORAMA.md)).
 
 Measured at 384x216 with default options plus those listed: crop mean with `--regularize` divided by
 the crop mean without it, each the average of two seeds (± is half the seed-to-seed difference),
-brightest 0.5 % of pixels excluded:
+brightest 0.5 % of pixels excluded. The wet rural canopy row was re-measured after the leaf energy fix
+(PR #150) over four seeds, on the two large tree crowns (x 45-82, y 35-80 and x 260-300, y 30-80, sky excluded):
 
 | scene | crop | spp | regularized / unbiased |
 |---|---|---:|---:|
-| rural, night, `--road-wetness wet` | tree canopy pixels, lit partly by lamp light reflected off the water | 16384 | 0.930 ± 0.005 |
+| rural, night, `--road-wetness wet` | tree canopy pixels, lit partly by lamp light reflected off the water | 16384 | 0.893 ± 0.007 (4 seeds, ± SEM) |
 | rural, night, `--road-wetness dry` | same pixels | 16384 | 1.000 (identical) |
 | urban, day, `--road-wetness wet` | road and parked cars, lower right | 8192 | 0.972 ± 0.000 |
 | highway, day, `--windscreen` | road seen through the windscreen, lower left | 8192 | 1.019 ± 0.001 |

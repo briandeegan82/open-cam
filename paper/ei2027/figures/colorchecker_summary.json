@@ -2,21 +2,21 @@
   "D65": {
     "bayer_pattern": "GBRG",
     "demosaic": "malvar",
-    "signal_e_mean_mono": 1150.347900390625,
+    "signal_e_mean_mono": 1150.3487548828125,
     "preview_white_balance_gains_rgb": [
-      2.1789071559906006,
+      2.1789040565490723,
       1.0,
-      1.8361668586730957
+      1.8361642360687256
     ]
   },
   "A": {
     "bayer_pattern": "GBRG",
     "demosaic": "malvar",
-    "signal_e_mean_mono": 1026.7659912109375,
+    "signal_e_mean_mono": 1026.7667236328125,
     "preview_white_balance_gains_rgb": [
-      1.2643672227859497,
+      1.264365315437317,
       1.0,
-      3.2286434173583984
+      3.2286388874053955
     ]
   }
 }
