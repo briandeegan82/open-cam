@@ -247,7 +247,9 @@ def scorecard_tables(sc: dict, macros: dict) -> dict[str, str]:
         ("dr_snr1_db", "drOne", "{:.1f}"),
         ("texture_acutance", "tex", "{:.2f}"),
     ):
-        v = vals(rows, key)
+        # Output-luma MTF50 of a rebound-flagged recipe is not comparable (render or fixed-pattern noise moves
+        # its crossing, e.g. 0.85 -> 1.34 cy/px with the noise seed alone): quote unflagged recipes only.
+        v = vals([r for r in rows if r not in flagged] if key == "edge_mtf50_cy_px" else rows, key)
         if v.size:
             macros[f"{name}Min"], macros[f"{name}Max"] = f.format(v.min()), f.format(v.max())  # fmt: skip
     return out
