@@ -748,6 +748,9 @@ def score_skin(rgb: np.ndarray, chart: dict, rois: list) -> dict:
 
 def score_flare(rgb: np.ndarray, expected_holes: int = 9) -> dict:
     holes = flare.black_hole_glare(_luma(rgb))
+    # Strong corner vignetting (wide phone lenses) leaves the frame corners below the 0.5 x median threshold,
+    # and sensor noise breaks them into small blobs that pass as holes; the scene's holes are the largest.
+    holes = sorted(holes, key=lambda h: h.area, reverse=True)[:expected_holes]
     # Fewer holes than the scene has means segmentation failed (e.g. a large CFA colour matrix drives the
     # luma negative); the median of the rest is then meaningless, so report NaN.
     g = [h.glare_percent for h in holes if np.isfinite(h.glare_percent)]
