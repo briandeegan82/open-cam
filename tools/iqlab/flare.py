@@ -19,6 +19,7 @@ class HoleGlare:
     y: float
     hole_mean: float
     surround_mean: float
+    area: int = 0
 
     @property
     def glare_percent(self) -> float:
@@ -61,7 +62,7 @@ def black_hole_glare(
         dist_out = ndimage.distance_transform_edt(~m)
         ring_m = (dist_out >= ring[0] * r_eq) & (dist_out <= ring[1] * r_eq) & (lab == 0)
         ring_m &= np.hypot(xx - cx, yy - cy) <= 3 * r_eq
-        out.append(HoleGlare(float(cx), float(cy), float(a[core_m].mean() - hole_true), float(a[ring_m].mean())))
+        out.append(HoleGlare(float(cx), float(cy), float(a[core_m].mean() - hole_true), float(a[ring_m].mean()), area))
     return out
 
 
