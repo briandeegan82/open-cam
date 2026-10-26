@@ -747,7 +747,12 @@ def score_skin(rgb: np.ndarray, chart: dict, rois: list) -> dict:
 
 
 def score_flare(rgb: np.ndarray, expected_holes: int = 9) -> dict:
-    holes = flare.black_hole_glare(_luma(rgb))
+    y = _luma(rgb)
+    if not np.median(y) > 0:
+        # A large CFA colour matrix (e.g. RCCG) can drive the luma of the white field negative; the
+        # 0.5 x median hole threshold and the hole / surround ratio are then meaningless.
+        return {"veiling_glare_pct": float("nan"), "n_holes": 0}
+    holes = flare.black_hole_glare(y)
     # Strong corner vignetting (wide phone lenses) leaves the frame corners below the 0.5 x median threshold,
     # and sensor noise breaks them into small blobs that pass as holes; the scene's holes are the largest.
     holes = sorted(holes, key=lambda h: h.area, reverse=True)[:expected_holes]
