@@ -11,14 +11,14 @@
 \emergencystretch=1.5em
 
 %% Numbers produced by scripts/fig_mtf.py (figures/mtf_summary.json).
-\newcommand{\mtfFoc}{0.257}
-\newcommand{\mtfDefTwo}{0.328}
-\newcommand{\mtfDefFive}{0.339}
-\newcommand{\mtfNyqDefTwo}{0.190}
-\newcommand{\mtfNyqFoc}{0.267}
-\newcommand{\mtfNyqLensFoc}{0.42}
+\newcommand{\mtfFoc}{0.262}
+\newcommand{\mtfDefTwo}{0.336}
+\newcommand{\mtfDefFive}{0.346}
+\newcommand{\mtfNyqDefTwo}{0.206}
+\newcommand{\mtfNyqFoc}{0.289}
+\newcommand{\mtfNyqLensFoc}{0.45}
 \newcommand{\mtfBandFoc}{0.18--0.27}
-\newcommand{\mtfBandFive}{0.33--0.46}
+\newcommand{\mtfBandFive}{0.34--0.49}
 
 \title{open-cam: an open-source hyperspectral, ray-traced camera simulator built on pbrt-v4 for sensor, lens and CFA studies}
 
@@ -131,7 +131,7 @@ All results below were produced on a CPU build of pbrt-v4 with the scripts in \t
 
 \textbf{Colour filter arrays.} The pipeline samples any periodic tile of named channels. Each channel has its own QE curve, which is multiplied by the IR-cut filter and integrated against the spectral buckets at each site, so a clear pixel sees the unfiltered silicon QE rather than a substitute curve. Shot noise, PRNU, DSNU, dark current, full well and ADC act per site. Bayer layouts keep the bilinear and Malvar--He--Cutler demosaics; other layouts use bilinear, gradient-guided or edge-directed interpolation, and quad Bayer~\cite{okawa2019quad} can be charge- or digitally binned 2$\times$2 or remosaiced to Bayer. We ran six recipes of the default research camera (Fig.~\ref{fig:qe}) through the pipeline on the D65 and CIE A ColorChecker renders at 50\,lux and 0.12\,s, the level at which the white patch stays below ADC full scale for every layout; with 2$\times$2 charge binning the 10-bit ADC, not the quadrupled full well, limits the binned signal to 4.8\,ke$^-$. The renders cover 360--830\,nm, so the 0.1--0.3\% leak of the IR-cut filter beyond 830\,nm is not counted.
 
-Table~\ref{tab:cfa} reports, for the neutral 5 patch (about 19\% reflectance), the luminance-channel signal relative to the Bayer green pixel (137\,e$^-$ at 50\,lux under D65), the temporal SNR at 10\,lux measured from two noise seeds next to the analytic EMVA value $\mu_e/\sqrt{\mu_e+\sigma_d^2}$ with $\sigma_d=2.6$\,e$^-$, and the colour error of the layout. A clear or white pixel collects 2.52--2.54 times the green signal and gains 4.6--5.1\,dB of SNR at 10\,lux; 2$\times$2 charge binning collects 4.05 times the green signal at a quarter of the resolution and gains 7.3\,dB; yellow gains 2.0\,dB. The measured SNR agrees with the analytic value to within 0.6\,dB for every layout. The yellow/green ratio depends on the illuminant, rising from 1.46 under D65 to 1.96 under CIE A, while the clear/green ratio stays at 2.50--2.51. The colour error is the mean CIEDE2000 of the 24 patches after a least-squares colour-correction matrix fitted to their noise-free spectral responses under D65; it measures how well each set of channels spans colour, and excludes the noise that the matrix amplifies, which Fig.~\ref{fig:mosaic} shows is clearly visible for RGBW at 50\,lux. Per-site analyses of this kind need the spectral radiance at each pixel and cannot be derived from an RGB render~\cite{hirakawa2008spatio}.
+Table~\ref{tab:cfa} reports, for the neutral 5 patch (about 19\% reflectance), the luminance-channel signal relative to the Bayer green pixel (138\,e$^-$ at 50\,lux under D65), the temporal SNR at 10\,lux measured from two noise seeds next to the analytic EMVA value $\mu_e/\sqrt{\mu_e+\sigma_d^2}$ with $\sigma_d=2.6$\,e$^-$, and the colour error of the layout. A clear or white pixel collects 2.52--2.53 times the green signal and gains 4.2--4.4\,dB of SNR at 10\,lux; 2$\times$2 charge binning collects 3.99 times the green signal at a quarter of the resolution and gains 7.2\,dB; yellow gains 1.7\,dB. The measured SNR agrees with the analytic value to within 0.5\,dB for every layout. The yellow/green ratio depends on the illuminant, rising from 1.44 under D65 to 1.94 under CIE A, while the clear/green ratio stays at 2.48--2.52. The colour error is the mean CIEDE2000 of the 24 patches after a least-squares colour-correction matrix fitted to their noise-free spectral responses under D65; it measures how well each set of channels spans colour, and excludes the noise that the matrix amplifies, which Fig.~\ref{fig:mosaic} shows is clearly visible for RGBW at 50\,lux. Per-site analyses of this kind need the spectral radiance at each pixel and cannot be derived from an RGB render~\cite{hirakawa2008spatio}.
 
 \begin{figure}[t]
 \centering
@@ -157,12 +157,12 @@ Table~\ref{tab:cfa} reports, for the neutral 5 patch (about 19\% reflectance), t
 \toprule
 CFA (channel) & ch/G D65 & ch/G A & SNR [dB] & $\Delta$ [dB] & $\Delta E_{00}$ \\
 \midrule
-Bayer (G) & 1.00 & 1.00 & 13.3 (13.4) & -- & 1.07 \\
-Quad, 2$\times$2 bin (G) & 4.05 & 4.04 & 20.7 (20.1) & +7.3 & 1.07 \\
-RGBW 2$\times$2 (W) & 2.52 & 2.51 & 18.0 (18.0) & +4.6 & 0.93 \\
-RGBW 4$\times$4 (W) & 2.54 & 2.50 & 18.4 (18.0) & +5.1 & 0.93 \\
-RCCB (C) & 2.54 & 2.51 & 18.0 (18.0) & +4.7 & 1.10 \\
-RYYCy (Ye) & 1.46 & 1.96 & 15.3 (15.3) & +2.0 & 1.15 \\
+Bayer (G) & 1.00 & 1.00 & 13.4 (13.3) & -- & 1.07 \\
+Quad, 2$\times$2 bin (G) & 3.99 & 3.95 & 20.6 (20.2) & +7.2 & 1.07 \\
+RGBW 2$\times$2 (W) & 2.53 & 2.49 & 17.6 (18.0) & +4.2 & 0.93 \\
+RGBW 4$\times$4 (W) & 2.53 & 2.48 & 17.8 (18.0) & +4.4 & 0.93 \\
+RCCB (C) & 2.52 & 2.48 & 17.8 (18.0) & +4.3 & 1.10 \\
+RYYCy (Ye) & 1.44 & 1.94 & 15.1 (15.3) & +1.7 & 1.15 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -170,7 +170,7 @@ RYYCy (Ye) & 1.46 & 1.96 & 15.3 (15.3) & +2.0 & 1.15 \\
 \begin{figure*}[t]
 \centering
 \includegraphics[width=\textwidth]{figures/fig_driving.jpg}
-\caption{Highway scenes, 960$\times$540, unregularized path tracer, 256 samples per pixel for (a)--(c) and 1024 for (d). (a), (b), (d): pbrt-v4 spectral film with 16 buckets over 360--830\,nm, converted by the default research-camera recipe and shown as its noisy demosaiced sRGB preview. (c): 36 buckets over 900--1600\,nm, converted by a representative 15\,\textmu m InGaAs recipe and shown as its noisy greyscale preview. Exposure is set separately for each panel (99th percentile at 80\% of full well), so brightness is not comparable between panels. The bright speckle on the wet road just ahead of the lead car in (d) is Monte Carlo noise in the pbrt-v4 output: ego low-beam light reflected by the lead car and then by the wet road, a two-bounce path that the unregularized path tracer renders without bias but still with high variance at 1024 samples per pixel.}
+\caption{Highway scenes, 960$\times$540, unregularized path tracer, 256 samples per pixel for (a)--(c) and 1024 for (d). (a), (b), (d): pbrt-v4 spectral film with 32 buckets over 360--830\,nm, converted by the default research-camera recipe and shown as its noisy demosaiced sRGB preview. (c): 36 buckets over 900--1600\,nm, converted by a representative 15\,\textmu m InGaAs recipe and shown as its noisy greyscale preview. Exposure is set separately for each panel (99th percentile at 80\% of full well), so brightness is not comparable between panels. The bright speckle on the wet road just ahead of the lead car in (d) is Monte Carlo noise in the pbrt-v4 output: ego low-beam light reflected by the lead car and then by the wet road, a two-bounce path that the unregularized path tracer renders without bias but still with high variance at 1024 samples per pixel.}
 \label{fig:driving}
 \end{figure*}
 
