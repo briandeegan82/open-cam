@@ -9,11 +9,13 @@ This is the companion to `paper/ei2027/`. It covers the IQ-lab metrics, the grou
 venv/bin/python tools/validate_iqlab_metrics.py --out-dir out/iq_lab/validation
 # 2. Recipe scorecard: every recipe in config/camera_recipes on all four scenes (several hours on 8 cores)
 venv/bin/python tools/run_recipe_scorecard.py --xres 480 --yres 320 --pixelsamples 64 \
-    --out-dir out/iq_lab/scorecard --figure
+    --roi-spp 1024 --out-dir out/iq_lab/scorecard --figure
 # 3. Tables, macros and figure
 venv/bin/python paper/ei2027_iqlab/scripts/make_tables.py \
     --scorecard out/iq_lab/scorecard/scorecard.json \
     --validation out/iq_lab/validation/iqlab_validation.json
+# 3b. Test-scene figure (fig_scenes.pdf) from the scorecard's renders
+venv/bin/python paper/ei2027_iqlab/scripts/make_scene_figure.py --work-dir out/iq_lab/scorecard/work
 # 4. PDF
 cd paper/ei2027_iqlab && latexmk -pdf open_cam_iqlab_ei2027.tex
 ```
