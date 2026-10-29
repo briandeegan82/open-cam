@@ -413,8 +413,7 @@ def test_desaturate_near_clip_whitens_fringes_only():
     out = cm.desaturate_near_clip(rgb, raw, 1000.0, radius=2)
     np.testing.assert_array_equal(out[:, :5], rgb[:, :5])  # far from the clip: untouched
     assert np.ptp(out[:, 8], axis=-1).max() < 1e-12  # at the clip: neutral
-    y = rgb[0, 0] @ np.array([0.2126, 0.7152, 0.0722])
-    np.testing.assert_allclose(out[:, 8].mean(axis=-1), y)  # luminance kept
+    np.testing.assert_allclose(out[:, 8].mean(axis=-1), 0.9)  # brightest channel kept: white, not grey
     assert cm.desaturate_near_clip(rgb, raw, None) is rgb
 
 

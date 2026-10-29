@@ -689,13 +689,15 @@ def clip_highlights(img: np.ndarray, gains: np.ndarray, clip_level: float | None
 def desaturate_near_clip(
     rgb: np.ndarray, raw: np.ndarray, clip_level: float | None, radius: int = 2, start: float = 0.9
 ) -> np.ndarray:
-    """Blend display RGB toward its luminance where the raw mosaic nears its clip level.
+    """Blend display RGB toward a grey at its brightest channel where the raw mosaic nears its clip level.
 
     Next to a clipped highlight the demosaic mixes clipped and unclipped samples of different
     channels, so one channel stops growing while the others do: a coloured fringe along window and
     lamp edges. The weight ramps from 0 at ``start * clip_level`` to 1 at the clip level, using the
-    largest raw sample within ``radius`` pixels (the demosaic's support). Display only; the raw data
-    and the metrics are not touched."""
+    largest raw sample within ``radius`` pixels (the demosaic's support). The target is the brightest
+    channel, not the luminance: a lamp clipped only in red would otherwise turn mid grey, so clipped
+    cores render white with a coloured rim, as in a real camera. Display only; the raw data and the
+    metrics are not touched."""
     if clip_level is None or clip_level <= 0:
         return rgb
     r = np.asarray(raw, dtype=np.float64)
@@ -708,7 +710,7 @@ def desaturate_near_clip(
     wgt = np.clip((m / float(clip_level) - start) / (1.0 - start), 0.0, 1.0)[:, :, None]
     if not np.any(wgt):
         return rgb
-    y = np.tensordot(rgb, np.array([0.2126, 0.7152, 0.0722]), axes=([2], [0]))[:, :, None]
+    y = np.max(rgb, axis=2, keepdims=True)
     return (rgb * (1.0 - wgt) + y * wgt).astype(np.asarray(rgb).dtype, copy=False)
 
 
