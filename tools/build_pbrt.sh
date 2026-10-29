@@ -6,6 +6,8 @@
 #   PBRT_LAMBDA_MAX_NM=1100 PBRT_BUILD_DIR=third_party/pbrt-v4/build-nir tools/build_pbrt.sh
 # 8 wavelengths per path instead of 4 (patch 0029; opt-in, own build dir):
 #   PBRT_NSPECTRUM=8 PBRT_BUILD_DIR=third_party/pbrt-v4/build-ns8 tools/build_pbrt.sh
+# Path guiding ("guidedpath" integrator, patch 0031; fetches and builds Open PGL first):
+#   PBRT_OPENPGL=1 tools/build_pbrt.sh
 set -euo pipefail
 export LC_ALL=C  # patch glob order = byte order of the file names, on every machine
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -45,7 +47,11 @@ for p in "${patches[@]}"; do
 done
 case "${1:-}" in --apply-only | --patch-only) exit 0 ;; esac
 
-env -u PBRT_OPTIX_PATH cmake -S "$src" -B "$build" -DCMAKE_BUILD_TYPE=Release \
+openpgl_args=()
+if [ "${PBRT_OPENPGL:-0}" = 1 ]; then
+  openpgl_args=(-Dopenpgl_DIR="$("$repo/tools/fetch_openpgl.sh")")
+fi
+env -u PBRT_OPTIX_PATH cmake -S "$src" -B "$build" -DCMAKE_BUILD_TYPE=Release "${openpgl_args[@]}" \
   -DPBRT_BUILD_NATIVE_EXECUTABLE="${PBRT_NATIVE:-ON}" \
   -DCMAKE_CXX_FLAGS="${PBRT_LAMBDA_MAX_NM:+-DPBRT_LAMBDA_MAX_NM=${PBRT_LAMBDA_MAX_NM}} ${PBRT_NSPECTRUM:+-DPBRT_NSPECTRUM=${PBRT_NSPECTRUM}}"
 env -u PBRT_OPTIX_PATH cmake --build "$build" -j"$(nproc)" --target pbrt_exe "$@"

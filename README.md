@@ -43,12 +43,32 @@ venv/bin/pip install -r requirements.txt
 2. Build PBRT (see `docs/BUILD_PBRT.txt` for full details):
 
 ```bash
-cd third_party/pbrt-v4
 git submodule update --init --recursive
-env -u PBRT_OPTIX_PATH cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j"$(nproc)"
-cd ../..
+tools/build_pbrt.sh
 ```
+
+Use `tools/build_pbrt.sh`, not a plain `cmake` build of the submodule. The script applies the
+open-cam patches in `third_party/patches/` (idempotent; the submodule commit is not changed) and
+then builds the CPU `pbrt` binary at `third_party/pbrt-v4/build/pbrt`. A stock pbrt-v4 build fails
+on scenes from the realistic lenses with `"dispersion": unused parameter`, because only patch 0003
+makes the realistic camera read the glass dispersion. The same stock build also lacks the other
+patched features (retroreflective and fluorescent materials, spectral film changes, and so on).
+After pulling new patches, re-run `tools/build_pbrt.sh` to rebuild.
+
+Optional builds, each in its own build directory:
+
+```bash
+# NIR spectral range 360..1100 nm
+PBRT_LAMBDA_MAX_NM=1100 PBRT_BUILD_DIR=third_party/pbrt-v4/build-nir tools/build_pbrt.sh
+# 8 wavelengths per path instead of 4
+PBRT_NSPECTRUM=8 PBRT_BUILD_DIR=third_party/pbrt-v4/build-ns8 tools/build_pbrt.sh
+```
+
+Path guiding (the `guidedpath` integrator, which removes the rare bright samples behind the night
+wet-road speckle) needs
+Open PGL. `PBRT_OPENPGL=1 tools/build_pbrt.sh` fetches and builds it first (needs TBB, e.g.
+`libtbb-dev`); the highway and tunnel builders then take `--guiding`. See
+[`docs/PATH_GUIDING.md`](docs/PATH_GUIDING.md).
 
 3. Run the full pipeline:
 
@@ -66,7 +86,7 @@ venv/bin/python tools/run_pipeline.py --config config/pipeline.yaml
 ## Requirements
 
 - Linux/macOS with Python 3
-- PBRT binary at `third_party/pbrt-v4/build/pbrt`
+- Patched PBRT binary at `third_party/pbrt-v4/build/pbrt`, built with `tools/build_pbrt.sh`
 - Python packages in `requirements.txt`:
   - `numpy`, `scipy`, `PyYAML`, `imageio`, `OpenEXR`, `openpyxl`
 
@@ -105,7 +125,7 @@ render:
   pbrt_args: ["--stats"]
 ```
 
-If the pbrt binary was built with the GPU renderer (its `--help` lists `--gpu`), `tools/run_pipeline.py` adds `--gpu`. On a CPU-only build the setting is ignored and pbrt runs its default CPU integrator. `--wavefront` is not added: on CPU it gives the same image about 5x slower.
+If the pbrt binary was built with the GPU renderer (its `--help` lists `--gpu`), `tools/run_pipeline.py` adds `--gpu`. `tools/build_pbrt.sh` builds CPU-only, and the open-cam patches target the CPU path, so the default build prints `render.gpu_enabled is set but this pbrt build has no GPU renderer; rendering on CPU`. That note is harmless. On a CPU-only build the setting is ignored and pbrt runs its default CPU integrator. `--wavefront` is not added: on CPU it gives the same image about 5x slower.
 
 Use `--dry-run` to confirm command wiring before launching a full run:
 

@@ -150,7 +150,7 @@ Noise is the seed-to-seed RMS difference over the crop mean:
 
 At alpha 0.008 a few huge samples dominate the estimate: the crop mean at 256 spp is twice that
 at alpha 0.1. The 41 % with matte cars is the wet road's glossy reflection of the brightly lit
-car rear, which only more samples (or path guiding) reduce. Alpha 0.03 still gives a sharp
+car rear, which more samples or path guiding (`--guiding`, [PATH_GUIDING.md](PATH_GUIDING.md)) reduce. Alpha 0.03 still gives a sharp
 highlight (orange peel on a real clear coat blurs it further) and is about 2.4x less noisy than
 0.008. Car highlights are a little wider and dimmer at their peak in every scene, day and night.
 

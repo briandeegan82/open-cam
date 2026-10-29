@@ -358,6 +358,25 @@ def test_regularize_is_opt_in(tmp_path):
         assert ('"bool regularize" true' in scene) == bool(a)
 
 
+def test_guiding_is_opt_in_and_keeps_volpath(tmp_path):
+    for d, a, integrator in (
+        ("plain", (), "path"),
+        ("guided", ("--guiding",), "guidedpath"),
+        ("spray", ("--guiding", "--road-wetness", "wet", "--spray"), "volpath"),
+    ):
+        (tmp_path / d).mkdir()
+        build_without_assets(tmp_path / d, *a)
+        scene = (tmp_path / d / "scene" / "highway.pbrt").read_text()
+        assert f'Integrator "{integrator}" ' in scene
+    (tmp_path / "both").mkdir()
+    try:
+        build_without_assets(tmp_path / "both", "--guiding", "--regularize")
+    except SystemExit as e:
+        assert "--regularize" in str(e)
+    else:
+        raise AssertionError("--guiding --regularize must be refused")
+
+
 def test_sampler_defaults_to_pmj02bn_and_zsobol_stays_selectable(tmp_path):
     for d, a, want in (("default", (), "pmj02bn"), ("zsobol", ("--sampler", "zsobol"), "zsobol")):
         (tmp_path / d).mkdir()
