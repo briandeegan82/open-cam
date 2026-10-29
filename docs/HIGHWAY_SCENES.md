@@ -286,6 +286,30 @@ road variance right of the lead car (about 24 of 72). The rest is bounced light 
 and headlamps. That change was not kept; only patch 0032 came out of it (a light the tree rules out
 gets pmf 0 instead of NaN).
 
+#### BSDF-aware light selection (investigated, not changed)
+
+The light tree picks lamps without looking at the surface's BSDF, so on the glossy wet road it spends
+samples on lamps outside the reflection lobe. A third strategy was tried in the path integrator: half of
+the 0024 exact half scored each goniometric lamp and each beam-mapped lamp (as one lamp) by its importance
+times the BSDF toward it. The BSDF was evaluated toward the 8 most important lamps, the rest taking the
+BSDF toward the normal. Its pmf is a deterministic function of the point, BSDF and wo, so MIS stays exact.
+Night wet scene, 480x270, 256 spp, 6 seeds, per-pixel variance (road crops exclude lamp pixels):
+
+| | time | cluster road | road right of lead car | near road | whole frame |
+|---|---:|---:|---:|---:|---:|
+| current sampler | 18.6 s | 97 | 40.9 | 101 | 5837 |
+| BSDF-aware, every non-Lambertian vertex | 74 s | 71 | 26.4 | 69 | 5762 |
+| BSDF-aware, first two vertices | 69 s | 66 | 30.4 | 72 | 5811 |
+| BSDF-aware, first vertex only | 67 s | 101 | 39.0 | 82 | 5817 |
+
+The means agree within their standard errors. The road variance drops about 1.5x (mostly from the
+second vertex, light reflected via the road off the cars), but the render takes 3.6x as long, nearly all
+of it in evaluating the layered (random-walk) road BSDF toward the candidate lamps, about 12 us per
+camera ray. Even with a free BSDF evaluation the whole-frame variance would barely change. Two details
+for a later attempt: the 0024 exact half has to stay in the mix (without it the headlamp beams lose their
+exact scoring, and cluster variance rose from 97 to 600), and pbrt's layered BxDFs report `Diffuse`, not
+`Glossy`, when they have a diffuse base, so flags cannot select glossy surfaces.
+
 ### Light layers (`--light-layers`)
 
 `--light-layers` also writes the scene as two light layers, `highway_layer_rear.pbrt` (rear signal
