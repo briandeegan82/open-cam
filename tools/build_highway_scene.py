@@ -309,7 +309,7 @@ def car_include(info: dict, raw_dir: Path, out_dir: Path, inst: str, paint_spd: 
                 f'MakeNamedMaterial "{mn}"',
                 '    "string type" "coateddiffuse"',
                 f'    "spectrum reflectance" "{paint_spd}"',
-                '    "float roughness" [0.008]',
+                f'    "float roughness" [{hmat.PAINT_ALPHA}]',
                 '    "float thickness" [0.04]',
                 '    "bool remaproughness" false',
             ]

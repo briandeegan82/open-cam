@@ -131,6 +131,29 @@ the tunnel `outside_in` view show no 1/64-frame tile that differs by more than t
 Unbiased renders converge more slowly where these paths matter (night scenes on wet roads especially),
 so raise `--pixelsamples` there rather than switch regularization back on.
 
+### Car paint roughness
+
+The clear coat of the car paint is a GGX lobe with alpha 0.03 (`highway_materials.PAINT_ALPHA`,
+not remapped). It was 0.008. At night most of the remaining wet-road speckle is not direct light,
+which the light samplers above handle (2.7 % per-pixel noise on the headlamp-lit road with depth 1
+only). It comes from the path headlamp -> clear coat -> wet road -> camera. The headlamp is a point
+light, so the path tracer finds the paint highlight only when a ray reflected by the road happens to
+land where the coat mirrors the lamp. The sharper the coat, the rarer and brighter those samples.
+
+Measured with one ego low beam, 480x270, 256 spp, 2 seeds, on the headlamp-lit road at the bottom of
+the frame (`cropwindow 0.20,0.80,0.70,1.0`), with proxy cars whose paint alpha was set as listed.
+Noise is the seed-to-seed RMS difference over the crop mean:
+
+| paint alpha | 0.008 | 0.03 | 0.05 | 0.1 | 0.3 | cars matte |
+|---|---:|---:|---:|---:|---:|---:|
+| RMS noise | 409 % | 169 % | 131 % | 89 % | 51 % | 41 % |
+
+At alpha 0.008 a few huge samples dominate the estimate: the crop mean at 256 spp is twice that
+at alpha 0.1. The 41 % with matte cars is the wet road's glossy reflection of the brightly lit
+car rear, which only more samples (or path guiding) reduce. Alpha 0.03 still gives a sharp
+highlight (orange peel on a real clear coat blurs it further) and is about 2.4x less noisy than
+0.008. Car highlights are a little wider and dimmer at their peak in every scene, day and night.
+
 ### Pixel sampler (`--sampler`)
 
 The highway scene uses pbrt's `pmj02bn` sampler by default; `--sampler zsobol` restores the old
