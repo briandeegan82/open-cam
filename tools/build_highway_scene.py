@@ -49,6 +49,7 @@ import highway_swir as swir  # noqa: E402
 import highway_variety as variety  # noqa: E402
 import highway_vru as vru  # noqa: E402
 import highway_wet as wet  # noqa: E402
+import light_layers  # noqa: E402
 import plant_variants  # noqa: E402
 import road_rtable as rt  # noqa: E402
 from fetch_highway_assets import cache_root, load_asset_manifest  # noqa: E402
@@ -724,6 +725,13 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         help='Open PGL path guiding (pbrt "guidedpath", patch 0031; unbiased, removes the night wet-road '
         "speckle tail; docs/PATH_GUIDING.md). Needs PBRT_OPENPGL=1 tools/build_pbrt.sh. Ignored with a "
         "warning when the scene needs volpath (haze, spray, windscreen).",
+    )
+    ap.add_argument(
+        "--light-layers",
+        action="store_true",
+        help="also write the scene as two light layers, rear signal lamps and the rest, rendered and "
+        "summed by tools/light_layers.py (same expectation; less rear-lamp noise per render time, and the "
+        'rear lamps can be re-weighted after rendering; docs/HIGHWAY_SCENES.md, "Light layers").',
     )
     ap.add_argument("--film-output", default=None, help="default: out/highway_spectral.exr (or out/highway.exr)")
     night.add_night_args(ap)
@@ -1488,6 +1496,11 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         manifest["signs"] = sign_meta
     if vru_meta is not None:
         manifest["vru"] = vru_meta
+    if args.light_layers:
+        layers = light_layers.split(scene_path, light_layers.HIGHWAY_LAYERS)
+        for entry in layers:
+            entry["output"] = light_layers.layer_output(film_out, entry["name"])
+        manifest["light_layers"] = {"pixelsamples": args.pixelsamples, "layers": layers}
     (out_dir / "highway_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     print(
         f"wrote {_rel(repo, scene_path)} (+ highway_manifest.json); horizontal illuminance "

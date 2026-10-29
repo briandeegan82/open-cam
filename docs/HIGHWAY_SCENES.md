@@ -271,6 +271,54 @@ stored mean instead of re-summing the image. Emission is unchanged. Night wet hi
 5.1 +/- 0.6 s); on the lead-car crop (64 spp, 3 seeds) the mean ratio is 1.00001, every
 spectral bucket agrees within 0.03 sigma and the per-pixel seed noise is the same (35.1 %).
 
+#### Rear lamps and the light sampler (investigated, not changed)
+
+The tail and stop lamps are grids of 1 cm area lights (`tools/highway_taillamps.py`) with beam maps
+(patch 0016), and the light tree bounds them as cosine emitters. In a render lit by the rear lamps
+only (depth 1), a wet-road point beside the lead car gave most light samples to that car's stop lamp,
+1.4 m away and 80 degrees off its beam axis (nearly dark there), and about 3e-6 per cell to the right-lane
+car's lamps 12 m away that actually light it. Scoring each lamp by its beam map toward the point
+(the 0024 exact half extended to beam-mapped area lights) cut the road variance there 17x (13.6 to
+0.78). In the full night scene it changed nothing measurable (cluster road variance 98.1 / 98.3,
+6 seeds) and cost 12 % render time: the goniometric lamps already switch on the 0024 sampler, which
+handles the rear lamps about as well, and the direct rear-lamp light is only about a third of the
+road variance right of the lead car (about 24 of 72). The rest is bounced light from the street lights
+and headlamps. That change was not kept; only patch 0032 came out of it (a light the tree rules out
+gets pmf 0 instead of NaN).
+
+### Light layers (`--light-layers`)
+
+`--light-layers` also writes the scene as two light layers, `highway_layer_rear.pbrt` (rear signal
+lamps: tail, stop, CHMSL, fog, indicators, reversing, by emission spectrum) and
+`highway_layer_main.pbrt` (all other lights). Every light statement is in exactly one layer; geometry
+is in both, so a lamp that is off in a layer is still there as a surface. Radiance is linear in the
+lights' emission, so the sum of the layers is the full image:
+
+```bash
+venv/bin/python tools/build_highway_scene.py --time-of-day night --light-layers ...
+venv/bin/python tools/light_layers.py render scenes/generated/highway --seed 1   # renders both, sums into film.filename
+venv/bin/python tools/light_layers.py merge scenes/generated/highway --weight rear=0   # rear lamps off, no re-render
+```
+
+Each layer gets its own seed. The manifest's `light_layers` lists the layer scenes, outputs and
+light counts. 160x90 night wet scene, 256 spp, 8 seeds: layered mean / single-pass mean = 1.0003
+(0.04 standard errors).
+
+Use it to re-weight the rear lamps after rendering (stop lamps on or off, brighter, dimmer). It does
+not lower the noise per render time: each layer traces all its paths again. Night wet highway
+(480x270, 256 spp main layer, 6 seeds; the variances are heavy-tailed, single seeds differ 3-5x):
+
+| | single pass | layers, rear 64 spp | layers, rear 256 spp (uniform light selection) |
+|---|---:|---:|---:|
+| render time | 18.9 s | 22-25 s | 31 s (about 37 s with the light tree) |
+| road right of the lead car, variance | 41 | 46-62 | 42 |
+| whole frame, variance | 5837 | 23085 | 5496 |
+
+The rear layer keeps the full sample count because the lamps seen directly are narrow-band red: few of
+each sample's wavelengths fall in their band, so their pixel noise grows as 1/spp and dominates the
+whole frame at 64 spp. In the rear layer, uniform light selection was the noisiest on the near road
+(variance 59 against 8-10 for the light tree), so both layers keep the scene's light sampler.
+
 ## Radiometry
 
 - Sun: `distant` light with a spectral direct-normal SPD (5778 K envelope x Rayleigh, aerosol,

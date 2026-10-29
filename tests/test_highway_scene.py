@@ -483,3 +483,24 @@ def test_car_instancing_defines_mix_parts_before_the_mix():
 
     text = "\n".join(hw.instance_car_bodies({"a": body("a", "red"), "b": body("b", "blue")})[0])
     assert text.index('"a:shared:L-black"') < text.index('MakeNamedMaterial "a:shared:L"')
+
+
+def test_light_layers_partition_the_night_lights(tmp_path):
+    """--light-layers: every light statement of the night scene in exactly one layer scene."""
+    import light_layers as ll
+
+    build_without_assets(tmp_path, "--time-of-day", "night", "--light-layers")
+    scene_dir = tmp_path / "scene"
+    meta = json.loads((scene_dir / "highway_manifest.json").read_text())
+    layers = meta["light_layers"]["layers"]
+    assert [e["name"] for e in layers] == ["rear", "main"]
+    assert all(e["lights"] > 0 for e in layers)
+
+    def lights(path):
+        text = path.read_text()
+        n = sum(d in ll._LIGHT_DIRECTIVES for _, _, d in ll.statements(text))
+        return n + sum(lights(scene_dir / f) for _, _, f in ll._includes(text) if (scene_dir / f).is_file())
+
+    full = lights(scene_dir / "highway.pbrt")
+    assert sum(lights(scene_dir / e["scene"]) for e in layers) == full == sum(e["lights"] for e in layers)
+    assert layers[1]["output"] == "out/highway_spectral_layer_main.exr"

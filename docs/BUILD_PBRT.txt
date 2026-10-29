@@ -57,6 +57,10 @@ Patches:
   Open PGL is found; PBRT_OPENPGL=1 tools/build_pbrt.sh fetches and builds Open PGL v0.7.1
   (tools/fetch_openpgl.sh, needs TBB) first. Without it the integrator name is an error.
   Also adds ImageTileIntegrator::WaveFinished(), a no-op hook for every other integrator.
+- 0032-light-bvh-pmf-zero-not-nan.patch: BVHLightSampler::PMF returns 0 for a light whose bounds
+  give it zero importance from the shading point; stock pbrt divided 0 by 0 and returned NaN
+  (seen for tail lamps facing away from the road point), which a MIS weight then turned into a
+  NaN sample that pbrt sets to black.
 - pbrt-v4-spectral-basis-infinite-light.patch: an "infinite" light may give both
   "filename" and n "L" spectra; the equal-area image then has channels B0..B{n-1}, each
   a per-pixel luminance weight of the corresponding (unit-luminance-normalised) spectrum,
