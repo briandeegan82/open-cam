@@ -256,6 +256,20 @@ def test_spectral_ccm_white_preserving_and_accurate_for_rggb() -> None:
     t = np.random.default_rng(1).random((10, 3))
     m = cm.fit_channel_ccm(a, t, white_index=3)
     np.testing.assert_allclose(a[3] @ m, t[3], atol=1e-10)
+    m = cm.fit_channel_ccm(a, t, white_index=3, ridge=0.1)
+    np.testing.assert_allclose(a[3] @ m, t[3], atol=1e-10)  # the white constraint holds with the ridge
+
+
+def test_spectral_ccm_noise_gain_of_rgbw_matches_bayer() -> None:
+    # W ~ R + G + B: unregularised, the fit builds red as ~12.7 W - 5.8 G - 5.4 B (noise gain ~15)
+    ircf = "spectra/QE/interpolated/QE_IRCF.csv"
+    gain = {
+        name: np.linalg.norm(
+            cm.colorchecker_spectral_ccm(REPO, cm.resolve_layout({"layout": name}), ircf_csv=ircf)[0], axis=0
+        )
+        for name in ("RGGB", "RGBW")
+    }
+    assert gain["RGBW"].max() < 1.2 * gain["RGGB"].max(), gain
 
 
 def test_generic_mode_requires_spectral_input() -> None:
