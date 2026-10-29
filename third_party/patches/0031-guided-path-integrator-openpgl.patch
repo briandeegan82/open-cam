@@ -1,0 +1,456 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -116,6 +116,15 @@
+                 PROPERTY FOLDER "ext/OpenEXR")
+ endif ()
+ 
++# open-cam patch 0031: optional Intel Open PGL for the "guidedpath" integrator
++# (pass -Dopenpgl_DIR=<install>/lib/cmake/openpgl-<version>)
++find_package (TBB QUIET)  # the static Open PGL links TBB::tbb
++find_package (openpgl 0.7 QUIET)
++if (openpgl_FOUND)
++  message (STATUS "Found Open PGL ${openpgl_VERSION}: \"guidedpath\" integrator enabled")
++  list (APPEND PBRT_DEFINITIONS "PBRT_HAS_OPENPGL")
++endif ()
++
+ ########################################
+ # os/compiler-specific stuff
+ 
+@@ -888,6 +897,9 @@
+ target_compile_options (pbrt_lib PUBLIC ${PBRT_CXX_FLAGS})
+ 
+ target_link_libraries (pbrt_lib PRIVATE OpenEXR::OpenEXR pbrt_warnings pbrt_opt $<$<BOOL:PBRT_CUDA_ENABLED>:cuda_build_configuration>)
++if (openpgl_FOUND)
++  target_link_libraries (pbrt_lib PUBLIC openpgl::openpgl)
++endif ()
+ 
+ add_sanitizers (pbrt_lib)
+ 
+diff --git a/src/pbrt/cpu/integrators.h b/src/pbrt/cpu/integrators.h
+--- a/src/pbrt/cpu/integrators.h
++++ b/src/pbrt/cpu/integrators.h
+@@ -89,6 +89,9 @@
+     virtual void EvaluatePixelSample(Point2i pPixel, int sampleIndex, Sampler sampler,
+                                      ScratchBuffer &scratchBuffer) = 0;
+ 
++    // open-cam patch 0031: called once every pixel has samples [0, samplesDone)
++    virtual void WaveFinished(int samplesDone) {}
++
+   protected:
+     // ImageTileIntegrator Protected Members
+     Camera camera;
+diff --git a/src/pbrt/cpu/integrators.cpp b/src/pbrt/cpu/integrators.cpp
+--- a/src/pbrt/cpu/integrators.cpp
++++ b/src/pbrt/cpu/integrators.cpp
+@@ -41,6 +41,10 @@
+ #include <pbrt/util/string.h>
+ 
+ #include <algorithm>
++#ifdef PBRT_HAS_OPENPGL  // open-cam patch 0031
++#include <openpgl/cpp/OpenPGL.h>
++#include <atomic>
++#endif
+ 
+ namespace pbrt {
+ 
+@@ -210,6 +214,7 @@
+                      tileBounds.pMin.y, tileBounds.pMax.x, tileBounds.pMax.y);
+             progress.Update((waveEnd - waveStart) * tileBounds.Area());
+         });
++        WaveFinished(waveEnd);  // open-cam patch 0031 (guidedpath trains between waves)
+ 
+         // Update start and end wave
+         waveStart = waveEnd;
+@@ -919,6 +924,376 @@
+                                             lightStrategy, regularize);
+ }
+ 
++#ifdef PBRT_HAS_OPENPGL
++// open-cam patch 0031: "guidedpath", the path integrator with Intel Open PGL path guiding.
++// Every path records its vertices; after each render wave up to "trainingspp" the guiding
++// field (a k-d tree of parallax-aware von Mises-Fisher mixtures) is refit to the incident
++// radiance those paths saw. At reflective non-specular vertices the next direction is then
++// drawn from the BSDF or, with probability "guidingprobability", from the field (times the
++// cosine), combined by one-sample MIS with balance-heuristic weights. The BSDF branch keeps
++// the BSDF's own f/pdf ratio (layered BSDFs only know an approximate PDF), so the estimator
++// stays unbiased; NEE and emitter hits are MIS-weighted with the same mixture PDF. Training
++// waves are kept in the image. No participating media (use volpath).
++class GuidedPathIntegrator : public RayIntegrator {
++  public:
++    GuidedPathIntegrator(int maxDepth, Camera camera, Sampler sampler, Primitive aggregate,
++                         std::vector<Light> lights, const std::string &lightSampleStrategy,
++                         Float guidingProbability, int trainingSpp)
++        : RayIntegrator(camera, sampler, aggregate, lights),
++          maxDepth(maxDepth),
++          lightSampler(LightSampler::Create(lightSampleStrategy, lights, Allocator())),
++          guidingProbability(guidingProbability),
++          trainingSpp(trainingSpp),
++          device(PGL_DEVICE_TYPE_CPU_4),
++          segments([this]() {
++              auto *s = new openpgl::cpp::PathSegmentStorage();
++              s->Reserve(this->maxDepth + 3);
++              return s;
++          }),
++          distributions([this]() {
++              return new openpgl::cpp::SurfaceSamplingDistribution(field.get());
++          }) {
++        openpgl::cpp::FieldConfig config;
++        config.Init(PGL_SPATIAL_STRUCTURE_KDTREE, PGL_DIRECTIONAL_DISTRIBUTION_PARALLAX_AWARE_VMM,
++                    true /* deterministic */, PGL_TREE_MAX_SAMPLE_PER_LEAF);
++        field = std::make_unique<openpgl::cpp::Field>(&device, config);
++        Bounds3f b = aggregate.Bounds();
++        pgl_box3f box;
++        pglBox3f(box, b.pMin.x, b.pMin.y, b.pMin.z, b.pMax.x, b.pMax.y, b.pMax.z);
++        field->SetSceneBounds(box);
++        escapeDistance = 2 * Length(b.Diagonal()) + 1;
++    }
++
++    ~GuidedPathIntegrator() {
++        segments.ForAll([](openpgl::cpp::PathSegmentStorage *&s) { delete s; });
++        distributions.ForAll([](openpgl::cpp::SurfaceSamplingDistribution *&d) { delete d; });
++    }
++
++    SampledSpectrum Li(RayDifferential ray, SampledWavelengths &lambda, Sampler sampler,
++                       ScratchBuffer &scratchBuffer, VisibleSurface *visibleSurface) const;
++
++    void WaveFinished(int samplesDone) override {
++        if (!training)
++            return;
++        if (samples.GetSizeSurface() > 0) {
++            field->Update(samples);
++            samples.Clear();
++            fieldReady = field->GetIteration() > 0;
++        }
++        if (samplesDone >= trainingSpp)
++            training = false;
++    }
++
++    static std::unique_ptr<GuidedPathIntegrator> Create(const ParameterDictionary &parameters,
++                                                        Camera camera, Sampler sampler,
++                                                        Primitive aggregate,
++                                                        std::vector<Light> lights,
++                                                        const FileLoc *loc);
++
++    std::string ToString() const {
++        return StringPrintf("[ GuidedPathIntegrator maxDepth: %d lightSampler: %s "
++                            "guidingProbability: %f trainingSpp: %d ]",
++                            maxDepth, lightSampler, guidingProbability, trainingSpp);
++    }
++
++  private:
++    // Guiding state of one path vertex: the field's distribution there, or none
++    struct Guide {
++        const openpgl::cpp::SurfaceSamplingDistribution *dist = nullptr;
++        Float prob = 0;
++        // PDF of the direction mixture, with the BSDF's (possibly approximate) PDF pb
++        Float PDF(Vector3f wi, Float pb) const {
++            if (!dist)
++                return pb;
++            return prob * dist->PDF(pgl_vec3f{float(wi.x), float(wi.y), float(wi.z)}) +
++                   (1 - prob) * pb;
++        }
++    };
++
++    SampledSpectrum SampleLd(const SurfaceInteraction &intr, const BSDF *bsdf,
++                             SampledWavelengths &lambda, Sampler sampler,
++                             const Guide &guide) const;
++
++    int maxDepth;
++    LightSampler lightSampler;
++    Float guidingProbability;
++    int trainingSpp;
++    Float escapeDistance;
++    openpgl::cpp::Device device;
++    std::unique_ptr<openpgl::cpp::Field> field;
++    mutable openpgl::cpp::SampleStorage samples;  // thread-safe
++    mutable ThreadLocal<openpgl::cpp::PathSegmentStorage *> segments;
++    mutable ThreadLocal<openpgl::cpp::SurfaceSamplingDistribution *> distributions;
++    // Changed only in WaveFinished(), while no Li() runs
++    bool training = true, fieldReady = false;
++};
++
++// Scalar radiance estimate of a spectral sample for the (RGB) guiding field
++static pgl_vec3f GuidingValue(const SampledSpectrum &s, const SampledWavelengths &lambda) {
++    Float v = SafeDiv(s, lambda.PDF()).Average();
++    if (!IsFinite(v) || v < 0)
++        v = 0;
++    return pgl_vec3f{float(v), float(v), float(v)};
++}
++
++static pgl_vec3f GuidingWeight(const SampledSpectrum &s) {
++    Float v = s.Average();
++    if (!IsFinite(v) || v < 0)
++        v = 0;
++    return pgl_vec3f{float(v), float(v), float(v)};
++}
++
++static pgl_vec3f ToPGL(Vector3f v) { return pgl_vec3f{float(v.x), float(v.y), float(v.z)}; }
++
++SampledSpectrum GuidedPathIntegrator::Li(RayDifferential ray, SampledWavelengths &lambda,
++                                         Sampler sampler, ScratchBuffer &scratchBuffer,
++                                         VisibleSurface *visibleSurf) const {
++    SampledSpectrum L(0.f), beta(1.f);
++    int depth = 0;
++    Float p_b, etaScale = 1;
++    bool specularBounce = false;
++    LightSampleContext prevIntrCtx;
++    FluorescenceLambdaGuard fluorescenceGuard{lambda, lambda};
++
++    openpgl::cpp::PathSegmentStorage *segs = training ? segments.Get() : nullptr;
++    openpgl::cpp::SurfaceSamplingDistribution *dist =
++        fieldReady ? distributions.Get() : nullptr;
++    if (segs)
++        segs->Clear();
++    openpgl::cpp::PathSegment *seg = nullptr;  // segment of the current vertex
++
++    while (true) {
++        pstd::optional<ShapeIntersection> si = Intersect(ray);
++        if (!si) {
++            SampledSpectrum Lesc(0.f);  // unweighted, for training
++            for (const auto &light : infiniteLights) {
++                SampledSpectrum Le = light.Le(ray, lambda);
++                Lesc += Le;
++                if (depth == 0 || specularBounce)
++                    L += beta * Le;
++                else {
++                    Float p_l = lightSampler.PMF(prevIntrCtx, light) *
++                                light.PDF_Li(prevIntrCtx, ray.d, true);
++                    L += beta * PowerHeuristic(1, p_b, 1, p_l) * Le;
++                }
++            }
++            if (segs && depth > 0 && Lesc) {
++                // A virtual vertex far away carries the environment's radiance
++                Vector3f d = Normalize(ray.d);
++                Point3f pFar = ray.o + escapeDistance * d;
++                if (openpgl::cpp::PathSegment *s = segs->NextSegment()) {
++                    openpgl::cpp::SetPosition(s, pgl_vec3f{pFar.x, pFar.y, pFar.z});
++                    openpgl::cpp::SetNormal(s, ToPGL(-d));
++                    openpgl::cpp::SetDirectionOut(s, ToPGL(-d));
++                    openpgl::cpp::SetDirectContribution(s, GuidingValue(Lesc, lambda));
++                }
++            }
++            break;
++        }
++
++        SurfaceInteraction &isect = si->intr;
++        SampledSpectrum Le = isect.Le(-ray.d, lambda);
++        if (Le) {
++            if (depth == 0 || specularBounce)
++                L += beta * Le;
++            else {
++                Light areaLight(isect.areaLight);
++                Float p_l = lightSampler.PMF(prevIntrCtx, areaLight) *
++                            areaLight.PDF_Li(prevIntrCtx, ray.d, true);
++                L += beta * PowerHeuristic(1, p_b, 1, p_l) * Le;
++            }
++        }
++
++        BSDF bsdf = isect.GetBSDF(ray, lambda, camera, scratchBuffer, sampler);
++        if (!bsdf) {
++            specularBounce = true;
++            isect.SkipIntersection(&ray, si->tHit);
++            continue;
++        }
++
++        Vector3f wo = -ray.d;
++        Normal3f ns = FaceForward(isect.shading.n, wo);
++        if (segs) {
++            seg = segs->NextSegment();
++            if (seg) {
++                openpgl::cpp::SetPosition(seg, pgl_vec3f{isect.p().x, isect.p().y, isect.p().z});
++                openpgl::cpp::SetDirectionOut(seg, ToPGL(Normalize(wo)));
++                openpgl::cpp::SetNormal(seg, ToPGL(Vector3f(ns)));
++                openpgl::cpp::SetVolumeScatter(seg, false);
++                if (Le)  // unweighted: the field learns full radiance
++                    openpgl::cpp::SetDirectContribution(seg, GuidingValue(Le, lambda));
++            }
++        }
++
++        if (depth == 0 && visibleSurf) {
++            constexpr int nRhoSamples = 16;
++            const Float ucRho[nRhoSamples] = {
++                0.75741637, 0.37870818, 0.7083487, 0.18935409, 0.9149363, 0.35417435,
++                0.5990858,  0.09467703, 0.8578725, 0.45746812, 0.686759,  0.17708716,
++                0.9674518,  0.2995429,  0.5083201, 0.047338516};
++            const Point2f uRho[nRhoSamples] = {
++                Point2f(0.855985, 0.570367), Point2f(0.381823, 0.851844),
++                Point2f(0.285328, 0.764262), Point2f(0.733380, 0.114073),
++                Point2f(0.542663, 0.344465), Point2f(0.127274, 0.414848),
++                Point2f(0.964700, 0.947162), Point2f(0.594089, 0.643463),
++                Point2f(0.095109, 0.170369), Point2f(0.825444, 0.263359),
++                Point2f(0.429467, 0.454469), Point2f(0.244460, 0.816459),
++                Point2f(0.756135, 0.731258), Point2f(0.516165, 0.152852),
++                Point2f(0.180888, 0.214174), Point2f(0.898579, 0.503897)};
++            SampledSpectrum albedo = bsdf.rho(isect.wo, ucRho, uRho);
++            *visibleSurf = VisibleSurface(isect, albedo, lambda);
++        }
++
++        ApplyFluorescence(isect, bsdf, lambda, beta, sampler, scratchBuffer,
++                          fluorescenceGuard);
++
++        if (depth++ == maxDepth)
++            break;
++
++        // Guide at reflective, non-specular vertices once the field has been trained
++        Guide guide;
++        BxDFFlags flags = bsdf.Flags();
++        if (dist && IsNonSpecular(flags) && !IsTransmissive(flags)) {
++            float uRegion = sampler.Get1D();
++            Point3f p = isect.p();
++            if (dist->Init(field.get(), pgl_vec3f{p.x, p.y, p.z}, uRegion)) {
++                if (dist->SupportsApplyCosineProduct())
++                    dist->ApplyCosineProduct(ToPGL(Vector3f(ns)));
++                guide.dist = dist;
++                guide.prob = guidingProbability;
++            }
++        }
++
++        if (IsNonSpecular(flags)) {
++            SampledSpectrum Ld = SampleLd(isect, &bsdf, lambda, sampler, guide);
++            L += beta * Ld;
++            if (seg && Ld)
++                openpgl::cpp::AddScatteredContribution(seg, GuidingValue(Ld, lambda));
++        }
++
++        // Sample the next direction from the BSDF or the guiding field
++        Float uSelect = guide.dist ? sampler.Get1D() : 1;
++        Float u = sampler.Get1D();
++        Point2f u2 = sampler.Get2D();
++        Vector3f wi;
++        SampledSpectrum weight;  // f |cos| / pdf of the mixture
++        BxDFFlags sampledFlags;
++        Float eta = 1;
++        bool isSpecular = false;
++        if (uSelect < guide.prob) {
++            pgl_vec3f d = guide.dist->Sample(pgl_point2f{float(u2.x), float(u2.y)});
++            wi = Normalize(Vector3f(d.x, d.y, d.z));
++            SampledSpectrum f = bsdf.f(wo, wi);
++            Float pdf = guide.PDF(wi, bsdf.PDF(wo, wi));
++            if (!f || pdf == 0)
++                break;
++            weight = f * AbsDot(wi, isect.shading.n) / pdf;
++            p_b = pdf;
++            sampledFlags = BxDFFlags::GlossyReflection;
++        } else {
++            pstd::optional<BSDFSample> bs = bsdf.Sample_f(wo, u, u2);
++            if (!bs)
++                break;
++            wi = bs->wi;
++            weight = bs->f * AbsDot(bs->wi, isect.shading.n) / bs->pdf;
++            isSpecular = bs->IsSpecular();
++            if (guide.dist && !isSpecular) {
++                // Balance-heuristic weight of the BSDF branch with the BSDF's proxy PDF
++                Float pb = bsdf.PDF(wo, wi), pdf = guide.PDF(wi, pb);
++                if (pdf == 0)
++                    break;
++                weight *= pb / pdf;
++                p_b = pdf;
++            } else {
++                // Delta lobes are reached only by the BSDF branch
++                if (guide.dist)
++                    weight /= 1 - guide.prob;
++                p_b = bs->pdfIsProportional ? bsdf.PDF(wo, wi) : bs->pdf;
++            }
++            sampledFlags = bs->flags;
++            eta = bs->eta;
++            if (bs->IsTransmission())
++                etaScale *= Sqr(bs->eta);
++        }
++        beta *= weight;
++        specularBounce = isSpecular;
++        prevIntrCtx = si->intr;
++        if (seg) {
++            openpgl::cpp::SetDirectionIn(seg, ToPGL(wi));
++            openpgl::cpp::SetPDFDirectionIn(seg, isSpecular ? 1.f : float(p_b));
++            openpgl::cpp::SetScatteringWeight(seg, GuidingWeight(weight));
++            openpgl::cpp::SetIsDelta(seg, isSpecular);
++            openpgl::cpp::SetRoughness(seg, isSpecular ? 0.f : 1.f);
++            openpgl::cpp::SetEta(seg, float(eta));
++        }
++
++        ray = isect.SpawnRay(ray, bsdf, wi, sampledFlags, eta);
++
++        SampledSpectrum rrBeta = beta * etaScale;
++        if (rrBeta.MaxComponentValue() < 1 && depth > 1) {
++            Float q = std::max<Float>(0, 1 - rrBeta.MaxComponentValue());
++            if (sampler.Get1D() < q)
++                break;
++            beta /= 1 - q;
++            if (seg)
++                openpgl::cpp::SetRussianRouletteProbability(seg, float(1 - q));
++        }
++    }
++    if (segs)
++        segs->PropagateSamples(&samples, true /* guide direct light */,
++                               false /* NEE MIS weights */, true);
++    return L;
++}
++
++SampledSpectrum GuidedPathIntegrator::SampleLd(const SurfaceInteraction &intr,
++                                               const BSDF *bsdf, SampledWavelengths &lambda,
++                                               Sampler sampler, const Guide &guide) const {
++    LightSampleContext ctx(intr);
++    BxDFFlags flags = bsdf->Flags();
++    if (IsReflective(flags) && !IsTransmissive(flags))
++        ctx.pi = intr.OffsetRayOrigin(intr.wo);
++    else if (IsTransmissive(flags) && !IsReflective(flags))
++        ctx.pi = intr.OffsetRayOrigin(-intr.wo);
++
++    Float u = sampler.Get1D();
++    pstd::optional<SampledLight> sampledLight = lightSampler.Sample(ctx, u);
++    Point2f uLight = sampler.Get2D();
++    if (!sampledLight)
++        return {};
++    Light light = sampledLight->light;
++    pstd::optional<LightLiSample> ls = light.SampleLi(ctx, uLight, lambda, true);
++    if (!ls || !ls->L || ls->pdf == 0)
++        return {};
++
++    Vector3f wo = intr.wo, wi = ls->wi;
++    SampledSpectrum f = bsdf->f(wo, wi) * AbsDot(wi, intr.shading.n);
++    if (!f || !Unoccluded(intr, ls->pLight))
++        return {};
++
++    Float p_l = sampledLight->p * ls->pdf;
++    if (IsDeltaLight(light.Type()))
++        return ls->L * f / p_l;
++    Float p_b = guide.PDF(wi, bsdf->PDF(wo, wi));
++    return PowerHeuristic(1, p_l, 1, p_b) * ls->L * f / p_l;
++}
++
++std::unique_ptr<GuidedPathIntegrator> GuidedPathIntegrator::Create(
++    const ParameterDictionary &parameters, Camera camera, Sampler sampler,
++    Primitive aggregate, std::vector<Light> lights, const FileLoc *loc) {
++    int maxDepth = parameters.GetOneInt("maxdepth", 5);
++    std::string lightStrategy = parameters.GetOneString("lightsampler", "bvh");
++    Float prob = parameters.GetOneFloat("guidingprobability", 0.5f);
++    if (prob < 0 || prob >= 1)
++        ErrorExit(loc, "\"guidingprobability\" must be in [0, 1).");
++    int spp = sampler.SamplesPerPixel();
++    int trainingSpp = parameters.GetOneInt("trainingspp", std::min(128, std::max(1, spp / 4)));
++    if (Options->wavefront || Options->useGPU)
++        ErrorExit(loc, "\"guidedpath\" is CPU-only (open-cam patch 0031).");
++    return std::make_unique<GuidedPathIntegrator>(maxDepth, camera, sampler, aggregate, lights,
++                                                  lightStrategy, prob, trainingSpp);
++}
++#endif  // PBRT_HAS_OPENPGL
++
+ // SimpleVolPathIntegrator Method Definitions
+ SimpleVolPathIntegrator::SimpleVolPathIntegrator(int maxDepth, Camera camera,
+                                                  Sampler sampler, Primitive aggregate,
+@@ -3948,6 +4323,14 @@
+     if (name == "path")
+         integrator =
+             PathIntegrator::Create(parameters, camera, sampler, aggregate, lights, loc);
++    else if (name == "guidedpath")  // open-cam patch 0031
++#ifdef PBRT_HAS_OPENPGL
++        integrator = GuidedPathIntegrator::Create(parameters, camera, sampler, aggregate,
++                                                  lights, loc);
++#else
++        ErrorExit(loc, "\"guidedpath\" needs pbrt built with Open PGL "
++                       "(PBRT_OPENPGL=1 tools/build_pbrt.sh, docs/PATH_GUIDING.md).");
++#endif
+     else if (name == "function")
+         integrator = FunctionIntegrator::Create(parameters, camera, sampler, loc);
+     else if (name == "simplepath")

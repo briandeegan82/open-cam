@@ -131,6 +131,29 @@ the tunnel `outside_in` view show no 1/64-frame tile that differs by more than t
 Unbiased renders converge more slowly where these paths matter (night scenes on wet roads especially),
 so raise `--pixelsamples` there rather than switch regularization back on.
 
+### Car paint roughness
+
+The clear coat of the car paint is a GGX lobe with alpha 0.03 (`highway_materials.PAINT_ALPHA`,
+not remapped). It was 0.008. At night most of the remaining wet-road speckle is not direct light,
+which the light samplers above handle (2.7 % per-pixel noise on the headlamp-lit road with depth 1
+only). It comes from the path headlamp -> clear coat -> wet road -> camera. The headlamp is a point
+light, so the path tracer finds the paint highlight only when a ray reflected by the road happens to
+land where the coat mirrors the lamp. The sharper the coat, the rarer and brighter those samples.
+
+Measured with one ego low beam, 480x270, 256 spp, 2 seeds, on the headlamp-lit road at the bottom of
+the frame (`cropwindow 0.20,0.80,0.70,1.0`), with proxy cars whose paint alpha was set as listed.
+Noise is the seed-to-seed RMS difference over the crop mean:
+
+| paint alpha | 0.008 | 0.03 | 0.05 | 0.1 | 0.3 | cars matte |
+|---|---:|---:|---:|---:|---:|---:|
+| RMS noise | 409 % | 169 % | 131 % | 89 % | 51 % | 41 % |
+
+At alpha 0.008 a few huge samples dominate the estimate: the crop mean at 256 spp is twice that
+at alpha 0.1. The 41 % with matte cars is the wet road's glossy reflection of the brightly lit
+car rear, which more samples or path guiding (`--guiding`, [PATH_GUIDING.md](PATH_GUIDING.md)) reduce. Alpha 0.03 still gives a sharp
+highlight (orange peel on a real clear coat blurs it further) and is about 2.4x less noisy than
+0.008. Car highlights are a little wider and dimmer at their peak in every scene, day and night.
+
 ### Pixel sampler (`--sampler`)
 
 The highway scene uses pbrt's `pmj02bn` sampler by default; `--sampler zsobol` restores the old
@@ -247,6 +270,78 @@ stored mean instead of re-summing the image. Emission is unchanged. Night wet hi
 2.16 GB (5 alternating 1-spp loads); scene load time is unchanged (5.4 +/- 0.6 s vs
 5.1 +/- 0.6 s); on the lead-car crop (64 spp, 3 seeds) the mean ratio is 1.00001, every
 spectral bucket agrees within 0.03 sigma and the per-pixel seed noise is the same (35.1 %).
+
+#### Rear lamps and the light sampler (investigated, not changed)
+
+The tail and stop lamps are grids of 1 cm area lights (`tools/highway_taillamps.py`) with beam maps
+(patch 0016), and the light tree bounds them as cosine emitters. In a render lit by the rear lamps
+only (depth 1), a wet-road point beside the lead car gave most light samples to that car's stop lamp,
+1.4 m away and 80 degrees off its beam axis (nearly dark there), and about 3e-6 per cell to the right-lane
+car's lamps 12 m away that actually light it. Scoring each lamp by its beam map toward the point
+(the 0024 exact half extended to beam-mapped area lights) cut the road variance there 17x (13.6 to
+0.78). In the full night scene it changed nothing measurable (cluster road variance 98.1 / 98.3,
+6 seeds) and cost 12 % render time: the goniometric lamps already switch on the 0024 sampler, which
+handles the rear lamps about as well, and the direct rear-lamp light is only about a third of the
+road variance right of the lead car (about 24 of 72). The rest is bounced light from the street lights
+and headlamps. That change was not kept; only patch 0032 came out of it (a light the tree rules out
+gets pmf 0 instead of NaN).
+
+#### BSDF-aware light selection (investigated, not changed)
+
+The light tree picks lamps without looking at the surface's BSDF, so on the glossy wet road it spends
+samples on lamps outside the reflection lobe. A third strategy was tried in the path integrator: half of
+the 0024 exact half scored each goniometric lamp and each beam-mapped lamp (as one lamp) by its importance
+times the BSDF toward it. The BSDF was evaluated toward the 8 most important lamps, the rest taking the
+BSDF toward the normal. Its pmf is a deterministic function of the point, BSDF and wo, so MIS stays exact.
+Night wet scene, 480x270, 256 spp, 6 seeds, per-pixel variance (road crops exclude lamp pixels):
+
+| | time | cluster road | road right of lead car | near road | whole frame |
+|---|---:|---:|---:|---:|---:|
+| current sampler | 18.6 s | 97 | 40.9 | 101 | 5837 |
+| BSDF-aware, every non-Lambertian vertex | 74 s | 71 | 26.4 | 69 | 5762 |
+| BSDF-aware, first two vertices | 69 s | 66 | 30.4 | 72 | 5811 |
+| BSDF-aware, first vertex only | 67 s | 101 | 39.0 | 82 | 5817 |
+
+The means agree within their standard errors. The road variance drops about 1.5x (mostly from the
+second vertex, light reflected via the road off the cars), but the render takes 3.6x as long, nearly all
+of it in evaluating the layered (random-walk) road BSDF toward the candidate lamps, about 12 us per
+camera ray. Even with a free BSDF evaluation the whole-frame variance would barely change. Two details
+for a later attempt: the 0024 exact half has to stay in the mix (without it the headlamp beams lose their
+exact scoring, and cluster variance rose from 97 to 600), and pbrt's layered BxDFs report `Diffuse`, not
+`Glossy`, when they have a diffuse base, so flags cannot select glossy surfaces.
+
+### Light layers (`--light-layers`)
+
+`--light-layers` also writes the scene as two light layers, `highway_layer_rear.pbrt` (rear signal
+lamps: tail, stop, CHMSL, fog, indicators, reversing, by emission spectrum) and
+`highway_layer_main.pbrt` (all other lights). Every light statement is in exactly one layer; geometry
+is in both, so a lamp that is off in a layer is still there as a surface. Radiance is linear in the
+lights' emission, so the sum of the layers is the full image:
+
+```bash
+venv/bin/python tools/build_highway_scene.py --time-of-day night --light-layers ...
+venv/bin/python tools/light_layers.py render scenes/generated/highway --seed 1   # renders both, sums into film.filename
+venv/bin/python tools/light_layers.py merge scenes/generated/highway --weight rear=0   # rear lamps off, no re-render
+```
+
+Each layer gets its own seed. The manifest's `light_layers` lists the layer scenes, outputs and
+light counts. 160x90 night wet scene, 256 spp, 8 seeds: layered mean / single-pass mean = 1.0003
+(0.04 standard errors).
+
+Use it to re-weight the rear lamps after rendering (stop lamps on or off, brighter, dimmer). It does
+not lower the noise per render time: each layer traces all its paths again. Night wet highway
+(480x270, 256 spp main layer, 6 seeds; the variances are heavy-tailed, single seeds differ 3-5x):
+
+| | single pass | layers, rear 64 spp | layers, rear 256 spp (uniform light selection) |
+|---|---:|---:|---:|
+| render time | 18.9 s | 22-25 s | 31 s (about 37 s with the light tree) |
+| road right of the lead car, variance | 41 | 46-62 | 42 |
+| whole frame, variance | 5837 | 23085 | 5496 |
+
+The rear layer keeps the full sample count because the lamps seen directly are narrow-band red: few of
+each sample's wavelengths fall in their band, so their pixel noise grows as 1/spp and dominates the
+whole frame at 64 spp. In the rear layer, uniform light selection was the noisiest on the near road
+(variance 59 against 8-10 for the light tree), so both layers keep the scene's light sampler.
 
 ## Radiometry
 

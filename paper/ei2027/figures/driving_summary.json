@@ -1,26 +1,30 @@
 {
   "day_dry": {
     "recipe": "default",
-    "exposure_scale_e_per_unit": 4.9561302793515605,
-    "signal_e_mean_mono": 1192.5115966796875,
+    "render": "highway_spectral.exr",
+    "exposure_scale_e_per_unit": 4.955614975915692,
+    "signal_e_mean_mono": 1192.2877197265625,
     "demosaic": "malvar"
   },
   "day_wet": {
     "recipe": "default",
-    "exposure_scale_e_per_unit": 5.003780598811539,
-    "signal_e_mean_mono": 1185.9454345703125,
+    "render": "highway_spectral.exr",
+    "exposure_scale_e_per_unit": 5.003628182692439,
+    "signal_e_mean_mono": 1185.7789306640625,
     "demosaic": "malvar"
   },
   "swir_900_1600": {
     "recipe": "swir_ingaas_vga_15um",
-    "exposure_scale_e_per_unit": 2.19810728080105,
-    "signal_e_mean_mono": 41716.0546875,
+    "render": "highway_spectral.exr",
+    "exposure_scale_e_per_unit": 2.194643754738273,
+    "signal_e_mean_mono": 41654.875,
     "demosaic": null
   },
   "night_wet": {
     "recipe": "default",
-    "exposure_scale_e_per_unit": 0.00036159107984938603,
-    "signal_e_mean_mono": 1594.64208984375,
+    "render": "highway_spectral_denoised.exr",
+    "exposure_scale_e_per_unit": 0.0003859059509009045,
+    "signal_e_mean_mono": 1868.204345703125,
     "demosaic": "malvar"
   }
 }

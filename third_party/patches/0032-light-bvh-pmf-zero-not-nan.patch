@@ -1,0 +1,14 @@
+--- a/src/pbrt/lightsamplers.h
++++ b/src/pbrt/lightsamplers.h
+@@ -393,7 +393,10 @@
+             const LightBVHNode *child0 = &nodes[nodeIndex + 1];
+             const LightBVHNode *child1 = &nodes[node->childOrLightIndex];
+             Float ci[2] = {child0->lightBounds.Importance(p, n, allLightBounds), child1->lightBounds.Importance(p, n, allLightBounds)};
+-            DCHECK_GT(ci[bitTrail & 1], 0);
++            // open-cam (patch 0032): a light the bounds rule out from here has pmf 0; stock
++            // pbrt computed 0/0 = NaN when both children scored 0.
++            if (ci[bitTrail & 1] == 0)
++                return 0;
+             pmf *= ci[bitTrail & 1] / (ci[0] + ci[1]);
+ 
+             // Use _bitTrail_ to find next node index and update its value

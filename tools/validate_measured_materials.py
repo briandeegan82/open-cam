@@ -150,18 +150,21 @@ def swatches(td: Path, res_per_cell: int = 90, spp: int = 128) -> dict:
     cells: list[tuple[str, str]] = []
     for c in PAINTS:
         cells.append(
-            (f"analytic {c}", f'"coateddiffuse" "spectrum reflectance" "{_paint(td, wl, c)}" "float roughness" [0.008]')
+            (
+                f"analytic {c}",
+                f'"coateddiffuse" "spectrum reflectance" "{_paint(td, wl, c)}" "float roughness" [{hm.PAINT_ALPHA}] "bool remaproughness" false',
+            )
         )
     cells += [
         (
             "analytic black",
-            f'"coateddiffuse" "spectrum reflectance" "{_paint(td, wl, "black")}" "float roughness" [0.008]',
+            f'"coateddiffuse" "spectrum reflectance" "{_paint(td, wl, "black")}" "float roughness" [{hm.PAINT_ALPHA}] "bool remaproughness" false',
         )
     ]
     cells += [
         (
             "analytic gray",
-            f'"coateddiffuse" "spectrum reflectance" "{_paint(td, wl, "gray")}" "float roughness" [0.008]',
+            f'"coateddiffuse" "spectrum reflectance" "{_paint(td, wl, "gray")}" "float roughness" [{hm.PAINT_ALPHA}] "bool remaproughness" false',
         )
     ]
     for c in PAINTS:

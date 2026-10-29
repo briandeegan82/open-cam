@@ -76,6 +76,10 @@ RGL_MATERIALS = {
         "Labsphere SRS-99-020 reflectance standard",
     ),
 }
+#: Clear-coat GGX alpha of the analytic car paint (coateddiffuse, "remaproughness" false). Was
+#: 0.008; 0.03 keeps a sharp highlight (orange peel blurs a real one) and cuts the night wet-road
+#: noise from headlamp highlights about 2.4x (docs/HIGHWAY_SCENES.md, "Car paint roughness").
+PAINT_ALPHA = 0.03
 #: Analytic paint colour (highway_spectra.CAR_PAINTS) -> RGL material. Colours without a
 #: measured counterpart (black, gray) keep the analytic coated-diffuse basecoat. White and
 #: red are vinyl wrap films, not paints (no measured solid white/red car paint in RGL).

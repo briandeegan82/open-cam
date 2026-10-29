@@ -381,3 +381,10 @@ def test_regularize_is_opt_in(tmp_path):
         for view in ("inside_out", "outside_in"):
             scene = (tmp_path / d / f"tunnel_{view}.pbrt").read_text()
             assert ('"bool regularize" true' in scene) == bool(a)
+
+
+def test_guiding_is_opt_in(tmp_path):
+    for d, a, integrator in (("plain", (), "path"), ("guided", ("--guiding",), "guidedpath")):
+        _build(tmp_path / d, *a)
+        for view in ("inside_out", "outside_in"):
+            assert f'Integrator "{integrator}" ' in (tmp_path / d / f"tunnel_{view}.pbrt").read_text()
