@@ -133,18 +133,21 @@ def main() -> None:
     (OUT / "ptc_summary.json").write_text(json.dumps(summary, indent=2))
 
     fig, axes = plt.subplots(1, 2, figsize=(7.0, 2.6))
-    md = np.array([r["mean_dn"] - dark["mean_dn"] for r in rows[1:]])
-    axes[0].loglog(md, [r["var_dn"] for r in rows[1:]], "o", ms=3, label="Monte Carlo (frame pair)")
-    axes[0].loglog(md, [r["pred_var_dn"] for r in rows[1:]], "-", lw=1, label="EMVA model")
+    # levels beyond full well are fully clipped (zero temporal variance): kept in the JSON, not plotted
+    plotted = [r for r in rows[1:] if r["mu_e"] <= full_well]
+    md = np.array([r["mean_dn"] - dark["mean_dn"] for r in plotted])
+    axes[0].loglog(md, [r["var_dn"] for r in plotted], "o", ms=3, label="Monte Carlo (frame pair)")
+    axes[0].loglog(md, [r["pred_var_dn"] for r in plotted], "-", lw=1, label="EMVA model")
     axes[0].axhline(dark["var_dn"], color="0.5", ls=":", lw=1, label="dark variance")
     axes[0].set_xlabel(r"$\mu_y-\mu_{y.dark}$ [DN]")
     axes[0].set_ylabel(r"$\sigma_y^2$ [DN$^2$]")
     axes[0].set_title("Photon transfer", fontsize=9)
     axes[0].legend(fontsize=6)
-    snr = [(r["mean_dn"] - dark["mean_dn"]) / np.sqrt(max(r["var_dn"], 1e-12)) for r in rows[1:]]
-    mu_p = np.array([r["mu_e"] for r in rows[1:]])
+    snr = [(r["mean_dn"] - dark["mean_dn"]) / np.sqrt(r["var_dn"]) for r in plotted]
+    mu_p = np.array([r["mu_e"] for r in plotted])
     axes[1].loglog(mu_p, snr, "o", ms=3, label="Monte Carlo")
     axes[1].loglog(mu_p, mu_p / np.sqrt(mu_p + sigma_d**2), "-", lw=1, label=r"$\mu_e/\sqrt{\mu_e+\sigma_d^2}$")
+    axes[1].axvline(full_well, color="0.5", ls=":", lw=1, label="full well")
     axes[1].set_xlabel(r"$\mu_e$ [e$^-$]")
     axes[1].set_ylabel("SNR")
     axes[1].set_title("Temporal SNR", fontsize=9)
