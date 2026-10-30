@@ -72,8 +72,8 @@ N_WATER = 1.333
 N_COAT_DRY = 1.5  # pbrt coateddiffuse default eta used by the dry road/paint materials
 LEVELS = ("dry", "damp", "wet", "flooded")
 # water-surface roughness (pbrt "roughness", alpha = sqrt) -> model Q0 (see q0): damp 0.07,
-# wet 0.14 (~W2), flooded 0.24 (~W4)
-ROUGHNESS = {"damp": 0.15, "wet": 0.05, "flooded": 0.02}
+# wet 0.15 (W2), flooded 0.25 (W4)
+ROUGHNESS = {"damp": 0.15, "wet": 0.038, "flooded": 0.013}
 # pbrt LayeredBxDF attenuates by exp(-thickness/|cos|) even with albedo 0: keep the clear water lossless
 THICKNESS = 1e-4
 PUDDLE_LEVEL = {
@@ -188,15 +188,17 @@ def luminance_coefficient(a, n, roughness, cos_i, cos_o, cos_phi, body_scale: fl
     return body_scale * body_brdf(a, n, cos_i, cos_o) + ggx_reflection(cos_i, cos_o, cos_phi, n, roughness)
 
 
-def q0(level: str, a: float = 0.12) -> float:
+def q0(level: str, a: float = 0.12, n: int = 1024) -> float:
     """CIE average luminance coefficient Q0 of the modelled surface (``dry`` = the scene's dry asphalt).
 
     Mean of q over incidence directions tan(gamma) <= 12, all azimuths, observer 1 deg above the
     surface (CIE 30.2 / CIE 144 r-table geometry); light azimuth beta = 0 is the observer's side.
+    Midpoint rule on an ``n`` x ``n`` grid: the specular peak sits on the domain's corner (gamma
+    largest, beta 0), so a sum that includes the end points overweights it.
     """
     co = math.sin(math.radians(1.0))
-    gam = np.linspace(0, math.atan(12.0), 400)[:, None]
-    beta = np.linspace(0, math.pi, 361)[None, :]
+    gam = ((np.arange(n) + 0.5) / n * math.atan(12.0))[:, None]
+    beta = ((np.arange(n) + 0.5) / n * math.pi)[None, :]
     ci = np.cos(gam) + 0 * beta
     if level == "dry":
         q = luminance_coefficient(a, N_COAT_DRY, 0.35, ci, co, -np.cos(beta))

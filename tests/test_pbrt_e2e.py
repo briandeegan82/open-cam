@@ -401,7 +401,7 @@ class TestPbrtWetCoating(unittest.TestCase):
             tmp = Path(td)
             for a in (0.1, 0.3):
                 lamb = self._render(tmp, f"lamb{a}", f'Material "diffuse" "spectrum reflectance" [300 {a} 900 {a}]')
-                for rough, tol in ((0.0, 0.01), (0.05, 0.05)):
+                for rough, tol in ((0.0, 0.01), (wet.ROUGHNESS["wet"], 0.05)):
                     coat = self._render(
                         tmp,
                         f"wet{a}_{rough}",
