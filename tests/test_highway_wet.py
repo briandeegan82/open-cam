@@ -51,14 +51,14 @@ class TestWaterFilmOptics(unittest.TestCase):
                 self.assertLess(abs(s / s0 - 1), 0.10)
 
     def test_q0_vs_cie_tables(self) -> None:
-        """Dry model near the CIE R2/R3 Q0 (0.07); wet/flooded inside the W1..W4 span (0.11-0.25)."""
+        """Dry model near the CIE R2/R3 Q0 (0.07); wet on W2, flooded on W4; the integral is converged."""
         dry = wet.q0("dry")
         self.assertGreater(dry, 0.05)
         self.assertLess(dry, wet.CIE_Q0["R1"])
         self.assertLess(wet.q0("damp"), wet.CIE_Q0["W1"])
-        for lvl in ("wet", "flooded"):
-            self.assertGreaterEqual(wet.q0(lvl), wet.CIE_Q0["W1"], lvl)
-            self.assertLessEqual(wet.q0(lvl), wet.CIE_Q0["W4"] * 1.02, lvl)
+        for lvl, cie in (("wet", "W2"), ("flooded", "W4")):
+            self.assertAlmostEqual(wet.q0(lvl) / wet.CIE_Q0[cie], 1.0, delta=0.02, msg=lvl)
+            self.assertAlmostEqual(wet.q0(lvl, n=512) / wet.q0(lvl, n=2048), 1.0, delta=0.002, msg=lvl)
         self.assertLess(wet.q0("wet"), wet.q0("flooded"))
 
     def test_q0_lambertian(self) -> None:

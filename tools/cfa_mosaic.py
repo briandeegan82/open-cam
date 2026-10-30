@@ -22,7 +22,8 @@ real thing and is used only when ``cfa.layout`` is set (opt-in; the Bayer path i
 * **Quad Bayer** -- 2x2 same-colour binning (charge or digital) and a reference remosaic to a
   standard RGGB mosaic (demosaic + resample; not a vendor remosaic algorithm).
 * **Colour** -- channels -> linear sRGB/XYZ via a ``C x 3`` least-squares CCM fitted on
-  ColorChecker patches (:func:`fit_channel_ccm`).
+  ColorChecker patches (:func:`fit_channel_ccm`), ridge-regularised so a channel that is nearly a
+  sum of others (W ~ R + G + B) does not get large opposing coefficients that amplify noise.
 """
 
 from __future__ import annotations
@@ -37,6 +38,10 @@ import numpy as np
 QE_DIR = "spectra/QE/interpolated"
 # ColorChecker reflectances / CIE illuminants always come from this checkout's spectra/.
 DATA_ROOT = Path(__file__).resolve().parent.parent
+# Ridge weight of the spectral ColorChecker CCM (responses normalised to the perfect diffuser).
+# Unregularised, the RGBW fit builds red as 12.7 W - 5.8 G - 5.4 B (noise gain 15 vs 1.8 for Bayer)
+# to gain 0.14 mean CIEDE2000; at 1e-3 its noise gain matches Bayer and the Bayer CCM is unchanged.
+SPECTRAL_CCM_RIDGE = 1e-3
 
 # Default spectral QE per channel name (total QE = silicon QE x colour filter, as in the repo's
 # existing QE_*.csv).  Clear / white sites have no colour filter: the monochrome QE.
@@ -566,21 +571,26 @@ def remosaic_to_bayer(
 # ---------------------------------------------------------------------------------------------
 # Colour conversion
 # ---------------------------------------------------------------------------------------------
-def fit_channel_ccm(cam: np.ndarray, target: np.ndarray, *, white_index: int | None = None) -> np.ndarray:
+def fit_channel_ccm(
+    cam: np.ndarray, target: np.ndarray, *, white_index: int | None = None, ridge: float = 0.0
+) -> np.ndarray:
     """``C x 3`` least-squares CCM with ``cam @ M ~= target`` (rows = patches or pixels).
 
     With ``white_index`` the fit is constrained so that patch maps exactly onto its target
     (white-point preserving), via a Lagrange-multiplier (KKT) solve per output column.
+    ``ridge`` adds ``ridge * |M|^2`` to the cost, which bounds the matrix's noise gain.
     """
     a = np.asarray(cam, dtype=np.float64).reshape(-1, np.shape(cam)[-1])
     t = np.asarray(target, dtype=np.float64).reshape(-1, 3)
-    if white_index is None:
-        m, *_ = np.linalg.lstsq(a, t, rcond=None)
-        return m
     c = a.shape[1]
+    if white_index is None:
+        if ridge == 0.0:
+            m, *_ = np.linalg.lstsq(a, t, rcond=None)
+            return m
+        return np.linalg.solve(a.T @ a + ridge * np.eye(c), a.T @ t)
     w = a[white_index]
     kkt = np.zeros((c + 1, c + 1))
-    kkt[:c, :c] = 2.0 * a.T @ a
+    kkt[:c, :c] = 2.0 * (a.T @ a + ridge * np.eye(c))
     kkt[:c, c] = w
     kkt[c, :c] = w
     m = np.empty((c, 3))
@@ -637,7 +647,8 @@ def colorchecker_spectral_ccm(
 
     Camera responses ``s_c = sum R(lambda) S(lambda) QE_c(lambda) dlambda`` (normalised to the
     perfect diffuser) are regressed on the patches' linear-sRGB values under ``illuminant``,
-    constrained so the white patch maps exactly to its target.  This is the CCM a calibration
+    constrained so the white patch maps exactly to its target, with a small ridge penalty
+    (:data:`SPECTRAL_CCM_RIDGE`) that keeps the noise gain bounded.  This is the CCM a calibration
     on an ideal, noise-free ColorChecker render would give for this QE set.
     """
     import colour_science as cs  # noqa: PLC0415
@@ -653,7 +664,7 @@ def colorchecker_spectral_ccm(
     xyz = cs.xyz_from_spectra(lam, chart.reflectance, spd)
     tgt = cs.xyz_to_srgb_linear(xyz)
     wi = int(np.argmax(xyz[:, 1]))
-    ccm = fit_channel_ccm(cam, tgt / tgt[wi].mean(), white_index=wi)
+    ccm = fit_channel_ccm(cam, tgt / tgt[wi].mean(), white_index=wi, ridge=SPECTRAL_CCM_RIDGE)
     return ccm, {"ccm_source": f"colorchecker_spectral_{illuminant}", "ccm_white_patch": chart.names[wi]}
 
 

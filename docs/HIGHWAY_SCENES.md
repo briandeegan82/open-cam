@@ -747,28 +747,47 @@ spectral body:
   spectrum transformed per wavelength (dry clear coat, `eta` 1.5, removed by inversion) —
   spectral, not RGB. The road texture maps modulate this spectral scale linearly; that is
   exact at the texel mean and within ±8 % for texels at ×0.4/×1.6 of it.
-- *Specular water surface* — microfacet roughness by level (damp 0.15, wet 0.05, flooded 0.02)
+- *Specular water surface* — microfacet roughness by level (damp 0.15, wet 0.038, flooded 0.013)
   chosen so the luminance coefficient q integrated to the CIE average Q0 (CIE 47-1979 "Road
   lighting for wet conditions"; R/W tables as in CIE 144:2001) lands in the CIE wet classes;
-  the asphalt normal map is dropped for wet/flooded (water fills the texture).
+  the asphalt normal map is dropped for wet/flooded (water fills the texture). The noise
+  measurements earlier in this document were made at the previous wet roughness, 0.05.
 
 | level | roughness | model Q0 | CIE reference Q0 |
 |---|---|---|---|
-| dry (existing material) | – | 0.058 | R2/R3 0.07, R1 0.10 |
-| damp | 0.15 | 0.074 | (< W1 0.11, partly dry) |
-| wet | 0.05 | 0.142 | W2 0.15 (W1 0.11–W4 0.25) |
-| flooded | 0.02 | 0.245 | W4 0.25 |
+| dry (existing material) | – | 0.057 | R2/R3 0.07, R1 0.10 |
+| damp | 0.15 | 0.070 | (< W1 0.11, partly dry) |
+| wet | 0.038 | 0.149 | W2 0.15 (W1 0.11–W4 0.25) |
+| flooded | 0.013 | 0.248 | W4 0.25 |
 
 Q0 here is the CIE average over the road-lighting solid angle (β 0–180°, tan γ ≤ 12) at an
 observation angle of 1°, computed analytically (`highway_wet.q0`, Lekner–Dorf body + GGX
-water specular); `TestPbrtWetCoating` renders a flat plate (normal incidence, 45° view)
+water specular; midpoint rule, because the specular peak sits on the corner of the domain and a sum
+including the end points overestimates it: the wet and flooded roughnesses were first tuned with
+such a sum, which read 0.142 and 0.245 where the converged values were 0.129 and 0.206); `TestPbrtWetCoating` renders a flat plate (normal incidence, 45° view)
 with pbrt's stochastic `coateddiffuse` against a Lambertian plate of the same albedo: with a
-smooth water interface pbrt reproduces the Lekner–Dorf body BRDF to 0.1 % (a = 0.1: 0.5624 vs
-0.5626; a = 0.3: 0.6244 vs 0.6249); with the wet roughness 0.05 it is 0.9 % / 3.7 % below the
-analytic body + GGX model used for Q0 (0.6576 vs 0.6636; 0.6345 vs 0.6586 — pbrt's rough
+smooth water interface pbrt reproduces the Lekner–Dorf body BRDF to 0.2 % (a = 0.1: 0.5623 vs
+0.5626; a = 0.3: 0.6239 vs 0.6249); with the wet roughness 0.038 it is 0.6 % / 3.0 % below the
+analytic body + GGX model used for Q0 (0.6445 vs 0.6486; 0.6341 vs 0.6536 — pbrt's rough
 interface also changes the light trapped in the film). The wet coatings use `"float thickness"
 1e-4`: pbrt's `LayeredBxDF` attenuates by exp(−thickness/|cos θ|) even with zero medium albedo,
 and the default 0.01 darkened the body by up to 6 %.
+
+S1 = r(2,0)/r(0,0), the other number the wet classes are published with (no CIE table ships with the
+repo; class values from Ylinen et al. 2010, via a summary that calls them S1' and lists normalised Q0):
+model wet 47.7 against W2 16, flooded 74.8 against W4 121, dry 2.9 against 0.56-0.85 measured on rough
+asphalt (Pattanapakdee & Chotigo, CIE 2019). Fitting roughness and a free body scale to Q0 and S1 gives
+W2 at roughness 0.041, close to the 0.038 here, with r(0,0) 0.0114 where the model has 0.0039; W4 has no
+solution (the model's S1 peaks near 77). So the specular lobe fits W2, and the body under overhead
+light is about 3 times too dark, or W2 describes a lighter road. Not changed: this needs the real
+tables (`docs/ROAD_RTABLE.md`).
+
+Aggregate showing through the film (investigated, not changed): keeping the road's normal map at
+`wet`, scaled by F, on the night wet highway (480x270, 256 spp, 6 seeds, roughness 0.05, lamp pixels
+excluded). Median per-pixel variance rises with F on every road crop (near road 0.056, 0.070, 0.099,
+0.143 at F = 0, 0.2, 0.5, 1) and Q0 falls (-2, -10, -23 %). Normal mapping has no masking or
+shadowing, which is why the night scenes drop these maps; its RMS slope (0.11) is also below the
+film's GGX alpha (0.22), so it adds speckle without much broadening.
 
 **Puddles** (`--puddles`, wet/flooded, needs `--road-wear` ≠ none). Water collects where the
 rut-depth proxy — the wheel-path map of `tools/highway_road_wear.py`, normalised and modulated
