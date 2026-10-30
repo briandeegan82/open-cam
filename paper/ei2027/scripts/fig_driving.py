@@ -3,7 +3,7 @@
 Each spectral EXR goes through tools/apply_emva_noise.py (per-render auto-exposure: 99th percentile
 at 80 % of full well). Visible panels use the default research camera and show its noisy demosaiced
 sRGB preview; the SWIR panel uses the representative InGaAs recipe and shows its noisy grey preview. The
-night panel uses the Open Image Denoise output of render_driving.sh (the pbrt render is denoised before
+wet panels use the Open Image Denoise output of render_driving.sh (the pbrt render is denoised before
 the sensor model, so the sensor noise is still simulated). Run from the repository root after render_driving.sh:
     venv/bin/python paper/ei2027/scripts/fig_driving.py
 """
@@ -31,7 +31,7 @@ PANELS = {
         "(b) day, wet road, puddles, spray, visible",
         "default",
         "noisy_demosaic_rgb8.png",
-        "highway_spectral.exr",
+        "highway_spectral_denoised.exr",
     ),
     "swir_900_1600": (
         "(c) day, dry, SWIR 900-1600 nm",

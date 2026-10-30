@@ -8,9 +8,9 @@
   },
   "day_wet": {
     "recipe": "default",
-    "render": "highway_spectral.exr",
-    "exposure_scale_e_per_unit": 5.003628182692439,
-    "signal_e_mean_mono": 1185.7789306640625,
+    "render": "highway_spectral_denoised.exr",
+    "exposure_scale_e_per_unit": 5.00704803743673,
+    "signal_e_mean_mono": 1196.765869140625,
     "demosaic": "malvar"
   },
   "swir_900_1600": {
@@ -23,8 +23,8 @@
   "night_wet": {
     "recipe": "default",
     "render": "highway_spectral_denoised.exr",
-    "exposure_scale_e_per_unit": 0.0003859059509009045,
-    "signal_e_mean_mono": 1868.204345703125,
+    "exposure_scale_e_per_unit": 0.00031776384287703383,
+    "signal_e_mean_mono": 1578.337890625,
     "demosaic": "malvar"
   }
 }
