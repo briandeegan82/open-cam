@@ -1,0 +1,82 @@
+--- a/src/pbrt/bsdf.h
++++ b/src/pbrt/bsdf.h
+@@ -145,6 +145,24 @@
+     PBRT_CPU_GPU
+     void Regularize() { bxdf.Regularize(); }
+ 
++    // Evaluate f() on a stack copy of the BxDF after Regularize(), leaving
++    // this BSDF unchanged. Used for secondary-bounce NEE to delta lights
++    // (open-cam patch 0034) so glossy-to-point-light spikes are capped
++    // without blurring the continuation BSDF sample.
++    PBRT_CPU_GPU
++    SampledSpectrum fRegularized(Vector3f woRender, Vector3f wiRender,
++                                 TransportMode mode = TransportMode::Radiance) const {
++        Vector3f wi = RenderToLocal(wiRender), wo = RenderToLocal(woRender);
++        if (wo.z == 0)
++            return {};
++        auto eval = [&](auto ptr) -> SampledSpectrum {
++            auto copy = *ptr;
++            copy.Regularize();
++            return copy.f(wo, wi, mode);
++        };
++        return bxdf.Dispatch(eval);
++    }
++
+   private:
+     // BSDF Private Members
+     BxDF bxdf;
+--- a/src/pbrt/cpu/integrators.h
++++ b/src/pbrt/cpu/integrators.h
+@@ -230,7 +230,8 @@
+   private:
+     // PathIntegrator Private Methods
+     SampledSpectrum SampleLd(const SurfaceInteraction &intr, const BSDF *bsdf,
+-                             SampledWavelengths &lambda, Sampler sampler) const;
++                             SampledWavelengths &lambda, Sampler sampler,
++                             bool anyNonSpecularBounces = false) const;
+ 
+     // PathIntegrator Private Members
+     int maxDepth;
+--- a/src/pbrt/cpu/integrators.cpp
++++ b/src/pbrt/cpu/integrators.cpp
+@@ -828,7 +828,8 @@
+         // Sample direct illumination from the light sources
+         if (IsNonSpecular(bsdf.Flags())) {
+             ++totalPaths;
+-            SampledSpectrum Ld = SampleLd(isect, &bsdf, lambda, sampler);
++            SampledSpectrum Ld =
++                SampleLd(isect, &bsdf, lambda, sampler, anyNonSpecularBounces);
+             if (!Ld)
+                 ++zeroRadiancePaths;
+             L += beta * Ld;
+@@ -867,8 +868,8 @@
+ }
+ 
+ SampledSpectrum PathIntegrator::SampleLd(const SurfaceInteraction &intr, const BSDF *bsdf,
+-                                         SampledWavelengths &lambda,
+-                                         Sampler sampler) const {
++                                         SampledWavelengths &lambda, Sampler sampler,
++                                         bool anyNonSpecularBounces) const {
+     // Initialize _LightSampleContext_ for light sampling
+     LightSampleContext ctx(intr);
+     // Try to nudge the light sampling position to correct side of the surface
+@@ -892,9 +893,17 @@
+     if (!ls || !ls->L || ls->pdf == 0)
+         return {};
+ 
+-    // Evaluate BSDF for light sample and check light visibility
++    // Evaluate BSDF for light sample and check light visibility.
++    // open-cam patch 0034: after a non-specular bounce, NEE to a delta light
++    // (goniometric headlamp, spot) uses a regularized lobe so a narrow GGX
++    // evaluated against a point light cannot spike. The original BSDF is not
++    // mutated, so the continuation sample stays sharp. Primary hits (depth 0)
++    // are unchanged.
+     Vector3f wo = intr.wo, wi = ls->wi;
+-    SampledSpectrum f = bsdf->f(wo, wi) * AbsDot(wi, intr.shading.n);
++    SampledSpectrum fBxDF =
++        (anyNonSpecularBounces && IsDeltaLight(light.Type())) ? bsdf->fRegularized(wo, wi)
++                                                              : bsdf->f(wo, wi);
++    SampledSpectrum f = fBxDF * AbsDot(wi, intr.shading.n);
+     if (!f || !Unoccluded(intr, ls->pLight))
+         return {};
+ 

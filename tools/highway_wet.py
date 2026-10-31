@@ -386,7 +386,7 @@ def _set_param(block: str, decl: str, value: str) -> str:
     import re
 
     name = decl.split()[1]
-    block = re.sub(rf'\s*"(float|texture) {name}" (\[[^\]]*\]|"[^"]*")', "", block)
+    block = re.sub(rf'\s*"(float|integer|texture) {name}" (\[[^\]]*\]|"[^"]*")', "", block)
     return f'{block} "{decl}" {value}'
 
 

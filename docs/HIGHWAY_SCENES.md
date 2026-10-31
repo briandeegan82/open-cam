@@ -134,7 +134,12 @@ and 1.019), so these changes are not a measure of the calibration alone. The oth
 Whole frames (1024 spp, same exclusion) change by at most 1.2 % (highway night, wet), and the garage and
 the tunnel `outside_in` view show no 1/64-frame tile that differs by more than the seed-to-seed noise.
 Unbiased renders converge more slowly where these paths matter (night scenes on wet roads especially),
-so raise `--pixelsamples` there rather than switch regularization back on.
+so raise `--pixelsamples` there rather than switch `--regularize` on.
+
+`--regularize` is still opt-in. Independently, patch 0034 always regularizes *only* the NEE
+evaluation of a delta light after the first non-specular bounce (a stack copy of the BxDF, so the
+continuation sample stays sharp). That is the wet-night path camera → road → car coat → point
+headlamp; primary hits, area lights and BSDF sampling are unchanged.
 
 ### Car paint roughness
 
@@ -802,10 +807,13 @@ renders 0.50 at roughness 0.35), so dry road paint is clipped, and white renders
 measured 0.71 (`unreachable_fraction` in the manifest); before calibration it rendered about 0.33.
 Wet materials target the water surface reflection plus the Lekner–Dorf body, per wavelength.
 
-`nsamples` on the road (investigated, not changed): `coateddiffuse` defaults to one random walk per
+`nsamples` on the road (left at pbrt's default 1): `coateddiffuse` runs one random walk per
 BSDF evaluation. Night wet scene, 960x324 crop, 256 spp, 6 seeds, near-road mean variance 0.7975 at
 `nsamples` 1, 4 and 16 and at 16 on all coated materials, 0.1014 at depth 1 for both 1 and 16; 16 costs
-1.76x on the full render. The estimator is not a meaningful share of the road noise.
+1.76x on the full render. Re-measured with `nsamples` 4 plus patch 0034 on the paper night_wet
+frame: the EXR road-crop tail was unchanged (p99 4.29 → 4.10, max still ~575) while pbrt's
+`CHECK_RARE` on the layered walk then failed. The estimator is not a meaningful share of the road
+noise.
 
 Aggregate showing through the film (investigated, not changed): keeping the road's normal map at
 `wet`, scaled by F, on the night wet highway (480x270, 256 spp, 6 seeds, roughness 0.05, lamp pixels
