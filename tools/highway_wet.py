@@ -18,9 +18,8 @@ Wet asphalt
     r_e = 0.0664, r_i = 0.475); (2) the water surface is a smooth dielectric (n = 1.333) whose
     Fresnel specular lobe dominates at the grazing driver geometry. The model is applied per
     wavelength to the scene's spectral asphalt (and paint) reflectance: the wet base reflectance
-    is chosen so that the rendered wet body reflectance equals the dry material's rendered body
-    reflectance times A_w / A, i.e. the published darkening ratio relative to the scene's dry
-    look (the dry material keeps its pbrt ``coateddiffuse`` n = 1.5 binder sheen). The wet
+    is chosen (tools/coat_calibration.py) so that the rendered wet material has the water surface
+    reflection plus the Lekner-Dorf body A_w of the measured dry reflectance A. The wet
     material is pbrt ``coateddiffuse`` (layered random walk == the Angstrom/Lekner-Dorf
     geometry) with ``eta`` 1.333 and a water-surface roughness per wetness level.
 
@@ -66,6 +65,7 @@ import math
 import os
 from pathlib import Path
 
+import coat_calibration as coat
 import numpy as np
 
 N_WATER = 1.333
@@ -141,23 +141,18 @@ def darkening_ratio(a, n: float = N_WATER) -> np.ndarray:
     return body_albedo(a, n) / np.maximum(a, 1e-12)
 
 
-def _invert_body(target, n: float) -> np.ndarray:
-    r_e, r_i = diffuse_reflectances(n)
-    t = (1.0 - r_e) * (1.0 - r_i)
-    return target / (t + r_i * target)
+def wet_base_reflectance(a, roughness: float, coated: bool = True) -> np.ndarray:
+    """Base reflectance for the wet material from the measured dry reflectance ``a``.
 
-
-def wet_base_reflectance(a, coated: bool = True) -> np.ndarray:
-    """Base reflectance for the wet material (water coat n = 1.333) from the dry one.
-
-    ``coated``: the dry material is pbrt coateddiffuse (n = 1.5 coat); the wet body reflectance
-    is the dry rendered body x the Lekner-Dorf ratio. Uncoated (Lambertian, e.g. the diffuse part
-    of the retroreflective markings): base = Lekner-Dorf wet albedo directly.
+    ``coated``: pbrt coateddiffuse with the water coat, calibrated (tools/coat_calibration.py) to render
+    the Lekner-Dorf wet body plus the water surface reflection. Uncoated (Lambertian, e.g. the diffuse
+    part of the retroreflective markings): base = Lekner-Dorf wet albedo directly.
     """
     a = np.asarray(a, dtype=np.float64)
     if not coated:
         return body_albedo(a, N_WATER)
-    return _invert_body(body_albedo(a, N_COAT_DRY) * darkening_ratio(a), N_WATER)
+    surface = coat.rendered_reflectance(0.0, N_WATER, roughness)
+    return coat.base_reflectance(surface + body_albedo(a, N_WATER), N_WATER, roughness)
 
 
 def body_brdf(a, n: float, cos_i, cos_o) -> np.ndarray:
@@ -201,10 +196,11 @@ def q0(level: str, a: float = 0.12, n: int = 1024) -> float:
     beta = ((np.arange(n) + 0.5) / n * math.pi)[None, :]
     ci = np.cos(gam) + 0 * beta
     if level == "dry":
-        q = luminance_coefficient(a, N_COAT_DRY, 0.35, ci, co, -np.cos(beta))
+        # a is the measured reflectance: the body is what the coat's surface reflection leaves of it
+        scale = float((a - coat.rendered_reflectance(0.0, N_COAT_DRY, 0.35)) / body_albedo(a, N_COAT_DRY))
+        q = luminance_coefficient(a, N_COAT_DRY, 0.35, ci, co, -np.cos(beta), body_scale=scale)
     else:
-        scale = float(darkening_ratio(a) * body_albedo(a, N_COAT_DRY) / body_albedo(a, N_WATER))
-        q = luminance_coefficient(a, N_WATER, ROUGHNESS[level], ci, co, -np.cos(beta), body_scale=scale)
+        q = luminance_coefficient(a, N_WATER, ROUGHNESS[level], ci, co, -np.cos(beta))
     w = np.sin(gam) + 0 * beta
     return float((q * w).sum() / w.sum())
 
@@ -408,7 +404,7 @@ def apply_materials(
         src = spd_dir / f"{name}.spd"
         if src.is_file():
             d = np.loadtxt(src)
-            _write_spd(spd_dir / f"wet_{name}.spd", d[:, 0], d[:, 1] * 0 + wet_base_reflectance(d[:, 1]))
+            _write_spd(spd_dir / f"wet_{name}.spd", d[:, 0], wet_base_reflectance(d[:, 1], rough))
             _write_spd(spd_dir / f"wetd_{name}.spd", d[:, 0], body_albedo(d[:, 1], N_WATER))
     spd_re = re.compile(r'"spd/(' + "|".join(WET_SPDS) + r')\.spd"')
     road_mats = set(ROAD_MATERIALS)

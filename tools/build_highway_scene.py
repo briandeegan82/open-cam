@@ -37,6 +37,7 @@ from lens_glass import pbrt_camera_lines
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import coat_calibration as coat_cal  # noqa: E402
 import highway_atmosphere as atmosphere  # noqa: E402
 import highway_backdrop as backdrop  # noqa: E402
 import highway_incar  # noqa: E402
@@ -1385,6 +1386,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         if spray_meta is not None:
             wet_meta["spray"] = wet.manifest_spray(spray_meta)
     scene_path = out_dir / "highway.pbrt"
+    L, coat_meta = coat_cal.calibrate_scene(L, spd, write_spd)
     scene_path.write_text("\n".join(L) + "\n")
 
     manifest = {
@@ -1462,6 +1464,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
             "length_m": ROAD_Z1 - ROAD_Z0,
             "wear": wear.summary if wear is not None else None,
             **({"rtable": rtable.summary()} if rtable is not None else {}),
+            "coat_calibration": coat_meta,
             **({"wet": wet_meta} if wet_meta else {}),
         },
         "cars": cars_meta,

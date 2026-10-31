@@ -755,10 +755,10 @@ spectral body:
 
 | level | roughness | model Q0 | CIE reference Q0 |
 |---|---|---|---|
-| dry (existing material) | – | 0.057 | R2/R3 0.07, R1 0.10 |
-| damp | 0.15 | 0.070 | (< W1 0.11, partly dry) |
-| wet | 0.038 | 0.149 | W2 0.15 (W1 0.11–W4 0.25) |
-| flooded | 0.013 | 0.248 | W4 0.25 |
+| dry (existing material) | – | 0.059 | R2/R3 0.07, R1 0.10 |
+| damp | 0.15 | 0.071 | (< W1 0.11, partly dry) |
+| wet | 0.038 | 0.151 | W2 0.15 (W1 0.11–W4 0.25) |
+| flooded | 0.013 | 0.249 | W4 0.25 |
 
 Q0 here is the CIE average over the road-lighting solid angle (β 0–180°, tan γ ≤ 12) at an
 observation angle of 1°, computed analytically (`highway_wet.q0`, Lekner–Dorf body + GGX
@@ -775,12 +775,32 @@ and the default 0.01 darkened the body by up to 6 %.
 
 S1 = r(2,0)/r(0,0), the other number the wet classes are published with (no CIE table ships with the
 repo; class values from Ylinen et al. 2010, via a summary that calls them S1' and lists normalised Q0):
-model wet 47.7 against W2 16, flooded 74.8 against W4 121, dry 2.9 against 0.56-0.85 measured on rough
-asphalt (Pattanapakdee & Chotigo, CIE 2019). Fitting roughness and a free body scale to Q0 and S1 gives
-W2 at roughness 0.041, close to the 0.038 here, with r(0,0) 0.0114 where the model has 0.0039; W4 has no
-solution (the model's S1 peaks near 77). So the specular lobe fits W2, and the body under overhead
-light is about 3 times too dark, or W2 describes a lighter road. Not changed: this needs the real
+model wet 35.1 against W2 16, flooded 48.9 against W4 121, dry 2.6 against 0.56-0.85 measured on rough
+asphalt (Pattanapakdee & Chotigo, CIE 2019). r(0,0) is 0.0053 where a fit of roughness and a free body
+scale to W2 gives 0.0114 at roughness 0.041, close to the 0.038 here; W4 has no solution. So the specular
+lobe fits W2, and the road under overhead light is about 2 times too dark, or W2 describes a lighter
+road. Calibrating the coat (below) closed part of the gap, from 3 times; most of r(0,0) at this geometry is the GGX tail, not the body. Not changed: this needs the real
 tables (`docs/ROAD_RTABLE.md`).
+
+**Coat calibration** (`tools/coat_calibration.py`). pbrt's `coateddiffuse` takes the reflectance of the
+substrate, while a measured spectrum is the reflectance of the finished surface. A plate under a uniform
+environment, viewed head-on, renders 0.069 for an input of 0.12 and 0.38 for 0.8 at roughness 0.35, eta 1.5
+(smooth coat: 0.090 and 0.615, the analytic trapped-light loss; the rest is the single-scattering loss of a
+rough GGX interface, unchanged by `maxdepth` 100). `config/coat_albedo.json` tabulates this by eta, roughness
+and substrate, and the builder's last step (`calibrate_scene`) points coated uses of the asphalt, sealant,
+road paint, galvanized and rubber spectra at `spd/coat_<name>.spd`, recorded in `road.coat_calibration`.
+Each spectrum uses one nominal roughness, so worn patches at roughness 0.12 are a little brighter than
+measured, and cars keep their own rubber materials. The car paint spectra are not calibrated: they are
+pigment bodies under a separate clear coat (`carpaint_black` is below the coat's own 0.04). Asset RGB
+materials are not calibrated either. A rough coat also limits how bright a surface can be (substrate 1
+renders 0.50 at roughness 0.35), so dry road paint is clipped, and white renders about 0.50 against its
+measured 0.71 (`unreachable_fraction` in the manifest); before calibration it rendered about 0.33.
+Wet materials target the water surface reflection plus the Lekner–Dorf body, per wavelength.
+
+`nsamples` on the road (investigated, not changed): `coateddiffuse` defaults to one random walk per
+BSDF evaluation. Night wet scene, 960x324 crop, 256 spp, 6 seeds, near-road mean variance 0.7975 at
+`nsamples` 1, 4 and 16 and at 16 on all coated materials, 0.1014 at depth 1 for both 1 and 16; 16 costs
+1.76x on the full render. The estimator is not a meaningful share of the road noise.
 
 Aggregate showing through the film (investigated, not changed): keeping the road's normal map at
 `wet`, scaled by F, on the night wet highway (480x270, 256 spp, 6 seeds, roughness 0.05, lamp pixels
