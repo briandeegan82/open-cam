@@ -25,6 +25,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import coat_calibration  # noqa: E402
 import facade_kits as fk  # noqa: E402
 import highway_night as night  # noqa: E402
 import highway_signs as sign_scene  # noqa: E402
@@ -1000,10 +1001,12 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         L, wet_meta = wet.apply_materials(L, args, wl, spd, out_dir)
 
     scene_path = out_dir / "urban.pbrt"
+    L, coat_meta = coat_calibration.calibrate_scene(L, spd, write_spd)
     scene_path.write_text("\n".join(L) + "\n")
     manifest = {
         "scene": _rel(repo, scene_path),
         "generator": "tools/build_urban_scene.py",
+        "coat_calibration": coat_meta,
         "units": "metres; y up; ego street along +z; +x image-right",
         "film": {"type": args.film, "filename": film_out, "xresolution": args.xres, "yresolution": args.yres},
         "camera": {"eye": eye.tolist(), "target": target.tolist(), "type": args.camera, "fov_deg": args.fov},

@@ -118,13 +118,18 @@ brightest 0.5 % of pixels excluded. The wet rural canopy row was re-measured aft
 
 | scene | crop | spp | regularized / unbiased |
 |---|---|---:|---:|
-| rural, night, `--road-wetness wet` | tree canopy pixels, lit partly by lamp light reflected off the water | 16384 | 0.893 ± 0.007 (4 seeds, ± SEM) |
+| rural, night, `--road-wetness wet` | tree canopy pixels, lit partly by lamp light reflected off the water | 16384 | 0.837 ± 0.000 (4 seeds, ± SEM) |
 | rural, night, `--road-wetness dry` | same pixels | 16384 | 1.000 (identical) |
-| urban, day, `--road-wetness wet` | road and parked cars, lower right | 8192 | 0.972 ± 0.000 |
-| highway, day, `--windscreen` | road seen through the windscreen, lower left | 8192 | 1.019 ± 0.001 |
+| urban, day, `--road-wetness wet` | road and parked cars, lower right (x 192-384, y 130-216) | 8192 | 0.997 ± 0.000 |
+| highway, day, `--windscreen` | road seen through the windscreen, lower left (x 0-192, y 130-216) | 8192 | 1.014 ± 0.000 |
 | highway, day, `--road-wetness wet` | traffic cars | 8192 | 1.004 ± 0.000 |
 | tunnel, `inside_out` | tube ceiling | 8192 | 0.999 ± 0.000 |
 | highway / urban, night, wet | traffic and parked cars | 16384 | 0.996 ± 0.024 / 1.009 ± 0.017 (noise-limited) |
+
+The rural wet, urban wet and highway windscreen rows were re-measured after the coat calibration and the
+wet roughness change, with the crops given. The rural row was 0.893 ± 0.007 and now includes any sky pixels
+in the two crown boxes, and the urban and highway crops are new (the earlier ones were not recorded: 0.972
+and 1.019), so these changes are not a measure of the calibration alone. The other rows predate it.
 
 Whole frames (1024 spp, same exclusion) change by at most 1.2 % (highway night, wet), and the garage and
 the tunnel `outside_in` view show no 1/64-frame tile that differs by more than the seed-to-seed noise.
@@ -792,7 +797,7 @@ road paint, galvanized and rubber spectra at `spd/coat_<name>.spd`, recorded in 
 Each spectrum uses one nominal roughness, so worn patches at roughness 0.12 are a little brighter than
 measured, and cars keep their own rubber materials. The car paint spectra are not calibrated: they are
 pigment bodies under a separate clear coat (`carpaint_black` is below the coat's own 0.04). Asset RGB
-materials are not calibrated either. A rough coat also limits how bright a surface can be (substrate 1
+materials are not calibrated either. The rural, urban, garage (with the coated floor concrete) and tunnel builders use the same pass, with the result in `coat_calibration` in their manifests; the diorama has no coated measured spectra. A rough coat also limits how bright a surface can be (substrate 1
 renders 0.50 at roughness 0.35), so dry road paint is clipped, and white renders about 0.50 against its
 measured 0.71 (`unreachable_fraction` in the manifest); before calibration it rendered about 0.33.
 Wet materials target the water surface reflection plus the Lekner–Dorf body, per wavelength.
