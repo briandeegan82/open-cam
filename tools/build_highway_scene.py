@@ -298,6 +298,29 @@ def terrain_mesh(edge: float, side: float, far: float, tile: float, seed: int):
     return P, np.array(t), uv
 
 
+def _sanitize_car_material(body_lines: list[str], min_alpha: float = hmat.PAINT_ALPHA) -> list[str]:
+    """Raise near-mirror roughness on imported car asset materials so point-light headlamps
+    do not produce delta or near-delta fireflies."""
+    text = "\n".join(body_lines)
+    if not any(t in text for t in ("coateddiffuse", "conductor", "coatedconductor")):
+        return body_lines
+    remap = not bool(re.search(r'"bool remaproughness"\s*\[?\s*false\s*\]?', text))
+    floor = min_alpha**2 if remap else min_alpha
+
+    def _clamp(m: re.Match) -> str:
+        key, val = m.group(1), float(m.group(2))
+        return f'"{key}" [ {max(val, floor):g} ]'
+
+    text = re.sub(
+        r'"(float (?:(?:u|v|interface\.|conductor\.)?roughness))"\s*\[?\s*([0-9.eE+-]+)\s*\]?',
+        _clamp,
+        text,
+    )
+    if '"conductor"' in text and "roughness" not in text:
+        text += f'\n"float roughness" [ {floor:g} ]'
+    return text.splitlines()
+
+
 def car_include(info: dict, raw_dir: Path, out_dir: Path, inst: str, paint_spd: str, length_m: float) -> list[str]:
     """pbrt lines for one car instance (materials renamed per instance, roles overridden)."""
     roles = info.get("roles", {})
@@ -325,7 +348,7 @@ def car_include(info: dict, raw_dir: Path, out_dir: Path, inst: str, paint_spd: 
                 '    "float roughness" [0.45]',
             ]
         else:
-            body_lines = body.splitlines()
+            body_lines = _sanitize_car_material(body.splitlines())
             for i, ln in enumerate(body_lines):
                 if '"string materials"' in ln:
                     for other in info["materials"]:
@@ -442,7 +465,7 @@ def proxy_car(paint_spd: str, inst: str) -> list[str]:
     """Box-and-cylinder stand-in (front towards +z, ground at y=0) when car assets are absent."""
     out = [
         f'MakeNamedMaterial "{inst}:paint" "string type" "coateddiffuse" "spectrum reflectance" "{paint_spd}"'
-        ' "float roughness" [0.01]',
+        f' "float roughness" [{hmat.PAINT_ALPHA}] "bool remaproughness" false',
         f'MakeNamedMaterial "{inst}:glass" "string type" "dielectric" "float eta" [1.52]',
         f'MakeNamedMaterial "{inst}:tire" "string type" "diffuse" "spectrum reflectance" "spd/rubber.spd"',
         f'NamedMaterial "{inst}:paint"',

@@ -430,6 +430,16 @@ def test_desaturate_near_clip_whitens_fringes_only():
     np.testing.assert_allclose(out[:, 8].mean(axis=-1), 0.9)  # brightest channel kept: white, not grey
     assert cm.desaturate_near_clip(rgb, raw, None) is rgb
 
+    # A monochromatic red lamp clipped only on R sites (even, even) must stay red, not bleach to white;
+    # and an isolated 1-pixel firefly must not trigger a 5x5 grey block.
+    red_rgb = np.ones((8, 8, 3)) * np.array([0.95, 0.25, 0.10])
+    red_raw = np.full((8, 8), 200.0)
+    red_raw[0::2, 0::2] = 1000.0  # only R sites clipped
+    np.testing.assert_array_equal(cm.desaturate_near_clip(red_rgb, red_raw, 1000.0, radius=2), red_rgb)
+    spike_raw = np.full((8, 8), 100.0)
+    spike_raw[4, 4] = 1000.0  # single-site firefly
+    np.testing.assert_array_equal(cm.desaturate_near_clip(rgb[:8, :8], spike_raw, 1000.0, radius=2), rgb[:8, :8])
+
 
 @pytest.mark.parametrize("pattern", ["RGGB", "BGGR", "GRBG", "GBRG"])
 def test_malvar_on_bayer_layouts_is_the_real_malvar(pattern):

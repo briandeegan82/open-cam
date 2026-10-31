@@ -697,6 +697,20 @@ def clip_highlights(img: np.ndarray, gains: np.ndarray, clip_level: float | None
     return np.minimum(img, float(clip_level) * float(np.min(g))).astype(np.asarray(img).dtype, copy=False)
 
 
+def _pad_reflect_even(a: np.ndarray, radius: int) -> np.ndarray:
+    """Pad a 2-D array by ``radius`` on both axes while preserving 2x2 Bayer phase parity."""
+    if radius <= 0:
+        return a
+    h, w = a.shape
+    iy = np.arange(-radius, h + radius)
+    ix = np.arange(-radius, w + radius)
+    iy = np.where(iy < 0, -iy, np.where(iy >= h, 2 * h - 2 - iy, iy))
+    ix = np.where(ix < 0, -ix, np.where(ix >= w, 2 * w - 2 - ix, ix))
+    iy = np.clip(iy, 0, h - 1)
+    ix = np.clip(ix, 0, w - 1)
+    return a[iy[:, None], ix[None, :]]
+
+
 def desaturate_near_clip(
     rgb: np.ndarray, raw: np.ndarray, clip_level: float | None, radius: int = 2, start: float = 0.9
 ) -> np.ndarray:
@@ -705,19 +719,27 @@ def desaturate_near_clip(
     Next to a clipped highlight the demosaic mixes clipped and unclipped samples of different
     channels, so one channel stops growing while the others do: a coloured fringe along window and
     lamp edges. The weight ramps from 0 at ``start * clip_level`` to 1 at the clip level, using the
-    largest raw sample within ``radius`` pixels (the demosaic's support). The target is the brightest
-    channel, not the luminance: a lamp clipped only in red would otherwise turn mid grey, so clipped
-    cores render white with a coloured rim, as in a real camera. Display only; the raw data and the
-    metrics are not touched."""
+    smaller of the two 2x2-subgrid maxima within ``radius`` pixels (the demosaic's support):
+    on a 2x2 Bayer mosaic one subgrid holds the two G phases and the other holds R and B, so both
+    subgrids approach ``clip_level`` only when at least two distinct colour channels clip (and an
+    isolated 1-pixel firefly on one site is ignored), keeping monochromatic lights (such as a red
+    LED tail-lamp reflection whose G sites stay well below clip) coloured instead of bleaching them
+    to white. Display only; the raw data and the metrics are not touched."""
     if clip_level is None or clip_level <= 0:
         return rgb
     r = np.asarray(raw, dtype=np.float64)
-    pad = np.pad(r, radius, mode="edge")
+    pad = _pad_reflect_even(r, radius)
     h, w = r.shape
-    m = np.full((h, w), -np.inf)
+    yy, xx = np.ogrid[:h, :w]
+    m_diag = np.full((h, w), -np.inf)  # same (y + x) % 2 parity as (0, 0)
+    m_anti = np.full((h, w), -np.inf)  # opposite (y + x) % 2 parity
     for dy in range(2 * radius + 1):
         for dx in range(2 * radius + 1):
-            m = np.maximum(m, pad[dy : dy + h, dx : dx + w])
+            v = pad[dy : dy + h, dx : dx + w]
+            same_parity = ((yy + dy + xx + dx) & 1) == 0
+            m_diag = np.where(same_parity, np.maximum(m_diag, v), m_diag)
+            m_anti = np.where(~same_parity, np.maximum(m_anti, v), m_anti)
+    m = np.minimum(m_diag, m_anti)
     wgt = np.clip((m / float(clip_level) - start) / (1.0 - start), 0.0, 1.0)[:, :, None]
     if not np.any(wgt):
         return rgb

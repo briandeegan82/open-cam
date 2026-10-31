@@ -37,6 +37,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import highway_materials as hmat
 import numpy as np
 from fetch_highway_assets import read_ply_positions
 
@@ -562,7 +563,10 @@ def glb_vehicle_include(model: str, info: dict, prep: Path, raw: Path, out_dir: 
                     f'Texture "{mn}:c" "spectrum" "scale" "spectrum tex" "{paint_spd}" "texture scale" "{mn}:lum"',
                 ]
                 refl = f'"texture reflectance" "{mn}:c"'
-            lines.append(f'MakeNamedMaterial "{mn}" "string type" "coateddiffuse" {refl} "float roughness" [0.01]')
+            lines.append(
+                f'MakeNamedMaterial "{mn}" "string type" "coateddiffuse" {refl}'
+                f' "float roughness" [{hmat.PAINT_ALPHA}] "bool remaproughness" false'
+            )
         elif is_glass_material(m):
             lines.append(f'MakeNamedMaterial "{mn}" "string type" "thindielectric" "float eta" [1.52]')
         elif any(w in name for w in ("pneu", "tyre", "tire", "rezina")):
@@ -604,7 +608,7 @@ def proxy_vehicle(model: str, paint_spd: str, inst: str, mesh, box) -> list[str]
     ln = spec["length_m"]
     return [
         f'MakeNamedMaterial "{inst}:paint" "string type" "coateddiffuse" "spectrum reflectance" "{paint_spd}"'
-        ' "float roughness" [0.01]',
+        f' "float roughness" [{hmat.PAINT_ALPHA}] "bool remaproughness" false',
         f'MakeNamedMaterial "{inst}:tire" "string type" "diffuse" "spectrum reflectance" "spd/rubber.spd"',
         f'NamedMaterial "{inst}:paint"',
         *mesh(*box(0, 0.5, 0, w, h - 0.5, ln)),

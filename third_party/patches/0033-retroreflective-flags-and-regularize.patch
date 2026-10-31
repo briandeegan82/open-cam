@@ -1,0 +1,31 @@
+--- a/src/pbrt/bxdfs.h
++++ b/src/pbrt/bxdfs.h
+@@ -417,8 +417,9 @@
+         SampledSpectrum fv = R * InvPi + Lobe(w, wi);
+         if (flip)
+             wi = -wi;
+-        return BSDFSample(fv, wi, pdf, R ? BxDFFlags::DiffuseReflection
+-                                         : BxDFFlags::GlossyReflection);
++        BxDFFlags sampledFlags =
++            (uc < pr || !R) ? BxDFFlags::GlossyReflection : BxDFFlags::DiffuseReflection;
++        return BSDFSample(fv, wi, pdf, sampledFlags);
+     }
+ 
+     PBRT_CPU_GPU
+@@ -440,7 +441,15 @@
+     std::string ToString() const;
+ 
+     PBRT_CPU_GPU
+-    void Regularize() {}
++    void Regularize() {
++        // Broaden the retroreflective lobe on indirect bounces while preserving total
++        // lobe energy (albedo ~ ra * exp(alpha0 / width) * width^2).
++        Float targetWidth = Radians(4.f);
++        if (width > 0 && width < targetWidth) {
++            ra *= Sqr(width / targetWidth) * std::exp(alpha0 * (1 / width - 1 / targetWidth));
++            width = targetWidth;
++        }
++    }
+ 
+     PBRT_CPU_GPU
+     BxDFFlags Flags() const {

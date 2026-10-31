@@ -23,8 +23,8 @@
   "night_wet": {
     "recipe": "default",
     "render": "highway_spectral_denoised.exr",
-    "exposure_scale_e_per_unit": 0.0003114477738986489,
-    "signal_e_mean_mono": 1549.669189453125,
+    "exposure_scale_e_per_unit": 0.0003103116814165728,
+    "signal_e_mean_mono": 1537.317138671875,
     "demosaic": "malvar"
   }
 }

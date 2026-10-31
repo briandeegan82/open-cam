@@ -72,6 +72,26 @@ class TestDemosaic(unittest.TestCase):
         with self.assertRaises(ValueError):
             demosaic_requested({"demosaic": "vng"})
 
+    def test_non_rggb_demosaic_does_not_wrap_bottom_row_to_top(self) -> None:
+        from apply_emva_noise import malvar_demosaic
+
+        mono = np.zeros((16, 16), dtype=np.float64)
+        mono[-1, :] = 1000.0  # bright bottom row, dark top row
+        for fn in (bilinear_demosaic, malvar_demosaic):
+            for pat in ("GBRG", "GRBG", "BGGR"):
+                rgb = fn(mono, pat)
+                self.assertEqual(float(rgb[0, :, :].max()), 0.0, f"{fn.__name__} {pat}")
+
+    def test_malvar_demosaic_clamps_overshoot_on_point_spike(self) -> None:
+        from apply_emva_noise import malvar_demosaic
+
+        mono = np.full((16, 16), 50.0, dtype=np.float64)
+        mono[8, 8] = 1000.0
+        for pat in ("RGGB", "GBRG", "GRBG", "BGGR"):
+            rgb = malvar_demosaic(mono, pat)
+            self.assertGreaterEqual(float(rgb.min()), 50.0 - 1e-4, pat)
+            self.assertLessEqual(float(rgb.max()), 1000.0 + 1e-4, pat)
+
 
 if __name__ == "__main__":
     unittest.main()
