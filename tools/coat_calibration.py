@@ -70,15 +70,16 @@ def base_reflectance(target, eta: float = 1.5, roughness: float = 0.0) -> np.nda
     return np.interp(target, rendered_reflectance(s, eta, roughness), s)
 
 
-def calibrate_scene(lines: list[str], spd_dir: Path, write_spd) -> tuple[list[str], dict]:
+def calibrate_scene(lines: list[str], spd_dir: Path, write_spd, extra: dict | None = None) -> tuple[list[str], dict]:
     """Point the coated uses of the measured spectra at their calibrated substrate spectra.
 
     Runs on the finished scene: a statement counts if it is a Texture (they feed the coated road) or a
     coateddiffuse; the Lambertian tires and lamp housings keep the measured spectrum. Returns the new
     lines and, per spectrum, the coat used and the fraction of the spectrum the coat cannot reach.
+    ``extra`` adds spectra (name -> roughness) that are coated in this scene only.
     """
     meta = {}
-    for name, rough in COAT_ROUGHNESS.items():
+    for name, rough in (COAT_ROUGHNESS | (extra or {})).items():
         src = spd_dir / f"{name}.spd"
         if src.is_file():
             d = np.loadtxt(src)
