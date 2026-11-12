@@ -28,11 +28,12 @@ LAYOUTS = [
     "RGBW_4X4",
     "RCCB",
     "RYYCY",
+    "MYYCY",
     "RCCG",
     "QUAD_BAYER",
     [["R", "G", "B"], ["G", "B", "R"], ["B", "R", "G"]],
 ]
-PEAKS = {"R": 610.0, "G": 540.0, "B": 460.0, "W": None, "C": None, "Ye": 575.0, "Cy": 495.0}
+PEAKS = {"R": 610.0, "G": 540.0, "B": 460.0, "W": None, "C": None, "Ye": 575.0, "Cy": 495.0, "Mg": 430.0}
 
 
 def _scene() -> np.ndarray:
@@ -326,7 +327,7 @@ def _channels(rgb: np.ndarray, names) -> np.ndarray:
     return np.stack([d[c] for c in names], -1)
 
 
-@pytest.mark.parametrize("layout", ["RGGB", "RCCB", "RYYCY", "RGBW_4X4"])
+@pytest.mark.parametrize("layout", ["RGGB", "RCCB", "RYYCY", "MYYCY", "RGBW_4X4"])
 def test_edge_demosaic_beats_gradient_on_a_zone_plate(layout) -> None:
     lay = cm.resolve_layout({"layout": layout})
     full = _channels(_zone_plate(), lay.channels)

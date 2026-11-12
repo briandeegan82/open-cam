@@ -75,6 +75,8 @@ PRESET_LAYOUTS: dict[str, tuple[tuple[str, ...], ...]] = {
     "RCCC": (("R", "C"), ("C", "C")),
     "RCCG": (("R", "C"), ("C", "G")),
     "RYYCY": (("R", "Ye"), ("Ye", "Cy")),
+    # All-complementary counterpart of RYYCy: magenta replaces red, yellow stays the luma channel.
+    "MYYCY": (("Mg", "Ye"), ("Ye", "Cy")),
     "RGGCY": (("R", "G"), ("G", "Cy")),
     "CMY": (("Cy", "Mg"), ("Mg", "Ye")),
     "CYGM": (("Cy", "Ye"), ("G", "Mg")),
