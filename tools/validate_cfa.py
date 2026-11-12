@@ -49,6 +49,7 @@ CASES = {
     "RGBW": ("RGBW", "none", "W", "RGBW"),
     "RCCB": ("RCCB", "none", "C", "RCCB (clear=W)"),
     "RYYCy": ("RYYCY", "none", "Ye", "RYYCy"),
+    "MYYCy": ("MYYCY", "none", "Ye", None),
     "Quad Bayer": ("QUAD_BAYER", "none", "G", "Quad Bayer"),
     "Quad Bayer 2x2 charge bin": ("QUAD_BAYER", "charge", "G", None),
 }
@@ -207,7 +208,8 @@ def main() -> None:
             row["luma_over_G_pipeline"] = row["mu_e_500lux_shot_read"] / (
                 results["cases"]["Bayer RGGB"]["mu_e_500lux_shot_read"] if results["cases"] else mu_a
             )
-            if ref_key:
+            # cfa_summary.json is now keyed by recipe; the reference columns stay empty without a match.
+            if ref_key and "mu_e_patch22_500lux" in ref["cfas"].get(ref_key, {}):
                 r = ref["cfas"][ref_key]
                 row["ref_mu_e_500lux"] = r["mu_e_patch22_500lux"]
                 row["ref_snr_db_10lux"] = r["snr_db_patch22_10lux"]

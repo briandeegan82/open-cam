@@ -25,6 +25,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import coat_calibration  # noqa: E402
 import highway_night as night  # noqa: E402
 import highway_wet as wet  # noqa: E402
 from build_highway_scene import (  # noqa: E402
@@ -364,10 +365,12 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
         L, wet_meta = wet.apply_materials(L, args, wl, spd, out_dir)
 
     scene_path = out_dir / "rural.pbrt"
+    L, coat_meta = coat_calibration.calibrate_scene(L, spd, write_spd)
     scene_path.write_text("\n".join(L) + "\n")
     manifest = {
         "scene": _rel(repo, scene_path),
         "generator": "tools/build_rural_scene.py",
+        "coat_calibration": coat_meta,
         "units": "metres; y up; road along +z; +x image-right; right-hand traffic",
         "film": {"type": args.film, "filename": film_out, "xresolution": args.xres, "yresolution": args.yres},
         "camera": {"eye": eye.tolist(), "target": target.tolist(), "type": args.camera, "fov_deg": args.fov},

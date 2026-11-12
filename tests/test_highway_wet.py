@@ -45,9 +45,9 @@ class TestWaterFilmOptics(unittest.TestCase):
     def test_wet_base_scale_nearly_linear(self) -> None:
         """One spectral scale per spd is valid across texture luminance x0.4..x1.6 (<10 %, documented)."""
         for a0 in (0.095, 0.155):
-            s0 = wet.wet_base_reflectance(a0) / a0
+            s0 = wet.wet_base_reflectance(a0, wet.ROUGHNESS["wet"]) / a0
             for f in (0.4, 1.6):
-                s = wet.wet_base_reflectance(a0 * f) / (a0 * f)
+                s = wet.wet_base_reflectance(a0 * f, wet.ROUGHNESS["wet"]) / (a0 * f)
                 self.assertLess(abs(s / s0 - 1), 0.10)
 
     def test_q0_vs_cie_tables(self) -> None:
@@ -186,7 +186,7 @@ class TestBuilderWet(unittest.TestCase):
             self.assertIn('"string materials" ["wet:film" "dry:asphalt"] "texture amount" "wet:track"', txt)
             dry = [ln for ln in txt.splitlines() if ln.startswith('Texture "dry:rw:A:aged"')]
             self.assertEqual(len(dry), 1)
-            self.assertIn('"spd/asphalt_aged.spd"', dry[0])
+            self.assertIn('"spd/coat_asphalt_aged.spd"', dry[0])
             t = m["road"]["wet"]["tyre_tracks"]
             self.assertGreater(t["dry_area_fraction"], 0.0)
             self.assertLess(t["dry_area_fraction"], 0.7)
@@ -216,7 +216,7 @@ class TestBuilderWet(unittest.TestCase):
             self.assertTrue(w["spray"]["vehicles"])
             wet_r = np.loadtxt(out / "spd" / "wet_asphalt_aged.spd")[:, 1]
             dry_r = np.loadtxt(out / "spd" / "asphalt_aged.spd")[:, 1]
-            np.testing.assert_allclose(wet_r, wet.wet_base_reflectance(dry_r), rtol=1e-5)
+            np.testing.assert_allclose(wet_r, wet.wet_base_reflectance(dry_r, wet.ROUGHNESS["wet"]), rtol=1e-5)
 
     def test_wet_night_markings_and_haze(self) -> None:
         with tempfile.TemporaryDirectory() as td:

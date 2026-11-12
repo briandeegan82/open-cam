@@ -40,6 +40,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import coat_calibration  # noqa: E402
 import road_rtable as rt  # noqa: E402
 import tunnel_interreflection as ti  # noqa: E402
 from build_highway_scene import (  # noqa: E402
@@ -829,6 +830,7 @@ def build(args: argparse.Namespace) -> dict:  # noqa: C901 (linear scene assembl
             ]
         L.append("")
         scene = out_dir / f"tunnel_{view}.pbrt"
+        L, coat_meta = coat_calibration.calibrate_scene(L, spd, write_spd)
         scene.write_text("\n".join(L))
 
         rear = tg["z"] - 2.3
@@ -889,6 +891,7 @@ def build(args: argparse.Namespace) -> dict:  # noqa: C901 (linear scene assembl
         dr = 20.0 * math.log10(rois[bright]["predicted_luminance_cd_m2"] / rois[dark]["predicted_luminance_cd_m2"])
         manifest = {
             "scene": scene.name,
+            "coat_calibration": coat_meta,
             "film_output": film_out,
             "view": view,
             **common,

@@ -28,11 +28,12 @@ LAYOUTS = [
     "RGBW_4X4",
     "RCCB",
     "RYYCY",
+    "MYYCY",
     "RCCG",
     "QUAD_BAYER",
     [["R", "G", "B"], ["G", "B", "R"], ["B", "R", "G"]],
 ]
-PEAKS = {"R": 610.0, "G": 540.0, "B": 460.0, "W": None, "C": None, "Ye": 575.0, "Cy": 495.0}
+PEAKS = {"R": 610.0, "G": 540.0, "B": 460.0, "W": None, "C": None, "Ye": 575.0, "Cy": 495.0, "Mg": 430.0}
 
 
 def _scene() -> np.ndarray:
@@ -326,7 +327,7 @@ def _channels(rgb: np.ndarray, names) -> np.ndarray:
     return np.stack([d[c] for c in names], -1)
 
 
-@pytest.mark.parametrize("layout", ["RGGB", "RCCB", "RYYCY", "RGBW_4X4"])
+@pytest.mark.parametrize("layout", ["RGGB", "RCCB", "RYYCY", "MYYCY", "RGBW_4X4"])
 def test_edge_demosaic_beats_gradient_on_a_zone_plate(layout) -> None:
     lay = cm.resolve_layout({"layout": layout})
     full = _channels(_zone_plate(), lay.channels)
@@ -429,6 +430,16 @@ def test_desaturate_near_clip_whitens_fringes_only():
     assert np.ptp(out[:, 8], axis=-1).max() < 1e-12  # at the clip: neutral
     np.testing.assert_allclose(out[:, 8].mean(axis=-1), 0.9)  # brightest channel kept: white, not grey
     assert cm.desaturate_near_clip(rgb, raw, None) is rgb
+
+    # A monochromatic red lamp clipped only on R sites (even, even) must stay red, not bleach to white;
+    # and an isolated 1-pixel firefly must not trigger a 5x5 grey block.
+    red_rgb = np.ones((8, 8, 3)) * np.array([0.95, 0.25, 0.10])
+    red_raw = np.full((8, 8), 200.0)
+    red_raw[0::2, 0::2] = 1000.0  # only R sites clipped
+    np.testing.assert_array_equal(cm.desaturate_near_clip(red_rgb, red_raw, 1000.0, radius=2), red_rgb)
+    spike_raw = np.full((8, 8), 100.0)
+    spike_raw[4, 4] = 1000.0  # single-site firefly
+    np.testing.assert_array_equal(cm.desaturate_near_clip(rgb[:8, :8], spike_raw, 1000.0, radius=2), rgb[:8, :8])
 
 
 @pytest.mark.parametrize("pattern", ["RGGB", "BGGR", "GRBG", "GBRG"])

@@ -1,9 +1,9 @@
 {
   "gbrg_bilinear_uniform_xtalk": {
-    "clean_demosaic_rgb8.png": "6348e47f73a2c0fb0048611c0e1121eb8c5282a9d3a46dc878080f95a54aff6c",
+    "clean_demosaic_rgb8.png": "1c68f82406f49d025465181956db31cc7f9c15ce43d27098c2f183f0d2eba75b",
     "clean_rgb8.png": "8b11eaf7dc49d688bbab833c8a69185ebe8fd2d7e907e2bcaf7c2c015abf750e",
     "noisy.raw16": "e7f93ac7171f13e8162419cceeb41c72c74b91370d9f061a424e00829ed22540",
-    "noisy_demosaic_rgb8.png": "40a8c132cd13aca59f03079029ac0e4f941152bd373ad0b853a72fc122cf821e",
+    "noisy_demosaic_rgb8.png": "6311d2d08741a1ce8097a49304803d10d168ba899b7ec2323b32c3fda55da456",
     "noisy_mono_16.png": "acddd0ea2929f03518d3fe617ff435ab9d42e1aa06707ce26c21bafb06172a64",
     "noisy_rgb8.png": "5cdca2ac02b66f351c8c6062891fa5223f1fe9b79cbef33fd760eb6afe1c5bb9"
   },
@@ -16,10 +16,10 @@
     "noisy_rgb8.png": "50f3b0e503b56c648809571369e04ea3eda37ec54fd08ee6215e37eb0a640b67"
   },
   "rggb_malvar_xtalk_integrate_qe": {
-    "clean_demosaic_rgb8.png": "d67d88e96bdb61c213cb9ff9d87de50095d724b4caed38de202053f334be1c88",
+    "clean_demosaic_rgb8.png": "5bda25b43d39381f42fd71014a8569ac05c2a5ccc3a2635a38cc9cb0cee31d8e",
     "clean_rgb8.png": "0defd035026eab48d06791a254d3e6f5f0c76ff0c26374bf6b68f9b228c00ed3",
     "noisy.raw16": "ed8c9a98ee2e1d7c5aaad178603b97c7e472d9ff60d75fdb10ae2a75e0c0b508",
-    "noisy_demosaic_rgb8.png": "f725205e33dbc5db52bfff2e72cf7c882b32d45026191365447c92bb1100bfb8",
+    "noisy_demosaic_rgb8.png": "5c6b2fc1f4d77fdbe6b1b2a8697b13318305081bb8fd8fab4016c25276c55e82",
     "noisy_mono_16.png": "6319705f8e92fe793a725a494b0c3c55577ac5a7c66a1d783b3acfdce8aef0e0",
     "noisy_rgb8.png": "fcb21e27bb0f0484768266934a2615e8a9e8cf11ff922af12891eec94b53409e"
   }

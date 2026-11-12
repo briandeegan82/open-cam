@@ -10,7 +10,7 @@ build (`PBRT_LAMBDA_MAX_NM`) pbrt keeps its stock 360-830 nm range.
 
 * **Layout**: any periodic NxM tile of channel names, or a preset
   (`RGGB`, `BGGR`, `GRBG`, `GBRG`, `RGBW`, `RGBW_4X4`, `RCCB`, `RCCC`, `RCCG`, `RYYCY`,
-  `RGGCY`, `CMY`, `QUAD_BAYER`). Set in the sensor model under `cfa.layout`.
+  `MYYCY`, `RGGCY`, `CMY`, `QUAD_BAYER`). Set in the sensor model under `cfa.layout`.
 * **Per-channel spectral QE**: `cfa.channels.<name>.qe_csv` (wavelength_nm,qe CSV in
   `spectra/`), default mapping `cfa_mosaic.DEFAULT_CHANNEL_QE` (`W`/`C` = unfiltered
   `QE_mono.csv`, `Ye`/`Cy`/`Mg` = `QE_yellow/cyan/magenta.csv`). Electrons are integrated **per
@@ -74,7 +74,7 @@ build (`PBRT_LAMBDA_MAX_NM`) pbrt keeps its stock 360-830 nm range.
   Sharma, Wu & Dalal, Color Res. Appl. 30(1), 21-30 (2005) (existing `color_science.delta_e2000`).
 
 Recipes using it: `default_rgbw`, `default_rgbw_4x4`, `default_rccb`, `default_rccg`,
-`default_ryycy`, `default_rggcy`, `default_cmy`, `default_quad_bayer` (charge binning),
+`default_ryycy`, `default_myycy`, `default_rggcy`, `default_cmy`, `default_quad_bayer` (charge binning),
 `default_rgb_noircf`, `default_rccc_noircf` (`config/camera_recipes/`). **Change**: the former
 RGB/QE-proxy versions of `default_rccb/ryycy/rccg/rggcy/cmy` are now true CFAs; the old proxy
 behaviour is available by setting `cfa.layout: null` and `cfa.demosaic: malvar` in the sensor

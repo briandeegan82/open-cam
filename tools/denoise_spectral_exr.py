@@ -153,7 +153,32 @@ class OidnRunner:
         self._tmp.cleanup()
 
 
-def denoise_stack(stack: np.ndarray, denoise) -> tuple[np.ndarray, float]:
+def clamp_fireflies(stack: np.ndarray, max_ratio: float = 20.0) -> tuple[np.ndarray, int]:
+    """Clamp extreme isolated spatial outliers before OIDN so 1000x fireflies do not ring or amplify.
+
+    A pixel is clamped only when its plane value exceeds ``max_ratio`` times the second-largest
+    value in its 3x3 neighbourhood (so 2-pixel features and lines are never touched, only single-
+    pixel Monte Carlo spikes). Returns ``(clamped_stack, n_pixels_clamped)``.
+    """
+    if max_ratio <= 0 or stack.size == 0:
+        return stack, 0
+    pad = np.pad(stack, ((1, 1), (1, 1), (0, 0)), mode="edge")
+    h, w, _ = stack.shape
+    m1 = np.full_like(stack, -np.inf)
+    m2 = np.full_like(stack, -np.inf)
+    for dy in range(3):
+        for dx in range(3):
+            v = pad[dy : dy + h, dx : dx + w]
+            swap = v > m1
+            m2 = np.where(swap, m1, np.maximum(m2, v))
+            m1 = np.where(swap, v, m1)
+    floor = float(np.percentile(stack, 99)) * 0.1 if stack.size >= 16 else 0.0
+    cap = np.maximum(max_ratio * m2, floor)
+    over = (m2 > 0) & (stack > cap)
+    return np.where(over, cap, stack), int(np.any(over, axis=2).sum())
+
+
+def denoise_stack(stack: np.ndarray, denoise, max_firefly_ratio: float = 20.0) -> tuple[np.ndarray, float]:
     """Denoise HxWxK planes three at a time; returns ``(denoised, fraction of negative samples clipped)``.
 
     OIDN treats a triplet as one colour image, so adjacent buckets share edge decisions without being mixed.
@@ -161,7 +186,7 @@ def denoise_stack(stack: np.ndarray, denoise) -> tuple[np.ndarray, float]:
     """
     stack = np.asarray(stack, dtype=np.float32)
     neg = float((stack < 0).mean()) if stack.size else 0.0
-    src = np.maximum(stack, 0.0)
+    src, _ = clamp_fireflies(np.maximum(stack, 0.0), max_firefly_ratio)
     out = np.empty_like(src)
     k = src.shape[2]
     for i in range(0, k, 3):

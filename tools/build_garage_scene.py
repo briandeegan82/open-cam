@@ -26,6 +26,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import coat_calibration  # noqa: E402
 import highway_night as night  # noqa: E402
 from build_highway_scene import (  # noqa: E402
     _f,
@@ -428,11 +429,13 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901 (linear scene ass
     write_car_includes(L, car_l0, car_bodies, out_dir / "cars")
 
     scene_path = out_dir / "garage.pbrt"
+    L, coat_meta = coat_calibration.calibrate_scene(L, spd, write_spd, extra={"concrete": 0.25})
     scene_path.write_text("\n".join(L) + "\n")
     lit = [m for m in lum_meta if m["on"]]
     manifest = {
         "scene": _rel(repo, scene_path),
         "generator": "tools/build_garage_scene.py",
+        "coat_calibration": coat_meta,
         "units": "metres; y up; aisle along +z; +x right of the ego car",
         "film": {"type": args.film, "filename": film_out, "xresolution": args.xres, "yresolution": args.yres},
         "camera": {

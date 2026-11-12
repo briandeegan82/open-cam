@@ -1,0 +1,735 @@
+--- a/src/pbrt/base/lightsampler.h
++++ b/src/pbrt/base/lightsampler.h
+@@ -42,6 +42,15 @@
+ 
+     PBRT_CPU_GPU inline Float PMF(const LightSampleContext &ctx, Light light) const;
+ 
++    // open-cam (patch 0035): light strata. An integrator that draws one light from each of
++    // the NStrata() strata at a vertex (SampleStratum) and uses PMFStratum() for the MIS
++    // weight of an emitter it hits gets the same expected value as with Sample()/PMF().
++    // Every sampler but the split "bvh" has one stratum, for which these are Sample()/PMF().
++    PBRT_CPU_GPU inline int NStrata() const;
++    PBRT_CPU_GPU inline pstd::optional<SampledLight> SampleStratum(
++        const LightSampleContext &ctx, Float u, int stratum) const;
++    PBRT_CPU_GPU inline Float PMFStratum(const LightSampleContext &ctx, Light light) const;
++
+     PBRT_CPU_GPU inline pstd::optional<SampledLight> Sample(Float u) const;
+     PBRT_CPU_GPU inline Float PMF(Light light) const;
+ };
+--- a/src/pbrt/cpu/integrators.cpp
++++ b/src/pbrt/cpu/integrators.cpp
+@@ -751,7 +751,7 @@
+                     L += beta * Le;
+                 else {
+                     // Compute MIS weight for infinite light
+-                    Float p_l = lightSampler.PMF(prevIntrCtx, light) *
++                    Float p_l = lightSampler.PMFStratum(prevIntrCtx, light) *
+                                 light.PDF_Li(prevIntrCtx, ray.d, true);
+                     Float w_b = PowerHeuristic(1, p_b, 1, p_l);
+ 
+@@ -769,7 +769,7 @@
+             else {
+                 // Compute MIS weight for area light
+                 Light areaLight(si->intr.areaLight);
+-                Float p_l = lightSampler.PMF(prevIntrCtx, areaLight) *
++                Float p_l = lightSampler.PMFStratum(prevIntrCtx, areaLight) *
+                             areaLight.PDF_Li(prevIntrCtx, ray.d, true);
+                 Float w_l = PowerHeuristic(1, p_b, 1, p_l);
+ 
+@@ -879,9 +879,24 @@
+     else if (IsTransmissive(flags) && !IsReflective(flags))
+         ctx.pi = intr.OffsetRayOrigin(-intr.wo);
+ 
++    // open-cam (patch 0035): one light from each stratum of the light sampler (one stratum,
++    // i.e. stock behaviour, unless the scene has goniometric lamps and other lights).
++    SampledSpectrum Ld(0.f);
++    for (int stratum = 0, nStrata = lightSampler.NStrata(); stratum < nStrata; ++stratum)
++        Ld += SampleLdStratum(intr, bsdf, ctx, stratum, lambda, sampler,
++                              anyNonSpecularBounces);
++    return Ld;
++}
++
++SampledSpectrum PathIntegrator::SampleLdStratum(const SurfaceInteraction &intr,
++                                                const BSDF *bsdf,
++                                                const LightSampleContext &ctx, int stratum,
++                                                SampledWavelengths &lambda, Sampler sampler,
++                                                bool anyNonSpecularBounces) const {
+     // Choose a light source for the direct lighting calculation
+     Float u = sampler.Get1D();
+-    pstd::optional<SampledLight> sampledLight = lightSampler.Sample(ctx, u);
++    pstd::optional<SampledLight> sampledLight =
++        lightSampler.SampleStratum(ctx, u, stratum);
+     Point2f uLight = sampler.Get2D();
+     if (!sampledLight)
+         return {};
+@@ -1022,6 +1037,10 @@
+     SampledSpectrum SampleLd(const SurfaceInteraction &intr, const BSDF *bsdf,
+                              SampledWavelengths &lambda, Sampler sampler,
+                              const Guide &guide) const;
++    SampledSpectrum SampleLdStratum(const SurfaceInteraction &intr, const BSDF *bsdf,
++                                    const LightSampleContext &ctx, int stratum,
++                                    SampledWavelengths &lambda, Sampler sampler,
++                                    const Guide &guide) const;
+ 
+     int maxDepth;
+     LightSampler lightSampler;
+@@ -1081,7 +1100,7 @@
+                 if (depth == 0 || specularBounce)
+                     L += beta * Le;
+                 else {
+-                    Float p_l = lightSampler.PMF(prevIntrCtx, light) *
++                    Float p_l = lightSampler.PMFStratum(prevIntrCtx, light) *
+                                 light.PDF_Li(prevIntrCtx, ray.d, true);
+                     L += beta * PowerHeuristic(1, p_b, 1, p_l) * Le;
+                 }
+@@ -1107,7 +1126,7 @@
+                 L += beta * Le;
+             else {
+                 Light areaLight(isect.areaLight);
+-                Float p_l = lightSampler.PMF(prevIntrCtx, areaLight) *
++                Float p_l = lightSampler.PMFStratum(prevIntrCtx, areaLight) *
+                             areaLight.PDF_Li(prevIntrCtx, ray.d, true);
+                 L += beta * PowerHeuristic(1, p_b, 1, p_l) * Le;
+             }
+@@ -1264,8 +1283,22 @@
+     else if (IsTransmissive(flags) && !IsReflective(flags))
+         ctx.pi = intr.OffsetRayOrigin(-intr.wo);
+ 
++    // open-cam (patch 0035): one light from each stratum of the light sampler
++    SampledSpectrum Ld(0.f);
++    for (int stratum = 0, nStrata = lightSampler.NStrata(); stratum < nStrata; ++stratum)
++        Ld += SampleLdStratum(intr, bsdf, ctx, stratum, lambda, sampler, guide);
++    return Ld;
++}
++
++SampledSpectrum GuidedPathIntegrator::SampleLdStratum(const SurfaceInteraction &intr,
++                                                      const BSDF *bsdf,
++                                                      const LightSampleContext &ctx,
++                                                      int stratum, SampledWavelengths &lambda,
++                                                      Sampler sampler,
++                                                      const Guide &guide) const {
+     Float u = sampler.Get1D();
+-    pstd::optional<SampledLight> sampledLight = lightSampler.Sample(ctx, u);
++    pstd::optional<SampledLight> sampledLight =
++        lightSampler.SampleStratum(ctx, u, stratum);
+     Point2f uLight = sampler.Get2D();
+     if (!sampledLight)
+         return {};
+@@ -1578,7 +1611,7 @@
+                         L += beta * Le / r_u.Average();
+                     else {
+                         // Add infinite light contribution using both PDFs with MIS
+-                        Float p_l = lightSampler.PMF(prevIntrContext, light) *
++                        Float p_l = lightSampler.PMFStratum(prevIntrContext, light) *
+                                     light.PDF_Li(prevIntrContext, ray.d, true);
+                         r_l *= p_l;
+                         L += beta * Le / (r_u + r_l).Average();
+@@ -1597,7 +1630,7 @@
+             else {
+                 // Add surface light contribution using both PDFs with MIS
+                 Light areaLight(isect.areaLight);
+-                Float p_l = lightSampler.PMF(prevIntrContext, areaLight) *
++                Float p_l = lightSampler.PMFStratum(prevIntrContext, areaLight) *
+                             areaLight.PDF_Li(prevIntrContext, ray.d, true);
+                 r_l *= p_l;
+                 L += beta * Le / (r_u + r_l).Average();
+@@ -1806,9 +1839,22 @@
+     } else
+         ctx = LightSampleContext(intr);
+ 
++    // open-cam (patch 0035): one light from each stratum of the light sampler
++    SampledSpectrum Ld(0.f);
++    for (int stratum = 0, nStrata = lightSampler.NStrata(); stratum < nStrata; ++stratum)
++        Ld += SampleLdStratum(intr, bsdf, ctx, stratum, lambda, sampler, beta, r_p);
++    return Ld;
++}
++
++SampledSpectrum VolPathIntegrator::SampleLdStratum(const Interaction &intr, const BSDF *bsdf,
++                                                   const LightSampleContext &ctx, int stratum,
++                                                   SampledWavelengths &lambda, Sampler sampler,
++                                                   SampledSpectrum beta,
++                                                   SampledSpectrum r_p) const {
+     // Sample a light source using _lightSampler_
+     Float u = sampler.Get1D();
+-    pstd::optional<SampledLight> sampledLight = lightSampler.Sample(ctx, u);
++    pstd::optional<SampledLight> sampledLight =
++        lightSampler.SampleStratum(ctx, u, stratum);
+     Point2f uLight = sampler.Get2D();
+     if (!sampledLight)
+         return SampledSpectrum(0.f);
+--- a/src/pbrt/cpu/integrators.h
++++ b/src/pbrt/cpu/integrators.h
+@@ -232,6 +232,10 @@
+     SampledSpectrum SampleLd(const SurfaceInteraction &intr, const BSDF *bsdf,
+                              SampledWavelengths &lambda, Sampler sampler,
+                              bool anyNonSpecularBounces = false) const;
++    SampledSpectrum SampleLdStratum(const SurfaceInteraction &intr, const BSDF *bsdf,
++                                    const LightSampleContext &ctx, int stratum,
++                                    SampledWavelengths &lambda, Sampler sampler,
++                                    bool anyNonSpecularBounces) const;
+ 
+     // PathIntegrator Private Members
+     int maxDepth;
+@@ -290,6 +294,10 @@
+     SampledSpectrum SampleLd(const Interaction &intr, const BSDF *bsdf,
+                              SampledWavelengths &lambda, Sampler sampler,
+                              SampledSpectrum beta, SampledSpectrum inv_w_u) const;
++    SampledSpectrum SampleLdStratum(const Interaction &intr, const BSDF *bsdf,
++                                    const LightSampleContext &ctx, int stratum,
++                                    SampledWavelengths &lambda, Sampler sampler,
++                                    SampledSpectrum beta, SampledSpectrum inv_w_u) const;
+ 
+     // VolPathIntegrator Private Members
+     int maxDepth;
+--- a/src/pbrt/lights.cpp
++++ b/src/pbrt/lights.cpp
+@@ -880,6 +880,46 @@
+     return Pi * (twoSided ? 2 : 1) * area * L;
+ }
+ 
++// open-cam (patch 0035): cone (light space) that holds every direction an angular map emits
++// in: axis = the map's mean direction, cosMax = the widest emitting texel, with a margin of
++// two texels for the bilinear lookup. Cached per map.
++static bool AngularMapCone(const Image *angular, Vector3f *axis, Float *cosMax) {
++    struct Cone {
++        Vector3f axis;
++        Float cosMax;
++        bool valid;
++    };
++    static std::mutex mutex;
++    static std::map<const Image *, Cone> cache;
++    std::lock_guard<std::mutex> lock(mutex);
++    auto it = cache.find(angular);
++    if (it == cache.end()) {
++        int n = angular->Resolution().x;
++        Vector3f sum(0, 0, 0);
++        for (int y = 0; y < n; ++y)
++            for (int x = 0; x < n; ++x)
++                sum += angular->GetChannel({x, y}, 0) *
++                       EqualAreaSquareToSphere(Point2f((x + 0.5f) / n, (y + 0.5f) / n));
++        Cone cone{Vector3f(0, 0, 1), -1, false};
++        if (LengthSquared(sum) > 0) {
++            cone.axis = Normalize(sum);
++            Float c = 1;
++            for (int y = 0; y < n; ++y)
++                for (int x = 0; x < n; ++x)
++                    if (angular->GetChannel({x, y}, 0) > 0)
++                        c = std::min(c, Dot(cone.axis, EqualAreaSquareToSphere(Point2f(
++                                                           (x + 0.5f) / n, (y + 0.5f) / n))));
++            Float theta = SafeACos(c) + 2 * std::sqrt(4 * Pi) / n;
++            cone.cosMax = theta < Pi ? std::cos(theta) : -1;
++            cone.valid = theta < Pi;
++        }
++        it = cache.emplace(angular, cone).first;
++    }
++    *axis = it->second.axis;
++    *cosMax = it->second.cosMax;
++    return it->second.valid;
++}
++
+ pstd::optional<LightBounds> DiffuseAreaLight::Bounds() const {
+     // Compute _phi_ for diffuse area light bounds
+     Float phi = 0;
+@@ -896,6 +936,15 @@
+         phi = Lemit->MaxValue();
+     phi *= scale * area * Pi;
+ 
++    // open-cam (patch 0035): a light with an angular map emits where the map does, which
++    // the light tree should know: the cells of a rear lamp that wraps round the body corner
++    // face sideways, but emit nothing forwards.
++    Vector3f axis;
++    Float cosMax;
++    if (angular && AngularMapCone(angular, &axis, &cosMax))
++        return LightBounds(shape.Bounds(), Normalize(renderFromLight(axis)), phi, 1,
++                           cosMax, false);
++
+     DirectionCone nb = shape.NormalBounds();
+     return LightBounds(shape.Bounds(), nb.w, phi, nb.cosTheta, std::cos(Pi / 2),
+                        twoSided);
+--- a/src/pbrt/lights.h
++++ b/src/pbrt/lights.h
+@@ -86,7 +86,7 @@
+     LightSampleContext() = default;
+     PBRT_CPU_GPU
+     LightSampleContext(const SurfaceInteraction &si)
+-        : pi(si.pi), n(si.n), ns(si.shading.n) {}
++        : pi(si.pi), n(si.n), ns(si.shading.n), wo(si.wo) {}
+     PBRT_CPU_GPU
+     LightSampleContext(const Interaction &intr) : pi(intr.pi) {}
+     PBRT_CPU_GPU
+@@ -98,6 +98,7 @@
+     // LightSampleContext Public Members
+     Point3fi pi;
+     Normal3f n, ns;
++    Vector3f wo;
+ };
+ 
+ // LightBounds Definition
+@@ -504,6 +505,21 @@
+     PBRT_CPU_GPU
+     Float PDF_Li(LightSampleContext ctx, Vector3f wi, bool allowIncompletePDF) const;
+ 
++    // open-cam (patch 0035): the "angularfilename" factor toward render-space direction w,
++    // for the light sampler; lights of one lamp share the map and the frame.
++    PBRT_CPU_GPU
++    bool HasAngularMap() const { return angular != nullptr; }
++    PBRT_CPU_GPU
++    bool SameAngularFrame(const DiffuseAreaLight &o) const {
++        return angular == o.angular && renderFromLight == o.renderFromLight;
++    }
++    PBRT_CPU_GPU
++    Float AngularFactor(Vector3f w) const {
++        Vector3f wl = Normalize(renderFromLight.ApplyInverse(w));
++        return angular->BilerpChannel(EqualAreaSphereToSquare(wl), 0,
++                                      WrapMode::OctahedralSphere);
++    }
++
+   private:
+     // DiffuseAreaLight Private Members
+     Shape shape;
+--- a/src/pbrt/lightsamplers.cpp
++++ b/src/pbrt/lightsamplers.cpp
+@@ -57,7 +57,8 @@
+         for (Light light : lights)
+             nGonio += light.Is<GoniometricLight>();
+         bool exact = nGonio > 0 && nGonio <= 256;
+-        return alloc.new_object<BVHLightSampler>(lights, alloc, !exact, false, exact);
++        // open-cam (patch 0035): and they are a stratum of their own (see BVHLightSampler).
++        return alloc.new_object<BVHLightSampler>(lights, alloc, !exact, false, exact, exact);
+     } else if (name == "bvhbeam")  // open-cam: patch 0022 mean/peak tree mixture
+         return alloc.new_object<BVHLightSampler>(lights, alloc);
+     else if (name == "bvhmean")  // open-cam: stock pbrt BVH (mean-intensity bounds only)
+@@ -119,32 +120,35 @@
+ 
+ // BVHLightSampler Method Definitions
+ BVHLightSampler::BVHLightSampler(pstd::span<const Light> lights, Allocator alloc,
+-                                 bool beamMix, bool peakBeams, bool exactBeams)
++                                 bool beamMix, bool peakBeams, bool exactBeams,
++                                 bool splitStrata, bool beamAware)
+     : lights(lights.begin(), lights.end(), alloc),
+       infiniteLights(alloc),
+       nodes(alloc),
+       lightToBitTrail(alloc),
+       exactBeams(exactBeams),
++      splitStrata(splitStrata),
++      nodeBeam(alloc),
++      beamLights(alloc),
+       gonio(alloc),
+-      gonioBounds(alloc) {
++      gonioP(alloc),
++      gonioPhi(alloc) {
+     if (exactBeams) {
+         std::vector<Light> others;
+-        std::vector<LightBounds> gb;
+         for (Light light : lights) {
+             pstd::optional<LightBounds> lb = light.Bounds();
+             if (!lb || lb->phi <= 0)
+                 continue;
+             else if (light.Is<GoniometricLight>()) {
+                 gonio.push_back(light);
+-                gb.push_back(*lb);
+-                gonioAllBounds = Union(gonioAllBounds, lb->bounds);
++                gonioP.push_back(lb->Centroid());
++                gonioPhi.push_back(lb->phi);
+             } else
+                 others.push_back(light);
+         }
+-        for (const LightBounds &lb : gb)
+-            gonioBounds.push_back(CompactLightBounds(lb, gonioAllBounds));
+         if (!others.empty())
+-            rest = alloc.new_object<BVHLightSampler>(others, alloc, false, false, false);
++            rest = alloc.new_object<BVHLightSampler>(others, alloc, false, false, false,
++                                                     false, splitStrata);
+     }
+     // Initialize _infiniteLights_ array and light BVH
+     std::vector<std::pair<int, LightBounds>> bvhLights;
+@@ -164,6 +168,28 @@
+     }
+     if (!bvhLights.empty())
+         buildBVH(bvhLights, 0, bvhLights.size(), 0, 0);
++    if (beamAware && !nodes.empty()) {
++        // open-cam (patch 0035): mark the nodes that hold the cells of one beam-mapped lamp
++        nodeBeam.assign(nodes.size(), NodeBeams());
++        AssignBeams(0);
++        if (beamLights.empty())
++            nodeBeam.clear();
++    }
++    if (splitStrata && !infiniteLights.empty()) {
++        // open-cam (patch 0035): mean irradiance of the infinite lights, pi x mean radiance,
++        // as the mean of L / pdf over the sphere (= the integral of L) / 4
++        SampledWavelengths lambda = SampledWavelengths::SampleUniform(0.5f);
++        LightSampleContext ctx;
++        ctx.pi = Point3fi((allLightBounds.pMin + allLightBounds.pMax) / 2);
++        constexpr int nSamples = 256;
++        for (Light light : infiniteLights)
++            for (int i = 0; i < nSamples; ++i) {
++                Point2f u(RadicalInverse(0, i), RadicalInverse(1, i));
++                pstd::optional<LightLiSample> ls = light.SampleLi(ctx, u, lambda, false);
++                if (ls && ls->pdf > 0)
++                    infiniteE += ls->L.MaxComponentValue() / ls->pdf / (4 * nSamples);
++            }
++    }
+     lightBVHBytes += nodes.size() * sizeof(LightBVHNode) +
+                      lightToBitTrail.capacity() * sizeof(uint32_t) +
+                      lights.size() * sizeof(Light) +
+@@ -177,6 +203,48 @@
+             }
+ }
+ 
++BVHLightSampler::NodeBeams BVHLightSampler::AssignBeams(int nodeIndex) {
++    const LightBVHNode &node = nodes[nodeIndex];
++    NodeBeams nb;
++    if (node.isLeaf) {
++        Light light = lights[node.childOrLightIndex];
++        const DiffuseAreaLight *al =
++            light.Is<DiffuseAreaLight>() ? light.Cast<DiffuseAreaLight>() : nullptr;
++        if (al && al->HasAngularMap()) {
++            for (size_t i = 0; i < beamLights.size() && nb.lamp[0] == 0; ++i)
++                if (beamLights[i]->SameAngularFrame(*al))
++                    nb.lamp[0] = uint16_t(i + 1);
++            if (nb.lamp[0] == 0 && beamLights.size() < 65535) {
++                beamLights.push_back(al);
++                nb.lamp[0] = uint16_t(beamLights.size());
++            }
++        }
++    } else {
++        // The lamps of both children, if each has some and they are few enough together
++        NodeBeams c[2] = {AssignBeams(nodeIndex + 1), AssignBeams(node.childOrLightIndex)};
++        if (c[0].lamp[0] != 0 && c[1].lamp[0] != 0) {
++            int n = 0;
++            bool fits = true;
++            for (const NodeBeams &child : c)
++                for (int k = 0; k < maxNodeBeams && child.lamp[k] != 0; ++k) {
++                    bool have = false;
++                    for (int m = 0; m < n; ++m)
++                        have |= nb.lamp[m] == child.lamp[k];
++                    if (have)
++                        continue;
++                    if (n == maxNodeBeams)
++                        fits = false;
++                    else
++                        nb.lamp[n++] = child.lamp[k];
++                }
++            if (!fits)
++                nb = NodeBeams();
++        }
++    }
++    nodeBeam[nodeIndex] = nb;
++    return nb;
++}
++
+ std::pair<int, LightBounds> BVHLightSampler::buildBVH(
+     std::vector<std::pair<int, LightBounds>> &bvhLights, int start, int end,
+     uint32_t bitTrail, int depth) {
+--- a/src/pbrt/lightsamplers.h
++++ b/src/pbrt/lightsamplers.h
+@@ -272,8 +272,89 @@
+     // stock tree. The mixture keeps at least half the stock pmf for every light, so lamps the
+     // exact half under-samples (e.g. tail lamps seen in a wet road under a low beam) do not
+     // get noisier than half-rate stock sampling, and the estimate stays unbiased.
++    // open-cam (patch 0035): with splitStrata (and exactBeams) the goniometric lamps and all
++    // other lights are two strata. The CPU path integrators then draw one light from each at
++    // every vertex instead of one light from the mixture: lamps picked by their exact score,
++    // the others by the stock tree. Which of the two groups lights a point is then no longer
++    // a random choice, which was most of the noise of a night road. Sample()/PMF() are
++    // unchanged, for integrators that take one light per vertex.
+     BVHLightSampler(pstd::span<const Light> lights, Allocator alloc, bool beamMix = true,
+-                    bool peakBeams = false, bool exactBeams = false);
++                    bool peakBeams = false, bool exactBeams = false,
++                    bool splitStrata = false, bool beamAware = false);
++
++    PBRT_CPU_GPU
++    int NStrata() const {
++        bool others = !infiniteLights.empty() || (rest && !rest->nodes.empty());
++        return (splitStrata && exactBeams && !gonio.empty() && others) ? 2 : 1;
++    }
++
++    PBRT_CPU_GPU
++    pstd::optional<SampledLight> SampleStratum(const LightSampleContext &ctx, Float u,
++                                               int stratum) const {
++        if (NStrata() == 1)
++            return Sample(ctx, u);
++        if (stratum == 0) {
++            // Goniometric lamps, by their exact score (one pass: the scores are kept)
++            constexpr size_t maxKept = 256;
++            Float kept[maxKept];
++            Float wG = 0;
++            for (size_t i = 0; i < gonio.size(); ++i) {
++                Float w = GonioImportance(i, ctx);
++                if (i < maxKept)
++                    kept[i] = w;
++                wG += w;
++            }
++            if (!(wG > 0))
++                return {};
++            Float target = u * wG, c = 0, wLast = 0;
++            int last = -1;
++            for (size_t i = 0; i < gonio.size(); ++i) {
++                Float w = i < maxKept ? kept[i] : GonioImportance(i, ctx);
++                if (w <= 0)
++                    continue;
++                last = int(i);
++                wLast = w;
++                c += w;
++                if (c > target)
++                    break;
++            }
++            if (last < 0)
++                return {};
++            return SampledLight{gonio[last], wLast / wG};
++        }
++        // Infinite lights and the tree of the other bounded lights
++        Float pInfinite = RestPInfinite(ctx);
++        if (u < pInfinite) {
++            int index = std::min<int>(u / pInfinite * infiniteLights.size(),
++                                      infiniteLights.size() - 1);
++            return SampledLight{infiniteLights[index], pInfinite / infiniteLights.size()};
++        }
++        if (!rest)
++            return {};
++        u = std::min<Float>((u - pInfinite) / (1 - pInfinite), OneMinusEpsilon);
++        pstd::optional<SampledLight> s = rest->SampleOne(ctx, u);
++        if (!s)
++            return {};
++        s->p *= 1 - pInfinite;
++        return s;
++    }
++
++    PBRT_CPU_GPU
++    Float PMFStratum(const LightSampleContext &ctx, Light light) const {
++        if (NStrata() == 1)
++            return PMF(ctx, light);
++        for (size_t i = 0; i < gonio.size(); ++i)
++            if (gonio[i] == light) {
++                Float wG = 0;
++                for (size_t j = 0; j < gonio.size(); ++j)
++                    wG += GonioImportance(j, ctx);
++                return wG > 0 ? GonioImportance(i, ctx) / wG : 0;
++            }
++        Float pInfinite = RestPInfinite(ctx);
++        if (rest && rest->lightToBitTrail.HasKey(light))
++            return (1 - pInfinite) * rest->PMFOne(ctx, light);
++        return infiniteLights.empty() ? 0 : pInfinite / infiniteLights.size();
++    }
+ 
+     PBRT_CPU_GPU
+     pstd::optional<SampledLight> Sample(const LightSampleContext &ctx, Float u) const {
+@@ -339,10 +420,8 @@
+                 LightBVHNode node = nodes[nodeIndex];
+                 if (!node.isLeaf) {
+                     // Compute light BVH child node importances
+-                    const LightBVHNode *children[2] = {&nodes[nodeIndex + 1],
+-                                                       &nodes[node.childOrLightIndex]};
+-                    Float ci[2] = {children[0]->lightBounds.Importance(p, n, allLightBounds),
+-                                   children[1]->lightBounds.Importance(p, n, allLightBounds)};
++                    Float ci[2] = {NodeImportance(nodeIndex + 1, p, n),
++                                   NodeImportance(node.childOrLightIndex, p, n)};
+                     if (ci[0] == 0 && ci[1] == 0)
+                         return {};
+ 
+@@ -390,9 +469,8 @@
+                 return pmf;
+             }
+             // Compute child importances and update PMF for current node
+-            const LightBVHNode *child0 = &nodes[nodeIndex + 1];
+-            const LightBVHNode *child1 = &nodes[node->childOrLightIndex];
+-            Float ci[2] = {child0->lightBounds.Importance(p, n, allLightBounds), child1->lightBounds.Importance(p, n, allLightBounds)};
++            Float ci[2] = {NodeImportance(nodeIndex + 1, p, n),
++                           NodeImportance(node->childOrLightIndex, p, n)};
+             // open-cam (patch 0032): a light the bounds rule out from here has pmf 0; stock
+             // pbrt computed 0/0 = NaN when both children scored 0.
+             if (ci[bitTrail & 1] == 0)
+@@ -425,13 +503,39 @@
+   private:
+     // BVHLightSampler Private Methods
+     PBRT_CPU_GPU
+-    Float GonioImportance(size_t i, Point3f p, Normal3f n) const {
+-        Float imp = gonioBounds[i].Importance(p, n, gonioAllBounds);
++    Float GonioImportance(size_t i, const LightSampleContext &ctx) const {
++        // open-cam (patch 0035): what LightBounds::Importance() gives for a point light
++        // (phi |cos theta_i| / d^2), written out: scoring the lamps was a third of the
++        // render time of a night scene.
++        Point3f p = ctx.p();
++        Normal3f n = ctx.ns;
++        Vector3f wi = gonioP[i] - p;
++        Float d2 = LengthSquared(wi);
++        if (d2 == 0)
++            return 0;
++        wi /= std::sqrt(d2);
++        Float imp = gonioPhi[i] / d2;
++        if (n != Normal3f(0, 0, 0))
++            imp *= AbsDot(wi, n);
+         if (imp == 0)
+             return 0;
+-        return imp * std::max<Float>(
+-                         gonio[i].Cast<GoniometricLight>()->BoundIntensityRatio(p),
+-                         1e-3f);
++        const GoniometricLight *gl = gonio[i].Cast<GoniometricLight>();
++        Float ratio = std::max<Float>(gl->BoundIntensityRatio(p), 1e-3f);
++        // The wet road is glossy, and the lamp near the mirror direction of the view lights
++        // it far more than the lamp overhead: weigh in a GGX lobe of alpha 0.2 (the wet film;
++        // 1 + D / (4 |cos o cos i|), so a diffuse surface keeps at least its own weight).
++        if (n != Normal3f(0, 0, 0) && LengthSquared(ctx.wo) > 0) {
++            Float cosO = Dot(ctx.wo, n), cosI = Dot(wi, n);
++            Vector3f wm = ctx.wo + wi;
++            if (cosO * cosI > 0 && LengthSquared(wm) > 0) {
++                wm = Normalize(wm);
++                Float cosM = AbsDot(wm, n);
++                constexpr Float a2 = 0.04f;
++                Float d = a2 / (Pi * Sqr(Sqr(cosM) * (a2 - 1) + 1));
++                ratio *= 1 + d / (4 * std::max<Float>( std::abs(cosO * cosI), 1e-3f));
++            }
++        }
++        return imp * ratio;
+     }
+ 
+     PBRT_CPU_GPU
+@@ -441,6 +545,62 @@
+         return rest->nodes[0].lightBounds.Importance(p, n, rest->allLightBounds);
+     }
+ 
++    // open-cam (patch 0035): importance of a BVH node; with beamAware, a node whose lights
++    // all have "angularfilename" maps, of at most maxNodeBeams lamps (map and frame: one
++    // car's tail and stop lamps are two), is scaled by the largest of those maps toward the
++    // point. The stock bound takes a signal lamp for a cosine emitter and gives the lamp
++    // that is close but points elsewhere most of the samples. The maps are read along the
++    // directions from the node's centre and, for a node that is not small as seen from the
++    // point, from the two ends of its longest side. Within one diagonal of the centre the
++    // stock value is kept, and the factor has a floor: a node keeps a nonzero probability
++    // wherever stock gives it one.
++    PBRT_CPU_GPU
++    Float NodeImportance(int nodeIndex, Point3f p, Normal3f n) const {
++        Float imp = nodes[nodeIndex].lightBounds.Importance(p, n, allLightBounds);
++        if (imp == 0 || nodeBeam.empty() || nodeBeam[nodeIndex].lamp[0] == 0)
++            return imp;
++        Bounds3f b = nodes[nodeIndex].lightBounds.Bounds(allLightBounds);
++        Point3f pc = (b.pMin + b.pMax) / 2;
++        Vector3f diag = b.Diagonal();
++        Float d2 = DistanceSquared(p, pc), diag2 = LengthSquared(diag);
++        if (d2 <= diag2)
++            return imp;
++        Vector3f from[3] = {p - pc, Vector3f(0, 0, 0), Vector3f(0, 0, 0)};
++        int nFrom = 1;
++        if (diag2 > Sqr(0.02f) * d2) {
++            Vector3f half(0, 0, 0);
++            int axis = b.MaxDimension();
++            half[axis] = diag[axis] / 2;
++            from[1] = p - (pc + half);
++            from[2] = p - (pc - half);
++            nFrom = 3;
++        }
++        Float a = 0;
++        for (int k = 0; k < maxNodeBeams && nodeBeam[nodeIndex].lamp[k] != 0; ++k)
++            for (int i = 0; i < nFrom; ++i)
++                a = std::max(
++                    a, beamLights[nodeBeam[nodeIndex].lamp[k] - 1]->AngularFactor(from[i]));
++        return imp * Clamp(a, 0.02f, 1);
++    }
++
++    // open-cam (patch 0035): probability of taking an infinite light in the second stratum.
++    // Stock pbrt gives the infinite lights 1 / (their number + 1) each, whatever they emit:
++    // half of the light samples of a night scene go to a sky of 0.002 lux. Here it is the
++    // sky's share of the irradiance, estimated with the tree's root bound, kept between
++    // 0.05 and the stock value so that neither side can be starved where the bound is poor.
++    PBRT_CPU_GPU
++    Float RestPInfinite(const LightSampleContext &ctx) const {
++        if (infiniteLights.empty())
++            return 0;
++        if (!rest || rest->nodes.empty())
++            return 1;
++        Float pStock = Float(infiniteLights.size()) / Float(infiniteLights.size() + 1);
++        Float eRest = RestImportance(ctx.p(), ctx.ns) * InvPi;
++        if (!(infiniteE + eRest > 0))
++            return pStock;
++        return Clamp(infiniteE / (infiniteE + eRest), std::min<Float>(0.05f, pStock), pStock);
++    }
++
+     PBRT_CPU_GPU
+     Float ExactPInfinite() const {
+         bool bounded = !gonio.empty() || (rest && !rest->nodes.empty());
+@@ -460,7 +620,7 @@
+         Normal3f n = ctx.ns;
+         Float wR = RestImportance(p, n), wG = 0;
+         for (size_t i = 0; i < gonio.size(); ++i)
+-            wG += GonioImportance(i, p, n);
++            wG += GonioImportance(i, ctx);
+         Float total = wG + wR;
+         if (!(total > 0))
+             return {};
+@@ -469,7 +629,7 @@
+             Float c = 0;
+             int last = -1;
+             for (size_t i = 0; i < gonio.size(); ++i) {
+-                Float w = GonioImportance(i, p, n);
++                Float w = GonioImportance(i, ctx);
+                 if (w <= 0)
+                     continue;
+                 last = int(i);
+@@ -479,7 +639,7 @@
+             }
+             if (last >= 0)
+                 return SampledLight{gonio[last],
+-                                    (1 - pInfinite) * GonioImportance(last, p, n) / total};
++                                    (1 - pInfinite) * GonioImportance(last, ctx) / total};
+         }
+         if (!(wR > 0))
+             return {};
+@@ -505,12 +665,12 @@
+         Normal3f n = ctx.ns;
+         Float wR = RestImportance(p, n), wG = 0;
+         for (size_t i = 0; i < gonio.size(); ++i)
+-            wG += GonioImportance(i, p, n);
++            wG += GonioImportance(i, ctx);
+         Float total = wG + wR;
+         if (!(total > 0))
+             return 0;
+         if (gi >= 0)
+-            return (1 - pInfinite) * GonioImportance(gi, p, n) / total;
++            return (1 - pInfinite) * GonioImportance(gi, ctx) / total;
+         return (1 - pInfinite) * wR / total * rest->PMFOne(ctx, light);
+     }
+ 
+@@ -541,9 +701,18 @@
+     HashMap<Light, uint32_t> lightToBitTrail;
+     BVHLightSampler *beam = nullptr;
+     bool exactBeams = false;
++    bool splitStrata = false;
++    Float infiniteE = 0;  // mean irradiance of the infinite lights (spectral maximum)
++    static constexpr int maxNodeBeams = 4;
++    struct NodeBeams {
++        uint16_t lamp[maxNodeBeams] = {};  // 1 + index into beamLights; lamp[0] == 0: none
++    };
++    pstd::vector<NodeBeams> nodeBeam;
++    NodeBeams AssignBeams(int nodeIndex);
++    pstd::vector<const DiffuseAreaLight *> beamLights;
+     pstd::vector<Light> gonio;
+-    pstd::vector<CompactLightBounds> gonioBounds;
+-    Bounds3f gonioAllBounds;
++    pstd::vector<Point3f> gonioP;
++    pstd::vector<Float> gonioPhi;
+     BVHLightSampler *rest = nullptr;
+ };
+ 
+@@ -593,6 +762,22 @@
+     return Dispatch(pdf);
+ }
+ 
++PBRT_CPU_GPU inline int LightSampler::NStrata() const {
++    return Is<BVHLightSampler>() ? Cast<BVHLightSampler>()->NStrata() : 1;
++}
++
++PBRT_CPU_GPU inline pstd::optional<SampledLight> LightSampler::SampleStratum(
++    const LightSampleContext &ctx, Float u, int stratum) const {
++    return Is<BVHLightSampler>() ? Cast<BVHLightSampler>()->SampleStratum(ctx, u, stratum)
++                                 : Sample(ctx, u);
++}
++
++PBRT_CPU_GPU inline Float LightSampler::PMFStratum(const LightSampleContext &ctx,
++                                                   Light light) const {
++    return Is<BVHLightSampler>() ? Cast<BVHLightSampler>()->PMFStratum(ctx, light)
++                                 : PMF(ctx, light);
++}
++
+ PBRT_CPU_GPU inline pstd::optional<SampledLight> LightSampler::Sample(Float u) const {
+     auto sample = [&](auto ptr) { return ptr->Sample(u); };
+     return Dispatch(sample);

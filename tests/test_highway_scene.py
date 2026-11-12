@@ -358,6 +358,25 @@ def test_regularize_is_opt_in(tmp_path):
         assert ('"bool regularize" true' in scene) == bool(a)
 
 
+def test_lamp_regularize_defaults_to_night_only(tmp_path):
+    cases = (
+        ("day", (), None),
+        ("night", ("--time-of-day", "night"), "0.1"),
+        ("night_off", ("--time-of-day", "night", "--lamp-regularize", "0"), None),
+        ("day_on", ("--lamp-regularize", "0.2"), "0.2"),
+        ("guided", ("--time-of-day", "night", "--guiding"), None),
+    )
+    for d, a, alpha in cases:
+        (tmp_path / d).mkdir()
+        build_without_assets(tmp_path / d, *a)
+        scene = (tmp_path / d / "scene" / "highway.pbrt").read_text()
+        manifest = (tmp_path / d / "scene" / "highway_manifest.json").read_text()
+        assert ("lampregularize" in scene) == (alpha is not None)
+        assert ("--lamp-regularize" in manifest) == (alpha is not None)
+        if alpha:
+            assert f'"float lampregularize" [{alpha}]' in scene
+
+
 def test_guiding_is_opt_in_and_keeps_volpath(tmp_path):
     for d, a, integrator in (
         ("plain", (), "path"),

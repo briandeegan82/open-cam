@@ -55,6 +55,7 @@ BEAM_TAILS = {"h": ((45, 0.3), (80, 0.1)), "v": ((15, 0.5), (30, 0.15), (60, 0.0
 BEAM_MAPS = ("tail", "stop", "tail_stop", "fog")
 HOTSPOT_FRACTION = 0.5  # incandescent: share of the intensity from the bulb image
 LENS_OFFSET_M, EMITTER_OFFSET_M = 0.002, 0.004
+LENS_ROUGHNESS = 0.03  # GGX alpha (~1.7 deg lobe, remaproughness false): avoids delta-coat fireflies under headlamps
 CELL_M = 0.01
 
 _PLY_TYPES = {
@@ -578,14 +579,15 @@ def _lamp_lines(
         sh = _patches(g, cells, LENS_OFFSET_M)
         if sh:
             out += ["AttributeBegin", f'    Material "coateddiffuse" "spectrum reflectance" "{LENS_SPD[kind]}"'
-                    ' "float roughness" [0]', sh, "AttributeEnd"]  # fmt: skip
+                    f' "float roughness" [{LENS_ROUGHNESS}] "bool remaproughness" false', sh, "AttributeEnd"]  # fmt: skip
     spd = EMITTER_SPD[layout.tech]
     for cells, lum, kind in groups:
         sh = _patches(g, cells, EMITTER_OFFSET_M)
         if sh:
             out += [
                 "AttributeBegin",
-                f'    Material "coateddiffuse" "spectrum reflectance" "{LENS_SPD["red"]}" "float roughness" [0]',
+                f'    Material "coateddiffuse" "spectrum reflectance" "{LENS_SPD["red"]}"'
+                f' "float roughness" [{LENS_ROUGHNESS}] "bool remaproughness" false',
                 _emitter(spd, lum, beam, kind),
                 sh,
                 "AttributeEnd",
@@ -611,7 +613,8 @@ def _function_lamp(grids: dict, kind: str, tech: str, intensity_cd: float, sides
                 continue
             out += [
                 "AttributeBegin",
-                f'    Material "coateddiffuse" "spectrum reflectance" "{LENS_SPD[kind]}" "float roughness" [0]',
+                f'    Material "coateddiffuse" "spectrum reflectance" "{LENS_SPD[kind]}"'
+                f' "float roughness" [{LENS_ROUGHNESS}] "bool remaproughness" false',
                 f'    AreaLightSource "diffuse" "spectrum L" "{FUNCTION_SPD[(kind, tech)]}"'
                 f' "float scale" [{_f(level * intensity_cd / g.area(cells))}]',
                 _patches(g, cells, EMITTER_OFFSET_M),
@@ -641,11 +644,12 @@ def _fog_lamp(
         norm = sum(w * g.area(m) for m, w in bins)
         groups = [(m, FOG_CD * w / norm) for m, w in bins]
     out = ["AttributeBegin", f'    Material "coateddiffuse" "spectrum reflectance" "{LENS_SPD["red"]}"'
-           ' "float roughness" [0]', _patches(g, g.mask, LENS_OFFSET_M), "AttributeEnd"]  # fmt: skip
+           f' "float roughness" [{LENS_ROUGHNESS}] "bool remaproughness" false', _patches(g, g.mask, LENS_OFFSET_M), "AttributeEnd"]  # fmt: skip
     for cells, lum in groups:
         out += [
             "AttributeBegin",
-            f'    Material "coateddiffuse" "spectrum reflectance" "{LENS_SPD["red"]}" "float roughness" [0]',
+            f'    Material "coateddiffuse" "spectrum reflectance" "{LENS_SPD["red"]}"'
+            f' "float roughness" [{LENS_ROUGHNESS}] "bool remaproughness" false',
             _emitter(EMITTER_SPD[layout.tech], lum, beam, "fog"),
             _patches(g, cells, EMITTER_OFFSET_M),
             "AttributeEnd",
@@ -735,12 +739,13 @@ def rear_lamp_lines(
             g = _grid(None, hw, -hw, cy0, cy1, rear_z, ())
         sh_lens, sh_emit = _patches(g, g.mask, LENS_OFFSET_M), _patches(g, g.mask, EMITTER_OFFSET_M)
         lines += ["AttributeBegin", f'    Material "coateddiffuse" "spectrum reflectance" "{LENS_SPD["red"]}"'
-                  ' "float roughness" [0]', sh_lens, "AttributeEnd"]  # fmt: skip
+                  f' "float roughness" [{LENS_ROUGHNESS}] "bool remaproughness" false', sh_lens, "AttributeEnd"]  # fmt: skip
         lum = CHMSL_CD / g.area(g.mask) if braking else 0.0
         if braking:
             lines += [
                 "AttributeBegin",
-                f'    Material "coateddiffuse" "spectrum reflectance" "{LENS_SPD["red"]}" "float roughness" [0]',
+                f'    Material "coateddiffuse" "spectrum reflectance" "{LENS_SPD["red"]}"'
+                f' "float roughness" [{LENS_ROUGHNESS}] "bool remaproughness" false',
                 _emitter(EMITTER_SPD["led"], lum, beam, "stop"),
                 sh_emit,
                 "AttributeEnd",

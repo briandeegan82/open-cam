@@ -7,7 +7,7 @@ model:
   display_name: Example custom 4x2 R/G/B/W CFA without IR-cut filter
 cfa:
   # Any periodic NxM tile (rows of channel names) or a preset:
-  # RGGB, BGGR, GRBG, GBRG, RGBW, RGBW_4X4, RCCB, RCCC, RCCG, RYYCY, RGGCY, CMY, QUAD_BAYER.
+  # RGGB, BGGR, GRBG, GBRG, RGBW, RGBW_4X4, RCCB, RCCC, RCCG, RYYCY, MYYCY, RGGCY, CMY, QUAD_BAYER.
   layout:
     - [R, G, B, G]
     - [W, W, W, W]

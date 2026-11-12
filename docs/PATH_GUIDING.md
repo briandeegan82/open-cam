@@ -29,6 +29,8 @@ light comes from and samples those directions.
   by one-sample MIS with balance-heuristic weights. The BSDF branch keeps the BSDF's own f/pdf ratio,
   because pbrt's layered BSDFs (wet road, car paint) only know an approximate PDF; the estimator stays
   unbiased with either. NEE and emitter hits are MIS-weighted with the same mixture PDF.
+- Direct light uses the light strata of patch 0035 (one goniometric lamp and one other light per
+  vertex; [HIGHWAY_SCENES.md](HIGHWAY_SCENES.md)), but not `lampregularize`.
 - Not guided: specular and transmissive vertices (glass, water passthrough), and volumes.
 - The field gets one scalar per sample (the mean over the path's wavelengths); guiding needs where
   light comes from, not its colour.

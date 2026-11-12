@@ -118,18 +118,60 @@ brightest 0.5 % of pixels excluded. The wet rural canopy row was re-measured aft
 
 | scene | crop | spp | regularized / unbiased |
 |---|---|---:|---:|
-| rural, night, `--road-wetness wet` | tree canopy pixels, lit partly by lamp light reflected off the water | 16384 | 0.893 ± 0.007 (4 seeds, ± SEM) |
+| rural, night, `--road-wetness wet` | tree canopy pixels, lit partly by lamp light reflected off the water | 16384 | 0.837 ± 0.000 (4 seeds, ± SEM) |
 | rural, night, `--road-wetness dry` | same pixels | 16384 | 1.000 (identical) |
-| urban, day, `--road-wetness wet` | road and parked cars, lower right | 8192 | 0.972 ± 0.000 |
-| highway, day, `--windscreen` | road seen through the windscreen, lower left | 8192 | 1.019 ± 0.001 |
+| urban, day, `--road-wetness wet` | road and parked cars, lower right (x 192-384, y 130-216) | 8192 | 0.997 ± 0.000 |
+| highway, day, `--windscreen` | road seen through the windscreen, lower left (x 0-192, y 130-216) | 8192 | 1.014 ± 0.000 |
 | highway, day, `--road-wetness wet` | traffic cars | 8192 | 1.004 ± 0.000 |
 | tunnel, `inside_out` | tube ceiling | 8192 | 0.999 ± 0.000 |
 | highway / urban, night, wet | traffic and parked cars | 16384 | 0.996 ± 0.024 / 1.009 ± 0.017 (noise-limited) |
 
+The rural wet, urban wet and highway windscreen rows were re-measured after the coat calibration and the
+wet roughness change, with the crops given. The rural row was 0.893 ± 0.007 and now includes any sky pixels
+in the two crown boxes, and the urban and highway crops are new (the earlier ones were not recorded: 0.972
+and 1.019), so these changes are not a measure of the calibration alone. The other rows predate it.
+
 Whole frames (1024 spp, same exclusion) change by at most 1.2 % (highway night, wet), and the garage and
 the tunnel `outside_in` view show no 1/64-frame tile that differs by more than the seed-to-seed noise.
 Unbiased renders converge more slowly where these paths matter (night scenes on wet roads especially),
-so raise `--pixelsamples` there rather than switch regularization back on.
+so raise `--pixelsamples` there rather than switch `--regularize` on.
+
+`--regularize` is still opt-in. `--lamp-regularize` is a separate, narrower switch (below).
+
+### Lamp regularization (`--lamp-regularize`, pbrt patches 0034 and 0036)
+
+After the light-sampling changes below, the speckle left on a wet road at night comes from one path:
+camera → road → glossy car part → headlamp. The headlamp is a point light, so the highlight it makes
+on the clear coat (alpha 0.03) is found only when the ray reflected by the road lands on it. With a
+depth-1 render the lower half of the frame has 0.8 outlier pixels per render, with one bounce 29, and
+skipping the goniometric lamps at the second vertex leaves 2 (480x270, 256 spp, 4 seeds, measured with
+patch 0034's rule on; an outlier is a pixel above 3x its median over the seeds).
+
+`Integrator "float lampregularize" [alpha]` (path and volpath; 0 = off, pbrt's default) evaluates the
+BSDF toward a delta light with its glossy lobes roughened to at least that GGX alpha, after the first
+non-specular bounce only. The BSDF itself is not changed, so directly seen surfaces and the sampled
+directions stay sharp. Layered materials roughen only the lobe their top interface reflects directly
+(`LayeredBxDF::fRegularizedInterface`), so the body under the coat keeps its brightness. Lobes that are
+already rougher are left alone: the wet film (alpha 0.195) is not touched at 0.1. `build_highway_scene.py`
+writes 0.1 at dusk and night and nothing by day; `--lamp-regularize 0` gives the unbiased render. The
+other builders do not write it. `guidedpath` does not have it.
+
+It is biased: the lamp's highlight on the paint is blurred, and so is its reflection in the road.
+Night wet highway, 480x270. Road behind the lead car (x 205-290, y 168-215), 4096 spp, 4 seeds, mean ±
+standard error; outliers as above at 256 spp; whole frame and 30 px tiles at 1024 spp, 2 seeds, the
+brightest 0.5 % of pixels excluded:
+
+| | road behind the lead car | per-pixel variance there | outlier pixels per render | whole frame | tiles |
+|---|---:|---:|---:|---:|---|
+| off (unbiased) | 50.37 ± 0.03 | 25.5 | 79 | 1 | |
+| 0.1 (night default) | 48.11 ± 0.02 (-4.5 %) | 7.1 | 37 | 0.992 | 0.91-1.05 on the road at the lead car, 1.00 elsewhere |
+| 0.2 | 46.34 ± 0.01 (-8.0 %) | 3.1 | 14.5 | | |
+| patch 0034 as first committed | 46.97 ± 0.00 (-6.7 %) | 6.7 | 28 | 0.984 | 0.87-1.04 at the lead car, 0.92-0.98 on the trees and verges |
+
+Patch 0034 was always on and used pbrt's `Regularize()` (every lobe below alpha 0.3 doubled, clamped to
+0.1-0.3). That also roughened the wet road where it was a second vertex, which is the loss on the trees
+(light they receive off the road), and it was not available in volpath. Patch 0036 replaces the rule
+and makes it a parameter. The EI 2027 night panel was rendered with the first form.
 
 ### Car paint roughness
 
@@ -309,6 +351,76 @@ camera ray. Even with a free BSDF evaluation the whole-frame variance would bare
 for a later attempt: the 0024 exact half has to stay in the mix (without it the headlamp beams lose their
 exact scoring, and cluster variance rose from 97 to 600), and pbrt's layered BxDFs report `Diffuse`, not
 `Glossy`, when they have a diffuse base, so flags cannot select glossy surfaces.
+
+#### Light strata, sky share and beam-mapped lamps (pbrt patch 0035, default)
+
+With the samplers above, most of the noise of a night road was still in the choice of light. Rendering
+the night wet highway once per light group (ego headlamps, other headlamps, rear lamps, street lights)
+and adding the per-pixel variances gave 59 on the road behind the lead car where the full scene had
+349, and 4.4 against 43 on the near road (480x270, 256 spp, 2 seeds); with direct light only, 3.5
+against 39. Three causes, each fixed without changing the expected image:
+
+- *One light per vertex from a 50/50 mixture.* Whether a road point was lit by a headlamp or a rear
+  lamp was a random choice with probabilities far from the two contributions. In a scene with
+  goniometric lamps and other lights, `"bvh"` now has two strata, and the path, volpath and guidedpath
+  integrators draw one light from each at every vertex: a lamp by its exact score, and an area or
+  infinite light from the stock tree (`LightSampler::NStrata/SampleStratum/PMFStratum`). A light is in
+  exactly one stratum, and an emitter hit by a BSDF sample is weighted with its stratum's pmf.
+  `"bvhexact"` is the former one-light mixture. Scenes without goniometric lamps have one stratum and
+  take the same code path as before. The wavefront integrator still takes one light per vertex.
+- *The sky.* Stock pbrt gives each infinite light 1 / (their number + 1) of the samples whatever it
+  emits, so half of all light samples went to a night sky of 0.002 lux. In the second stratum the
+  share is the sky's part of the irradiance, estimated with the tree's root bound, and kept between
+  0.05 and the stock value.
+- *Rear lamps.* The tree bounded a lamp cell with an `angularfilename` map as a cosine emitter about
+  its normal. Cells on a lamp that wraps round the body corner face sideways and took half of the
+  samples of a road point beside the car, to which the map emits nothing. Such a light is now
+  bounded by the cone its map emits in (`DiffuseAreaLight::Bounds`), and in the second stratum a tree
+  node whose lights belong to at most four lamps (map and frame) is scaled by the largest of their maps
+  toward the point, with a floor of 0.02.
+
+The lamp score also has the gloss term that was in the binary of the EI 2027 night panel but in no
+patch: 1 + D / (4 |cos o cos i|) of a GGX lobe of alpha 0.2 about the mirror direction of the view, so
+on the wet film the lamp ahead outweighs the lamp overhead (left road, patch stack without / with it:
+variance 96.5 / 13.2; on the dry night road the verge and barrier got 0.92 → 0.67 and 0.63 → 0.47). It
+is a fixed lobe, not the surface's own. Scoring the lamps was 37 % of the render time; the bound of a
+point light is now written out (phi |cos| / d²), which brought the 480x270 render from 51.7 to 44.4 s.
+
+Night wet highway, 480x270, `--lamp-regularize 0`, 1024 spp, 3 seeds, `"bvh"` against `"bvhexact"` in
+the same binary. Frame total (brightest 0.5 % of pixels excluded) 1.0004, 0.3 standard errors; over
+144 tiles of 30 px the differences have an rms of 1.15 standard errors. Region means and per-pixel
+variance:
+
+| region | `bvhexact` | `bvh` | variance, `bvhexact` / `bvh` |
+|---|---:|---:|---:|
+| road behind the lead car | 50.33 ± 0.25 | 50.27 ± 0.07 | 359 / 101 |
+| road right of the lead car | 12.83 ± 0.08 | 12.78 ± 0.03 | 28.1 / 10.9 |
+| near road | 21.10 ± 0.02 | 21.09 ± 0.01 | 19.2 / 3.82 |
+| left road | 42.10 ± 0.02 | 42.12 ± 0.01 | 3.12 / 0.607 |
+| right shoulder | 2.912 ± 0.002 | 2.910 ± 0.001 | 0.0354 / 0.0058 |
+| left barrier | 4.874 ± 0.012 | 4.863 ± 0.002 | 0.441 / 0.029 |
+| median pixel, lower half of the frame | | | 0.0460 / 0.0086 |
+
+A render takes about 1.5 times as long (29 → 44 s at 256 spp: the second light sample), so at equal
+time the median pixel has about 3.5 times less variance. The dry night highway gains the same (256 spp,
+2 seeds, an earlier build: behind the lead car 30.9 → 5.8, near road 1.40 → 0.23, barrier 0.47 → 0.08).
+At the EI 2027 panel's settings (960x540, one render each; noise is a pixel minus its 5x5 median over
+the road rows, an outlier a pixel above 3x that median):
+
+| | time | median noise | outlier pixels |
+|---|---:|---:|---:|
+| before (patch 0034 binary), 1024 spp | 439 s | 2.94 % | 320 |
+| patches 0035 + 0036, `--lamp-regularize 0.1`, 676 spp | 449 s | 1.85 % | 193 |
+| same, `--lamp-regularize 0` (unbiased), 676 spp | 448 s | 1.84 % | 420 |
+| same, `--lamp-regularize 0.1`, 1024 spp | 677 s | 1.66 % | 142 |
+
+`tests/test_pbrt_light_bvh.py` checks the mean against `"bvhmean"` and `"bvhexact"` on a small scene
+with a lamp, a dim sky and a beam-mapped area light.
+
+Not done: the tree still picks area lights without the surface's BSDF or the path's wavelengths. On
+the road right of the lead car the second moment of the choice among area lights is still about 30
+times that of an ideal choice (the lamps near the mirror direction of the view get too little), and a
+red LED lamp is picked as often by a path that carries no red wavelength.
 
 ### Light layers (`--light-layers`)
 
@@ -755,10 +867,10 @@ spectral body:
 
 | level | roughness | model Q0 | CIE reference Q0 |
 |---|---|---|---|
-| dry (existing material) | – | 0.057 | R2/R3 0.07, R1 0.10 |
-| damp | 0.15 | 0.070 | (< W1 0.11, partly dry) |
-| wet | 0.038 | 0.149 | W2 0.15 (W1 0.11–W4 0.25) |
-| flooded | 0.013 | 0.248 | W4 0.25 |
+| dry (existing material) | – | 0.059 | R2/R3 0.07, R1 0.10 |
+| damp | 0.15 | 0.071 | (< W1 0.11, partly dry) |
+| wet | 0.038 | 0.151 | W2 0.15 (W1 0.11–W4 0.25) |
+| flooded | 0.013 | 0.249 | W4 0.25 |
 
 Q0 here is the CIE average over the road-lighting solid angle (β 0–180°, tan γ ≤ 12) at an
 observation angle of 1°, computed analytically (`highway_wet.q0`, Lekner–Dorf body + GGX
@@ -775,12 +887,35 @@ and the default 0.01 darkened the body by up to 6 %.
 
 S1 = r(2,0)/r(0,0), the other number the wet classes are published with (no CIE table ships with the
 repo; class values from Ylinen et al. 2010, via a summary that calls them S1' and lists normalised Q0):
-model wet 47.7 against W2 16, flooded 74.8 against W4 121, dry 2.9 against 0.56-0.85 measured on rough
-asphalt (Pattanapakdee & Chotigo, CIE 2019). Fitting roughness and a free body scale to Q0 and S1 gives
-W2 at roughness 0.041, close to the 0.038 here, with r(0,0) 0.0114 where the model has 0.0039; W4 has no
-solution (the model's S1 peaks near 77). So the specular lobe fits W2, and the body under overhead
-light is about 3 times too dark, or W2 describes a lighter road. Not changed: this needs the real
+model wet 35.1 against W2 16, flooded 48.9 against W4 121, dry 2.6 against 0.56-0.85 measured on rough
+asphalt (Pattanapakdee & Chotigo, CIE 2019). r(0,0) is 0.0053 where a fit of roughness and a free body
+scale to W2 gives 0.0114 at roughness 0.041, close to the 0.038 here; W4 has no solution. So the specular
+lobe fits W2, and the road under overhead light is about 2 times too dark, or W2 describes a lighter
+road. Calibrating the coat (below) closed part of the gap, from 3 times; most of r(0,0) at this geometry is the GGX tail, not the body. Not changed: this needs the real
 tables (`docs/ROAD_RTABLE.md`).
+
+**Coat calibration** (`tools/coat_calibration.py`). pbrt's `coateddiffuse` takes the reflectance of the
+substrate, while a measured spectrum is the reflectance of the finished surface. A plate under a uniform
+environment, viewed head-on, renders 0.069 for an input of 0.12 and 0.38 for 0.8 at roughness 0.35, eta 1.5
+(smooth coat: 0.090 and 0.615, the analytic trapped-light loss; the rest is the single-scattering loss of a
+rough GGX interface, unchanged by `maxdepth` 100). `config/coat_albedo.json` tabulates this by eta, roughness
+and substrate, and the builder's last step (`calibrate_scene`) points coated uses of the asphalt, sealant,
+road paint, galvanized and rubber spectra at `spd/coat_<name>.spd`, recorded in `road.coat_calibration`.
+Each spectrum uses one nominal roughness, so worn patches at roughness 0.12 are a little brighter than
+measured, and cars keep their own rubber materials. The car paint spectra are not calibrated: they are
+pigment bodies under a separate clear coat (`carpaint_black` is below the coat's own 0.04). Asset RGB
+materials are not calibrated either. The rural, urban, garage (with the coated floor concrete) and tunnel builders use the same pass, with the result in `coat_calibration` in their manifests; the diorama has no coated measured spectra. A rough coat also limits how bright a surface can be (substrate 1
+renders 0.50 at roughness 0.35), so dry road paint is clipped, and white renders about 0.50 against its
+measured 0.71 (`unreachable_fraction` in the manifest); before calibration it rendered about 0.33.
+Wet materials target the water surface reflection plus the Lekner–Dorf body, per wavelength.
+
+`nsamples` on the road (left at pbrt's default 1): `coateddiffuse` runs one random walk per
+BSDF evaluation. Night wet scene, 960x324 crop, 256 spp, 6 seeds, near-road mean variance 0.7975 at
+`nsamples` 1, 4 and 16 and at 16 on all coated materials, 0.1014 at depth 1 for both 1 and 16; 16 costs
+1.76x on the full render. Re-measured with `nsamples` 4 plus patch 0034 on the paper night_wet
+frame: the EXR road-crop tail was unchanged (p99 4.29 → 4.10, max still ~575) while pbrt's
+`CHECK_RARE` on the layered walk then failed. The estimator is not a meaningful share of the road
+noise.
 
 Aggregate showing through the film (investigated, not changed): keeping the road's normal map at
 `wet`, scaled by F, on the night wet highway (480x270, 256 spp, 6 seeds, roughness 0.05, lamp pixels

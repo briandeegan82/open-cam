@@ -1,0 +1,16 @@
+# Delta from config/sensor_models/default.yaml — only overrides are listed.
+schema_version: 1
+sensor:
+  quantum_efficiency:
+    red_csv: spectra/QE/nir/QE_magenta_noircf.csv
+    green_csv: spectra/QE/nir/QE_yellow_noircf.csv
+    blue_csv: spectra/QE/nir/QE_cyan_noircf.csv
+source:
+  qe_variant: default_myycy
+  qe_variant_note: 'True periodic CFA via cfa.layout (per-channel spectral QE). quantum_efficiency keeps a 3-channel proxy for RGB-only tools (Mg->R, Ye->G, Cy->B); the proxy is not a colorimetric model of this CFA.'
+model:
+  name: default_myycy
+  display_name: Default MYYCy (true CFA)
+cfa:
+  layout: MYYCY
+  demosaic: gradient

@@ -18,6 +18,7 @@ from camera_model import (
     noise_config_from_camera_model,
 )
 from cfa_mosaic import (
+    _clamp_to_local_range,
     apply_site_crosstalk,
     bin_mosaic,
     channel_parameter,
@@ -83,13 +84,15 @@ def gray_world_gains(rgb: np.ndarray) -> np.ndarray:
     return gains.astype(np.float32)
 
 
-def white_patch_gains(rgb: np.ndarray, top_pct: float = 1.0) -> np.ndarray:
-    """Compute WB gains using the brightest pixels as the white reference.
+def white_patch_gains(rgb: np.ndarray, top_pct: float = 1.0, clip_level: float | None = None) -> np.ndarray:
+    """Compute WB gains using the brightest unclipped pixels as the white reference.
 
     Uses the top ``top_pct`` percent of pixels ranked by green-channel
     luminance to estimate the illuminant white point.  More accurate than
     gray-world for scenes with distinct neutral patches (e.g. ColorChecker)
     because it is not biased by the chromatic distribution of the chart.
+    When ``clip_level`` is given, saturated pixels (where any channel >= 0.98 * clip_level)
+    are excluded so clipped lamps or fireflies cannot bias the white point.
 
     Parameters
     ----------
@@ -97,13 +100,20 @@ def white_patch_gains(rgb: np.ndarray, top_pct: float = 1.0) -> np.ndarray:
         HxWx3 float array (linear, black-level subtracted).
     top_pct:
         Fraction of pixels (by green channel) used as the white reference.
+    clip_level:
+        Optional saturation level (DN above black) above which pixels are excluded.
     """
     if rgb.ndim != 3 or rgb.shape[2] < 3:
         raise ValueError(f"white_patch_gains expects HxWx3, got {rgb.shape}")
     arr = np.asarray(rgb[:, :, :3], dtype=np.float64)
+    valid = np.ones(arr.shape[:2], dtype=bool)
+    if clip_level is not None and clip_level > 0:
+        unclipped = np.max(arr, axis=2) < 0.98 * float(clip_level)
+        if np.count_nonzero(unclipped) >= 16:
+            valid = unclipped
     luma = arr[:, :, 1]  # green channel as luminance proxy
-    thresh = np.percentile(luma, 100.0 - top_pct)
-    mask = luma >= thresh
+    thresh = np.percentile(luma[valid], 100.0 - top_pct)
+    mask = valid & (luma >= thresh)
     m = arr[mask].mean(axis=0)
     target = m[1]  # normalise to green
     eps = 1e-9
@@ -376,17 +386,18 @@ def demosaic_requested(bayer_cfg: dict) -> bool:
 
 
 def bilinear_demosaic(mono: np.ndarray, pattern: str) -> np.ndarray:
-    """CFA HxW -> full RGB HxWx3 using edge-padded bilinear interpolation."""
+    """CFA HxW -> full RGB HxWx3 using reflect-padded bilinear interpolation."""
     p = pattern.upper()
     if p not in _BAYER_NEG_ROLL_TO_RGGB:
         raise ValueError(f"unknown Bayer pattern {pattern!r}")
     nr, nc = _BAYER_NEG_ROLL_TO_RGGB[p]
-    r = mono
+    r = np.asarray(mono)
+    h, w = r.shape[:2]
     if nr != 0 or nc != 0:
-        r = np.roll(np.roll(mono, -nr, axis=0), -nc, axis=1)
+        r = np.pad(r, ((nr, nr), (nc, nc)), mode="reflect")
     rgb = _demosaic_rggb_bilinear(r)
     if nr != 0 or nc != 0:
-        rgb = np.roll(np.roll(rgb, nr, axis=0), nc, axis=1)
+        rgb = rgb[nr : nr + h, nc : nc + w, :]
     return rgb.astype(np.float32)
 
 
@@ -398,7 +409,10 @@ def _demosaic_rggb_malvar(raw: np.ndarray) -> np.ndarray:
       of Bayer-Patterned Color Images", ICASSP 2004.
 
     Significantly reduces zipper artefacts and false colour at luminance edges
-    compared to bilinear interpolation.
+    compared to bilinear interpolation.  Interpolated values are clamped to the
+    local range of measured samples in the 3×3 neighbourhood so the negative
+    outer filter taps cannot overshoot or drive channels negative at high-contrast
+    edges and point highlights.
     """
     from scipy.ndimage import convolve  # noqa: PLC0415
 
@@ -477,6 +491,20 @@ def _demosaic_rggb_malvar(raw: np.ndarray) -> np.ndarray:
     B[1::2, 0::2] = B_at_Gb[1::2, 0::2]  # Gb sites
     B[1::2, 1::2] = raw[1::2, 1::2]  # B pixels: identity
 
+    r_mask = np.zeros((h, w), dtype=bool)
+    g_mask = np.zeros((h, w), dtype=bool)
+    b_mask = np.zeros((h, w), dtype=bool)
+    r_mask[0::2, 0::2] = True
+    g_mask[0::2, 1::2] = True
+    g_mask[1::2, 0::2] = True
+    b_mask[1::2, 1::2] = True
+    _clamp_to_local_range(R, raw, r_mask, 2, 2)
+    _clamp_to_local_range(G, raw, g_mask, 2, 2)
+    _clamp_to_local_range(B, raw, b_mask, 2, 2)
+    R[r_mask] = raw[r_mask]
+    G[g_mask] = raw[g_mask]
+    B[b_mask] = raw[b_mask]
+
     out = np.stack([R, G, B], axis=2)
     return out[:h0, :w0, :].astype(np.float32)
 
@@ -487,12 +515,13 @@ def malvar_demosaic(mono: np.ndarray, pattern: str) -> np.ndarray:
     if p not in _BAYER_NEG_ROLL_TO_RGGB:
         raise ValueError(f"unknown Bayer pattern {pattern!r}")
     nr, nc = _BAYER_NEG_ROLL_TO_RGGB[p]
-    r = mono
+    r = np.asarray(mono)
+    h, w = r.shape[:2]
     if nr != 0 or nc != 0:
-        r = np.roll(np.roll(mono, -nr, axis=0), -nc, axis=1)
+        r = np.pad(r, ((nr, nr), (nc, nc)), mode="reflect")
     rgb = _demosaic_rggb_malvar(r)
     if nr != 0 or nc != 0:
-        rgb = np.roll(np.roll(rgb, nr, axis=0), nc, axis=1)
+        rgb = rgb[nr : nr + h, nc : nc + w, :]
     return rgb.astype(np.float32)
 
 
@@ -1326,10 +1355,10 @@ def electrons_to_dn(
     return dn_clean, dn_noisy
 
 
-def preview_wb_gains(dn: np.ndarray, black_dn: float, method: str) -> np.ndarray:
+def preview_wb_gains(dn: np.ndarray, black_dn: float, method: str, clip_dn: float | None = None) -> np.ndarray:
     """Preview white-balance gains ("white_patch" or "gray_world") from black-subtracted DN."""
     src = np.clip(dn - black_dn, 0.0, None)
-    return white_patch_gains(src) if method == "white_patch" else gray_world_gains(src)
+    return white_patch_gains(src, clip_level=clip_dn) if method == "white_patch" else gray_world_gains(src)
 
 
 def preview_ccm_pair(dn_clean, dn_noisy, ref_linear, black_dn, method, wb_gains, highlight_clip_dn):
@@ -1925,7 +1954,7 @@ def main(argv: list[str] | None = None) -> None:
             ccm_source = "reference_unavailable"
             print(f"warning: preview CCM reference unavailable from {exr_in}: {exc}", file=sys.stderr)
     if wb_enabled and not bayer_on and cfa_layout is None:
-        wb_gains = preview_wb_gains(dn_clean, black_dn, wb_method)
+        wb_gains = preview_wb_gains(dn_clean, black_dn, wb_method, highlight_clip_dn)
         dn_clean = apply_preview_wb_dn(dn_clean, black_dn, wb_gains, highlight_clip_dn)
         dn_noisy = apply_preview_wb_dn(dn_noisy, black_dn, wb_gains, highlight_clip_dn)
     if (
@@ -1964,7 +1993,7 @@ def main(argv: list[str] | None = None) -> None:
         dn_clean_rgb = _demosaic_fn(dn_clean, bayer_pat)
         dn_noisy_rgb = _demosaic_fn(dn_noisy, bayer_pat)
         if wb_enabled:
-            wb_gains = preview_wb_gains(dn_clean_rgb, black_dn, wb_method)
+            wb_gains = preview_wb_gains(dn_clean_rgb, black_dn, wb_method, highlight_clip_dn)
         dn_clean_rgb = apply_preview_wb_dn(dn_clean_rgb, black_dn, wb_gains, highlight_clip_dn)
         dn_noisy_rgb = apply_preview_wb_dn(dn_noisy_rgb, black_dn, wb_gains, highlight_clip_dn)
         if ccm_enabled and ref_linear is not None and ref_linear.shape == dn_clean_rgb.shape:
