@@ -5,6 +5,11 @@ it dominates and its light lands as fireflies. "bvhbeam" (patch 0022) mixes in a
 the default "bvh" (patch 0024) scores each goniometric lamp by its intensity toward the shading point.
 Both must keep the image mean ("bvhmean" is the stock sampler) and cut the per-pixel noise under the
 beam, the exact scoring more than the mixture.
+
+Patch 0035: with goniometric lamps and other lights in a scene, "bvh" draws one light from each of the
+two groups at every vertex (light strata), gives a dim sky its share of the irradiance instead of half
+the samples, and bounds area lights that have an "angularfilename" map by the map. "bvhexact" is the
+one-light mixture of patch 0024. Patch 0036: "lampregularize" leaves directly seen surfaces alone.
 """
 
 from __future__ import annotations
@@ -110,3 +115,68 @@ def test_beam_mixture_is_unbiased_with_bounces(tmp_path: Path) -> None:
     }
     assert mean["bvh"] == pytest.approx(mean["bvhmean"], rel=0.02)
     assert mean["bvhbeam"] == pytest.approx(mean["bvhmean"], rel=0.02)
+
+
+def _night_scene(tmp: Path, sampler: str, seed: int, extra: str = "", maxdepth: int = 3) -> np.ndarray:
+    """A lamp with a beam, a dim sky, a signal lamp with an angular map, on a glossy coated floor."""
+    write_y_exr(tmp / "beam.exr", _beam_map())
+    c = (np.arange(64) + 0.5) / 64
+    u, v = np.meshgrid(c, c)
+    write_y_exr(tmp / "signal.exr", (np.abs(2 * u - 1) + np.abs(2 * v - 1) < 0.6).astype(np.float32))  # around +z
+    name = f"n_{sampler}_{maxdepth}_{len(extra)}.pbrt"
+    (tmp / name).write_text(
+        "\n".join(
+            [
+                "LookAt 0 1.5 -6  0 0 2  0 1 0",
+                'Camera "perspective" "float fov" [40]',
+                'Sampler "independent" "integer pixelsamples" [256]',
+                f'Integrator "path" "integer maxdepth" [{maxdepth}] "string lightsampler" "{sampler}"{extra}',
+                'Film "rgb" "integer xresolution" [48] "integer yresolution" [32] "string filename" "n.exr"',
+                "WorldBegin",
+                'LightSource "infinite" "blackbody L" [6500] "float scale" [0.002]',
+                'AttributeBegin Translate 0 3 0 Rotate 180 1 0 0 LightSource "goniometric" '
+                '"spectrum I" "stdillum-A" "string filename" "beam.exr" "float scale" [0.02] AttributeEnd',
+                # signal lamp: faces -z (towards the camera), its map only emits around its +z axis
+                'AttributeBegin Translate 1.5 0.6 4 Rotate 180 0 1 0 AreaLightSource "diffuse" "blackbody L" [2000] '
+                '"float scale" [40] "string angularfilename" "signal.exr" '
+                'Shape "bilinearmesh" "point3 P" [-0.2 -0.1 0  0.2 -0.1 0  -0.2 0.1 0  0.2 0.1 0] AttributeEnd',
+                'AttributeBegin AreaLightSource "diffuse" "blackbody L" [3000] "float scale" [2] '
+                'Shape "bilinearmesh" "point3 P" [-3 2.5 5.9  -2 2.5 5.9  -3 3.5 5.9  -2 3.5 5.9] AttributeEnd',
+                'Material "coateddiffuse" "rgb reflectance" [0.3 0.3 0.3] "float roughness" [0.04]',
+                'Shape "bilinearmesh" "point3 P" [-20 0 -20  20 0 -20  -20 0 20  20 0 20]',
+                'Material "coateddiffuse" "rgb reflectance" [0.6 0.1 0.1] "float roughness" [0.03] "bool remaproughness" false',
+                'AttributeBegin Translate -1 0.7 3 Shape "sphere" "float radius" [0.7] AttributeEnd',
+            ]
+        )
+    )
+    out = tmp / f"n_{sampler}_{seed}_{maxdepth}_{len(extra)}.exr"
+    subprocess.run(
+        [str(PBRT), "--quiet", "--seed", str(seed), "--outfile", str(out), str(tmp / name)],
+        check=True,
+        cwd=tmp,
+        timeout=PBRT_TIMEOUT_S,
+    )
+    d = read_separate_exr_channels(out)
+    return np.mean([d[k] for k in ("R", "G", "B")], axis=0).astype(np.float64)
+
+
+def test_light_strata_are_unbiased_and_quieter(tmp_path: Path) -> None:
+    seeds = (1, 2, 3, 4)
+    img = {s: np.array([_night_scene(tmp_path, s, seed) for seed in seeds]) for s in ("bvh", "bvhexact", "bvhmean")}
+    floor = np.s_[:, 20:, :]  # the lit floor in front of the camera
+    mean = {s: v[floor].mean() for s, v in img.items()}
+    sem = {s: v[floor].mean(axis=(1, 2)).std(ddof=1) / np.sqrt(len(seeds)) for s, v in img.items()}
+    for ref in ("bvhexact", "bvhmean"):
+        assert abs(mean["bvh"] - mean[ref]) < 4 * np.hypot(sem["bvh"], sem[ref]) + 0.01 * mean[ref], (mean, sem)
+    var = {s: np.median(v[floor].var(axis=0, ddof=1)) for s, v in img.items()}
+    assert var["bvh"] < 0.6 * var["bvhexact"], var
+
+
+def test_lampregularize_leaves_direct_light_alone(tmp_path: Path) -> None:
+    reg = ' "float lampregularize" [0.2]'
+    direct = [np.mean([_night_scene(tmp_path, "bvh", s, e, maxdepth=1).mean() for s in (1, 2)]) for e in ("", reg)]
+    assert direct[1] == pytest.approx(direct[0], rel=0.02)
+    bounced = [np.mean([_night_scene(tmp_path, "bvh", s, e).mean() for s in (1, 2)]) for e in ("", reg)]
+    assert bounced[1] == pytest.approx(bounced[0], rel=0.1)  # blurred, not removed
+    with pytest.raises(subprocess.CalledProcessError):
+        _night_scene(tmp_path, "bvh", 1, ' "float lampregularize" [2]')

@@ -1,0 +1,312 @@
+--- a/src/pbrt/bsdf.h
++++ b/src/pbrt/bsdf.h
+@@ -145,25 +145,52 @@
+     PBRT_CPU_GPU
+     void Regularize() { bxdf.Regularize(); }
+ 
+-    // Evaluate f() on a stack copy of the BxDF after Regularize(), leaving
+-    // this BSDF unchanged. Used for secondary-bounce NEE to delta lights
+-    // (open-cam patch 0034) so glossy-to-point-light spikes are capped
+-    // without blurring the continuation BSDF sample.
++    // open-cam (patches 0034, 0036): f() with glossy lobes roughened to at least _alpha_,
++    // on a copy, so this BSDF and the direction sampled from it stay sharp. For next-event
++    // estimation of delta lights (goniometric headlamps) after a non-specular bounce, where
++    // a narrow lobe meets a point light only through rare, very bright samples. Layered
++    // BxDFs roughen the lobe their top interface reflects directly; BxDFs without a
++    // microfacet lobe of their own (the retroreflective one) use their Regularize().
+     PBRT_CPU_GPU
+-    SampledSpectrum fRegularized(Vector3f woRender, Vector3f wiRender,
++    SampledSpectrum fRegularized(Vector3f woRender, Vector3f wiRender, Float alpha,
+                                  TransportMode mode = TransportMode::Radiance) const {
+         Vector3f wi = RenderToLocal(wiRender), wo = RenderToLocal(woRender);
+         if (wo.z == 0)
+             return {};
+         auto eval = [&](auto ptr) -> SampledSpectrum {
+-            auto copy = *ptr;
+-            copy.Regularize();
+-            return copy.f(wo, wi, mode);
++            return fRegularizedOf(ptr, wo, wi, mode, alpha, Rank2());
+         };
+         return bxdf.Dispatch(eval);
+     }
+ 
+   private:
++    // BSDF Private Methods
++    struct Rank0 {};
++    struct Rank1 : Rank0 {};
++    struct Rank2 : Rank1 {};
++    template <typename T>
++    PBRT_CPU_GPU static auto fRegularizedOf(const T *bxdf, Vector3f wo, Vector3f wi,
++                                            TransportMode mode, Float alpha, Rank2)
++        -> decltype(bxdf->fRegularizedInterface(wo, wi, mode, alpha)) {
++        return bxdf->fRegularizedInterface(wo, wi, mode, alpha);
++    }
++    template <typename T>
++    PBRT_CPU_GPU static auto fRegularizedOf(const T *bxdf, Vector3f wo, Vector3f wi,
++                                            TransportMode mode, Float alpha, Rank1)
++        -> decltype(std::declval<T &>().RegularizeTo(alpha), SampledSpectrum()) {
++        T copy = *bxdf;
++        copy.RegularizeTo(alpha);
++        return copy.f(wo, wi, mode);
++    }
++    template <typename T>
++    PBRT_CPU_GPU static SampledSpectrum fRegularizedOf(const T *bxdf, Vector3f wo,
++                                                       Vector3f wi, TransportMode mode,
++                                                       Float, Rank0) {
++        T copy = *bxdf;
++        copy.Regularize();
++        return copy.f(wo, wi, mode);
++    }
++
+     // BSDF Private Members
+     BxDF bxdf;
+     Frame shadingFrame;
+--- a/src/pbrt/bxdfs.h
++++ b/src/pbrt/bxdfs.h
+@@ -584,6 +584,8 @@
+ 
+     PBRT_CPU_GPU
+     void Regularize() { mfDistrib.Regularize(); }
++    PBRT_CPU_GPU
++    void RegularizeTo(Float alpha) { mfDistrib.RegularizeTo(alpha); }
+ 
+   private:
+     // DielectricBxDF Private Members
+@@ -759,6 +761,8 @@
+ 
+     PBRT_CPU_GPU
+     void Regularize() { mfDistrib.Regularize(); }
++    PBRT_CPU_GPU
++    void RegularizeTo(Float alpha) { mfDistrib.RegularizeTo(alpha); }
+ 
+   private:
+     // ConductorBxDF Private Members
+@@ -838,6 +842,26 @@
+         bottom.Regularize();
+     }
+ 
++    // open-cam (patch 0036): f() with the lobe that the top interface reflects directly
++    // roughened to at least _alpha_. Light that goes through the layers keeps the real
++    // interface, so the surface under the coat is not darkened as it is by Regularize(),
++    // whose rougher interface loses energy. For next-event estimation of delta lights after
++    // a non-specular bounce (BSDF::fRegularized).
++    PBRT_CPU_GPU
++    SampledSpectrum fRegularizedInterface(Vector3f wo, Vector3f wi, TransportMode mode,
++                                          Float alpha) const {
++        SampledSpectrum f0 = f(wo, wi, mode);
++        if (twoSided && wo.z < 0) {
++            wo = -wo;
++            wi = -wi;
++        }
++        if (!SameHemisphere(wo, wi) || wo.z < 0)
++            return f0;
++        TopBxDF reg = top;
++        reg.RegularizeTo(alpha);
++        return ClampZero(f0 + reg.f(wo, wi, mode) - top.f(wo, wi, mode));
++    }
++
+     PBRT_CPU_GPU
+     BxDFFlags Flags() const {
+         BxDFFlags topFlags = top.Flags(), bottomFlags = bottom.Flags();
+--- a/src/pbrt/cpu/integrators.cpp
++++ b/src/pbrt/cpu/integrators.cpp
+@@ -720,11 +720,13 @@
+ // PathIntegrator Method Definitions
+ PathIntegrator::PathIntegrator(int maxDepth, Camera camera, Sampler sampler,
+                                Primitive aggregate, std::vector<Light> lights,
+-                               const std::string &lightSampleStrategy, bool regularize)
++                               const std::string &lightSampleStrategy, bool regularize,
++                               Float lampRegularize)
+     : RayIntegrator(camera, sampler, aggregate, lights),
+       maxDepth(maxDepth),
+       lightSampler(LightSampler::Create(lightSampleStrategy, lights, Allocator())),
+-      regularize(regularize) {}
++      regularize(regularize),
++      lampRegularize(lampRegularize) {}
+ 
+ SampledSpectrum PathIntegrator::Li(RayDifferential ray, SampledWavelengths &lambda,
+                                    Sampler sampler, ScratchBuffer &scratchBuffer,
+@@ -909,15 +911,17 @@
+         return {};
+ 
+     // Evaluate BSDF for light sample and check light visibility.
+-    // open-cam patch 0034: after a non-specular bounce, NEE to a delta light
+-    // (goniometric headlamp, spot) uses a regularized lobe so a narrow GGX
+-    // evaluated against a point light cannot spike. The original BSDF is not
+-    // mutated, so the continuation sample stays sharp. Primary hits (depth 0)
+-    // are unchanged.
++    // open-cam (patches 0034, 0036): with "lampregularize", after a non-specular bounce the
++    // BSDF is evaluated toward a delta light (goniometric headlamp, spot) with its glossy
++    // lobes roughened to that alpha. A narrow lobe meets a point light only through rare,
++    // very bright samples (camera -> wet road -> car paint -> headlamp). The BSDF itself is
++    // not changed, so the next direction is sampled from the sharp one, and vertices seen
++    // directly are unaffected. Biased: the lamp's highlight on the paint is blurred.
+     Vector3f wo = intr.wo, wi = ls->wi;
+     SampledSpectrum fBxDF =
+-        (anyNonSpecularBounces && IsDeltaLight(light.Type())) ? bsdf->fRegularized(wo, wi)
+-                                                              : bsdf->f(wo, wi);
++        (lampRegularize > 0 && anyNonSpecularBounces && IsDeltaLight(light.Type()))
++            ? bsdf->fRegularized(wo, wi, lampRegularize)
++            : bsdf->f(wo, wi);
+     SampledSpectrum f = fBxDF * AbsDot(wi, intr.shading.n);
+     if (!f || !Unoccluded(intr, ls->pLight))
+         return {};
+@@ -944,8 +948,11 @@
+     int maxDepth = parameters.GetOneInt("maxdepth", 5);
+     std::string lightStrategy = parameters.GetOneString("lightsampler", "bvh");
+     bool regularize = parameters.GetOneBool("regularize", false);
++    Float lampRegularize = parameters.GetOneFloat("lampregularize", 0);
++    if (lampRegularize < 0 || lampRegularize > 1)
++        ErrorExit(loc, "\"lampregularize\" must be in [0, 1].");
+     return std::make_unique<PathIntegrator>(maxDepth, camera, sampler, aggregate, lights,
+-                                            lightStrategy, regularize);
++                                            lightStrategy, regularize, lampRegularize);
+ }
+ 
+ #ifdef PBRT_HAS_OPENPGL
+@@ -1694,7 +1701,8 @@
+ 
+         // Sample illumination from lights to find attenuated path contribution
+         if (IsNonSpecular(bsdf.Flags())) {
+-            L += SampleLd(isect, &bsdf, lambda, sampler, beta, r_u);
++            L += SampleLd(isect, &bsdf, lambda, sampler, beta, r_u,
++                          anyNonSpecularBounces ? lampRegularize : 0);
+             DCHECK(IsInf(L.y(lambda)) == false);
+         }
+         prevIntrContext = LightSampleContext(isect);
+@@ -1822,8 +1830,8 @@
+ 
+ SampledSpectrum VolPathIntegrator::SampleLd(const Interaction &intr, const BSDF *bsdf,
+                                             SampledWavelengths &lambda, Sampler sampler,
+-                                            SampledSpectrum beta,
+-                                            SampledSpectrum r_p) const {
++                                            SampledSpectrum beta, SampledSpectrum r_p,
++                                            Float lampAlpha) const {
+     // Estimate light-sampled direct illumination at _intr_
+     // Initialize _LightSampleContext_ for volumetric light sampling
+     LightSampleContext ctx;
+@@ -1842,15 +1850,16 @@
+     // open-cam (patch 0035): one light from each stratum of the light sampler
+     SampledSpectrum Ld(0.f);
+     for (int stratum = 0, nStrata = lightSampler.NStrata(); stratum < nStrata; ++stratum)
+-        Ld += SampleLdStratum(intr, bsdf, ctx, stratum, lambda, sampler, beta, r_p);
++        Ld += SampleLdStratum(intr, bsdf, ctx, stratum, lambda, sampler, beta, r_p,
++                              lampAlpha);
+     return Ld;
+ }
+ 
+ SampledSpectrum VolPathIntegrator::SampleLdStratum(const Interaction &intr, const BSDF *bsdf,
+                                                    const LightSampleContext &ctx, int stratum,
+                                                    SampledWavelengths &lambda, Sampler sampler,
+-                                                   SampledSpectrum beta,
+-                                                   SampledSpectrum r_p) const {
++                                                   SampledSpectrum beta, SampledSpectrum r_p,
++                                                   Float lampAlpha) const {
+     // Sample a light source using _lightSampler_
+     Float u = sampler.Get1D();
+     pstd::optional<SampledLight> sampledLight =
+@@ -1873,7 +1882,11 @@
+     Vector3f wo = intr.wo, wi = ls->wi;
+     if (bsdf) {
+         // Update _f_hat_ and _scatterPDF_ accounting for the BSDF
+-        f_hat = bsdf->f(wo, wi) * AbsDot(wi, intr.AsSurface().shading.n);
++        // open-cam (patch 0036): "lampregularize", as in PathIntegrator::SampleLdStratum()
++        SampledSpectrum fBxDF = (lampAlpha > 0 && IsDeltaLight(light.Type()))
++                                    ? bsdf->fRegularized(wo, wi, lampAlpha)
++                                    : bsdf->f(wo, wi);
++        f_hat = fBxDF * AbsDot(wi, intr.AsSurface().shading.n);
+         scatterPDF = bsdf->PDF(wo, wi);
+ 
+     } else {
+@@ -1972,9 +1985,12 @@
+     bool skipCaustics = parameters.GetOneBool("skipcaustics", false);
+     if (skipCaustics && regularize)
+         ErrorExit(loc, "\"skipcaustics\" and \"regularize\" can't be combined.");
++    Float lampRegularize = parameters.GetOneFloat("lampregularize", 0);
++    if (lampRegularize < 0 || lampRegularize > 1)
++        ErrorExit(loc, "\"lampregularize\" must be in [0, 1].");
+     return std::make_unique<VolPathIntegrator>(maxDepth, camera, sampler, aggregate,
+                                                lights, lightStrategy, regularize,
+-                                               skipCaustics);
++                                               skipCaustics, lampRegularize);
+ }
+ 
+ // AOIntegrator Method Definitions
+--- a/src/pbrt/cpu/integrators.h
++++ b/src/pbrt/cpu/integrators.h
+@@ -213,7 +213,7 @@
+     PathIntegrator(int maxDepth, Camera camera, Sampler sampler, Primitive aggregate,
+                    std::vector<Light> lights,
+                    const std::string &lightSampleStrategy = "bvh",
+-                   bool regularize = false);
++                   bool regularize = false, Float lampRegularize = 0);
+ 
+     SampledSpectrum Li(RayDifferential ray, SampledWavelengths &lambda, Sampler sampler,
+                        ScratchBuffer &scratchBuffer,
+@@ -241,6 +241,9 @@
+     int maxDepth;
+     LightSampler lightSampler;
+     bool regularize;
++    // open-cam (patch 0036): "float lampregularize", the GGX alpha that lobes are roughened
++    // to for next-event estimation of delta lights after a non-specular bounce; 0 = off.
++    Float lampRegularize;
+ };
+ 
+ // SimpleVolPathIntegrator Definition
+@@ -272,12 +275,14 @@
+     VolPathIntegrator(int maxDepth, Camera camera, Sampler sampler, Primitive aggregate,
+                       std::vector<Light> lights,
+                       const std::string &lightSampleStrategy = "bvh",
+-                      bool regularize = false, bool skipCaustics = false)
++                      bool regularize = false, bool skipCaustics = false,
++                      Float lampRegularize = 0)
+         : RayIntegrator(camera, sampler, aggregate, lights),
+           maxDepth(maxDepth),
+           lightSampler(LightSampler::Create(lightSampleStrategy, lights, Allocator())),
+           regularize(regularize),
+-          skipCaustics(skipCaustics) {}
++          skipCaustics(skipCaustics),
++          lampRegularize(lampRegularize) {}
+ 
+     SampledSpectrum Li(RayDifferential ray, SampledWavelengths &lambda, Sampler sampler,
+                        ScratchBuffer &scratchBuffer,
+@@ -293,11 +298,13 @@
+     // VolPathIntegrator Private Methods
+     SampledSpectrum SampleLd(const Interaction &intr, const BSDF *bsdf,
+                              SampledWavelengths &lambda, Sampler sampler,
+-                             SampledSpectrum beta, SampledSpectrum inv_w_u) const;
++                             SampledSpectrum beta, SampledSpectrum inv_w_u,
++                             Float lampAlpha = 0) const;
+     SampledSpectrum SampleLdStratum(const Interaction &intr, const BSDF *bsdf,
+                                     const LightSampleContext &ctx, int stratum,
+                                     SampledWavelengths &lambda, Sampler sampler,
+-                                    SampledSpectrum beta, SampledSpectrum inv_w_u) const;
++                                    SampledSpectrum beta, SampledSpectrum inv_w_u,
++                                    Float lampAlpha) const;
+ 
+     // VolPathIntegrator Private Members
+     int maxDepth;
+@@ -305,6 +312,7 @@
+     bool regularize;
+     // open-cam: drop caustic paths E (S|G)* D S+ L (left to sppm "causticsonly")
+     bool skipCaustics;
++    Float lampRegularize;  // open-cam (patch 0036), as in PathIntegrator
+ };
+ 
+ // AOIntegrator Definition
+--- a/src/pbrt/util/scattering.h
++++ b/src/pbrt/util/scattering.h
+@@ -204,6 +204,13 @@
+             alpha_y = Clamp(2 * alpha_y, 0.1f, 0.3f);
+     }
+ 
++    // open-cam (patch 0036): roughen to at least _alpha_, leaving rougher lobes alone
++    PBRT_CPU_GPU
++    void RegularizeTo(Float alpha) {
++        alpha_x = std::max(alpha_x, alpha);
++        alpha_y = std::max(alpha_y, alpha);
++    }
++
+   private:
+     // TrowbridgeReitzDistribution Private Members
+     Float alpha_x, alpha_y;
