@@ -199,3 +199,12 @@ def test_real_oidn_removes_noise_and_keeps_mean(tmp_path):
         run.close()
     assert (out - clean)[8:-8, 8:-8].std() < 0.2 * (noisy - clean).std()
     np.testing.assert_allclose(out.mean((0, 1)), noisy.mean((0, 1)), rtol=0.03)
+
+
+def test_blend_planes_endpoints_and_range():
+    noisy, den = np.full((2, 2, 3), 4.0, np.float32), np.full((2, 2, 3), 2.0, np.float32)
+    assert np.array_equal(dn.blend_planes(noisy, den, 0.0), den)
+    assert np.allclose(dn.blend_planes(noisy, den, 1.0), noisy)
+    assert np.allclose(dn.blend_planes(noisy, den, 0.25), 2.5)
+    with pytest.raises(ValueError):
+        dn.blend_planes(noisy, den, 1.5)

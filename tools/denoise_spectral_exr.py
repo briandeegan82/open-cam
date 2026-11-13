@@ -197,8 +197,21 @@ def denoise_stack(stack: np.ndarray, denoise, max_firefly_ratio: float = 20.0) -
     return out, neg
 
 
-def denoise_channels(channels: dict[str, np.ndarray], denoise) -> tuple[dict[str, np.ndarray], dict]:
-    """Denoise the ``S0.*nm`` buckets (sorted by wavelength) and ``R,G,B`` of a pbrt EXR channel dict."""
+def blend_planes(noisy: np.ndarray, denoised: np.ndarray, blend: float) -> np.ndarray:
+    """Linear mix ``(1 - blend) * denoised + blend * noisy``: 0 is the full OIDN result, 1 the untouched render."""
+    if not 0.0 <= blend <= 1.0:
+        raise ValueError(f"blend must be in [0, 1], got {blend}")
+    return denoised if blend == 0.0 else (1.0 - blend) * denoised + blend * noisy
+
+
+def denoise_channels(
+    channels: dict[str, np.ndarray], denoise, blend: float = 0.0, max_firefly_ratio: float = 20.0
+) -> tuple[dict[str, np.ndarray], dict]:
+    """Denoise the ``S0.*nm`` buckets (sorted by wavelength) and ``R,G,B`` of a pbrt EXR channel dict.
+
+    ``blend`` mixes the noisy render back in (see ``blend_planes``); ``max_firefly_ratio`` is the
+    ``clamp_fireflies`` threshold applied before OIDN (0 disables it).
+    """
     from exr_multispectral import parse_s0_wavelength_nm  # noqa: PLC0415
 
     out = dict(channels)
@@ -207,7 +220,8 @@ def denoise_channels(channels: dict[str, np.ndarray], denoise) -> tuple[dict[str
     if spectral:
         names = [n for _, n in spectral]
         cube = np.stack([channels[n] for n in names], axis=2)
-        den, neg = denoise_stack(cube, denoise)
+        den, neg = denoise_stack(cube, denoise, max_firefly_ratio)
+        den = blend_planes(cube, den, blend)
         for j, n in enumerate(names):
             out[n] = den[..., j]
         before, after = float(np.maximum(cube, 0).sum()), float(den.sum())
@@ -215,7 +229,8 @@ def denoise_channels(channels: dict[str, np.ndarray], denoise) -> tuple[dict[str
         report["spectral_negative_fraction_clipped"] = neg
     if all(c in channels for c in "RGB"):
         rgb = np.stack([channels[c] for c in "RGB"], axis=2)
-        den, neg = denoise_stack(rgb, denoise)
+        den, neg = denoise_stack(rgb, denoise, max_firefly_ratio)
+        den = blend_planes(rgb, den, blend)
         for j, c in enumerate("RGB"):
             out[c] = den[..., j]
         before = float(np.maximum(rgb, 0).sum())
@@ -241,6 +256,8 @@ def denoise_exr(
     quality: str = "high",
     device: str = "cpu",
     oidn: Path | None = None,
+    blend: float = 0.0,
+    firefly_ratio: float = 20.0,
 ) -> dict:
     """Denoise ``exr_in`` into ``exr_out`` (default ``<stem>_denoised.exr``) and write the sidecar report.
 
@@ -264,7 +281,7 @@ def denoise_exr(
             normal = None
     runner = OidnRunner(binary, albedo, normal, quality=quality, device=device)
     try:
-        out, report = denoise_channels(channels, runner)
+        out, report = denoise_channels(channels, runner, blend, firefly_ratio)
     finally:
         runner.close()
     noisy = None
@@ -282,6 +299,8 @@ def denoise_exr(
             "device": device,
             "guides": guides,
             "guide_spp": guide_spp if guides != "none" else None,
+            "blend": blend,
+            "firefly_ratio": firefly_ratio,
             "exr_in": str(exr_in),
             "exr_out": str(exr_out),
             "noisy_copy": str(noisy) if noisy else None,
@@ -303,6 +322,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--quality", choices=QUALITY_CHOICES, default="high")
     ap.add_argument("--device", default="cpu", help="oidnDenoise -d value (cpu, cuda, sycl, hip, metal, default)")
     ap.add_argument("--oidn", type=Path, default=None, help="oidnDenoise binary (default: auto-detect)")
+    ap.add_argument("--blend", type=float, default=0.0, help="0 = full denoise, 1 = noisy render; mixes the noisy render back in")
+    ap.add_argument("--firefly-ratio", type=float, default=20.0, help="pre-OIDN single-pixel spike clamp (0 = off)")
     a = ap.parse_args(argv)
     report = denoise_exr(
         a.exr_in,
@@ -314,6 +335,8 @@ def main(argv: list[str] | None = None) -> int:
         quality=a.quality,
         device=a.device,
         oidn=a.oidn,
+        blend=a.blend,
+        firefly_ratio=a.firefly_ratio,
     )
     print(json.dumps(report, indent=2))
     print(f"warning: {METRICS_WARNING}", file=sys.stderr)

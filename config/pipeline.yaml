@@ -54,6 +54,8 @@ render:
     guide_spp: 16
     quality: high          # high | balanced | fast
     device: cpu
+    blend: 0.0             # 0 = full denoise .. 1 = noisy render; mixes the noisy render back in (less blur, more noise)
+    firefly_ratio: 20.0    # pre-OIDN single-pixel spike clamp, x brightest neighbour (0 = off)
 validate:
   enabled: true
 validate_emva:

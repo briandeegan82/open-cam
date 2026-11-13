@@ -313,6 +313,8 @@ def main() -> None:
         denoise_cmd += ["--guide-spp", str(int(denoise_cfg.get("guide_spp", 16)))]
         denoise_cmd += ["--quality", str(denoise_cfg.get("quality", "high"))]
         denoise_cmd += ["--device", str(denoise_cfg.get("device", "cpu"))]
+        denoise_cmd += ["--blend", str(float(denoise_cfg.get("blend", 0.0)))]
+        denoise_cmd += ["--firefly-ratio", str(float(denoise_cfg.get("firefly_ratio", 20.0)))]
         if denoise_cfg.get("oidn"):
             denoise_cmd += ["--oidn", str(p(repo, denoise_cfg["oidn"]))]
         log.append(run_cmd(denoise_cmd, repo, args.dry_run))
