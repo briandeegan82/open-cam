@@ -72,6 +72,37 @@ The +1.3 % in flat regions is firefly energy that OIDN spreads into the surround
 isolated pixels; the image total is unchanged. The whole stage (guide render + 32 buckets) took 39 s on 8 CPU
 cores.
 
+## Speckle: merge independent renders first (`tools/merge_seeds.py`)
+
+OIDN turns an isolated bright pixel into a blob, and the stage's clamp of single-pixel spikes
+(`clamp_fireflies`, 20x the brightest neighbour) discards the light of the largest ones. On a wet road at night the speckle is also real light: rare samples of a headlamp's highlight
+on a car, seen in the road (docs/HIGHWAY_SCENES.md, "Lamp regularization"). One render cannot tell such a
+sample from a small lamp. Several renders with different seeds can, because the lamp is in all of them.
+
+```bash
+for s in 1 2 3 4; do pbrt --seed $s --outfile out/x_s$s.exr x.pbrt; done          # each at spp / 4
+venv/bin/python tools/merge_seeds.py --exr-in out/x_s?.exr --exr-out out/x.exr    # then denoise out/x.exr
+```
+
+Per pixel and per channel (every spectral bucket, and R, G, B), a render's value above
+`ratio` x the median over the renders (default 3, plus a floor of half the local level) is capped, and the
+part removed is averaged over the renders and added back through a Gaussian of `sigma` pixels (default 2) in
+the same channel. The total of every channel equals that of the plain average. At least three renders are
+needed. `<out>.merge.json` records how much light was moved.
+
+Night wet highway, 480x270, four renders of 256 spp, against a 3072 spp reference (error = mean squared
+relative error over four colour bands, lamp pixels excluded):
+
+| renders | plain average | merged | image total | road behind the lead car |
+|---|---:|---:|---:|---:|
+| `--lamp-regularize 0.1` | 0.045 | 0.035 | 1.00000 | 48.05 → 48.06 |
+| `--lamp-regularize 0` | 0.263 | 0.090 | 1.00000 | 50.55 → 50.55 |
+
+A stricter cap (`--ratio 2 --sigma 3`) looks cleaner but starts to move ordinary noise and the edges of
+lamps (error 0.185 on the first row). Like the denoiser, this is for figures: the merged image's noise is
+correlated between neighbouring pixels, so it is not a render to measure noise or texture on.
+`paper/ei2027/scripts/render_driving.sh` renders the night panel this way (`NIGHT_SEEDS`, default 4).
+
 ## Limits
 
 - OIDN is trained on RGB beauty renders, not on spectral buckets. The per-bucket noise is therefore removed
