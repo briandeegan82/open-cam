@@ -21,6 +21,9 @@ NIGHT_SEEDS="${NIGHT_SEEDS:-4}"
 #   PBRT_NATIVE=OFF PBRT_LAMBDA_MAX_NM=2500 PBRT_BUILD_DIR=third_party/pbrt-v4/build-swir tools/build_pbrt.sh
 PBRT_SWIR="${PBRT_SWIR:-third_party/pbrt-v4/build-swir/pbrt}"
 DENOISE_WET="${DENOISE_WET:-1}"
+# pbrt now and then crashes or hangs on the night scene: re-run it (tools/pbrt_retry.py); a render here takes minutes
+PBRT_TIMEOUT_S="${PBRT_TIMEOUT_S:-7200}"
+pbrt_run() { "${PY}" tools/pbrt_retry.py --timeout "${PBRT_TIMEOUT_S}" "$@"; }
 
 render() {
   local name="$1" spp="$2"; shift 2
@@ -30,7 +33,7 @@ render() {
   mkdir -p "${d}/out"
   "${PY}" tools/build_highway_scene.py --xres "${XRES}" --yres "${YRES}" --pixelsamples "${spp}" \
     --out-dir "${d}" "$@"
-  (cd "${d}" && "${ROOT}/${pbrt}" --quiet highway.pbrt)
+  pbrt_run --cwd "${d}" -- "${ROOT}/${pbrt}" --quiet highway.pbrt
 }
 
 # render_seeds <name> <total spp> <seeds> <builder args...>: <seeds> renders of spp / seeds, merged
@@ -41,7 +44,7 @@ render_seeds() {
   "${PY}" tools/build_highway_scene.py --xres "${XRES}" --yres "${YRES}" --pixelsamples "$((spp / n))" \
     --out-dir "${d}" "$@"
   for s in $(seq "${n}"); do
-    (cd "${d}" && "${ROOT}/${PBRT}" --quiet --seed "${s}" --outfile "out/highway_spectral_s${s}.exr" highway.pbrt)
+    pbrt_run --cwd "${d}" -- "${ROOT}/${PBRT}" --quiet --seed "${s}" --outfile "out/highway_spectral_s${s}.exr" highway.pbrt
     files+=("${d}/out/highway_spectral_s${s}.exr")
   done
   "${PY}" tools/merge_seeds.py --exr-in "${files[@]}" --exr-out "${d}/out/highway_spectral.exr" > /dev/null

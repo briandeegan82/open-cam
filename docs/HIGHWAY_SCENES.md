@@ -1338,6 +1338,13 @@ choose the rendered band. See [SWIR.md](SWIR.md#highway-scene-in-the-swir-toolsh
   medium, flat Earth for the medium (the backdrop has curvature); without `--haze` the horizon
   is sharp and aerial perspective comes only from the sky map.
 - Asset car materials other than paint/glass/tyres are the authors' RGB values unless `--spectral-library usgs` (chrome and near-black trim only, see below); sign sheeting is diffuse by day unless `--fluorescent-sign`.
+- The patched pbrt (Release) now and then crashes during rendering of the night wet highway: double free,
+  SIGSEGV or a hang, 3-4 in 64 full renders at 480x270. Not found: an AddressSanitizer build ran 60 full
+  renders clean (and matched the Release image), which points to a thread race that ASan's slowdown
+  hides. A finished render is not affected, so the night renders go through `tools/pbrt_retry.py`, which
+  runs pbrt again after a signal or a timeout (`render_driving.sh`: `PBRT_TIMEOUT_S`, default 7200 s;
+  `tools/firefly_experiment.py`; in 64 more full renders it caught one hang, whose re-run matched the
+  other seeds). A ThreadSanitizer build would be the next step to find the cause.
 
 ## In-car camera effects
 
