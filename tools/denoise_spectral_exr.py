@@ -178,15 +178,34 @@ def clamp_fireflies(stack: np.ndarray, max_ratio: float = 20.0) -> tuple[np.ndar
     return np.where(over, cap, stack), int(np.any(over, axis=2).sum())
 
 
-def denoise_stack(stack: np.ndarray, denoise, max_firefly_ratio: float = 20.0) -> tuple[np.ndarray, float]:
+def bypass_keep(lum: np.ndarray, bypass: float = 2.0) -> np.ndarray:
+    """HxWx1 share of each pixel's light handed to the denoiser; the rest skips it and is added back unchanged.
+
+    Light above ``bypass`` x the 99th percentile of ``lum`` (the channel sum) skips the denoiser, the same fraction in
+    every channel. Lamps of 1-3 px are converged and denoisers treat them as fireflies: OptiX keeps 2-7 % of a 1 px
+    spot; OIDN spread night lamps into their surroundings (+0.5 % on the frame). 0 hands everything to the denoiser.
+    """
+    lum = np.asarray(lum, dtype=np.float32)
+    if bypass <= 0 or lum.size == 0:
+        return np.ones(lum.shape + (1,), np.float32)
+    thr = bypass * float(np.percentile(lum, 99))
+    return np.minimum(1.0, thr / np.maximum(lum, 1e-30))[..., None].astype(np.float32)
+
+
+def denoise_stack(
+    stack: np.ndarray, denoise, max_firefly_ratio: float = 20.0, keep: np.ndarray | None = None
+) -> tuple[np.ndarray, float]:
     """Denoise HxWxK planes three at a time; returns ``(denoised, fraction of negative samples clipped)``.
 
     OIDN treats a triplet as one colour image, so adjacent buckets share edge decisions without being mixed.
-    The last triplet is zero-padded.
+    The last triplet is zero-padded. ``keep`` (``bypass_keep``) sends only that share of each pixel to ``denoise``.
     """
     stack = np.asarray(stack, dtype=np.float32)
     neg = float((stack < 0).mean()) if stack.size else 0.0
     src, _ = clamp_fireflies(np.maximum(stack, 0.0), max_firefly_ratio)
+    excess = None
+    if keep is not None:
+        excess, src = src * (1.0 - keep), src * keep
     out = np.empty_like(src)
     k = src.shape[2]
     for i in range(0, k, 3):
@@ -194,6 +213,8 @@ def denoise_stack(stack: np.ndarray, denoise, max_firefly_ratio: float = 20.0) -
         trip = np.zeros(src.shape[:2] + (3,), dtype=np.float32)
         trip[..., : len(idx)] = src[..., idx]
         out[..., idx] = np.maximum(denoise(trip)[..., : len(idx)], 0.0)
+    if excess is not None:
+        out += excess
     return out, neg
 
 
@@ -205,22 +226,33 @@ def blend_planes(noisy: np.ndarray, denoised: np.ndarray, blend: float) -> np.nd
 
 
 def denoise_channels(
-    channels: dict[str, np.ndarray], denoise, blend: float = 0.0, max_firefly_ratio: float = 20.0
+    channels: dict[str, np.ndarray], denoise, blend: float = 0.0, max_firefly_ratio: float = 20.0, bypass: float = 2.0
 ) -> tuple[dict[str, np.ndarray], dict]:
     """Denoise the ``S0.*nm`` buckets (sorted by wavelength) and ``R,G,B`` of a pbrt EXR channel dict.
 
     ``blend`` mixes the noisy render back in (see ``blend_planes``); ``max_firefly_ratio`` is the
-    ``clamp_fireflies`` threshold applied before OIDN (0 disables it).
+    ``clamp_fireflies`` threshold applied before OIDN (0 disables it); ``bypass`` see ``bypass_keep``
+    (one share per pixel, from the bucket sum, or from R+G+B without buckets).
     """
     from exr_multispectral import parse_s0_wavelength_nm  # noqa: PLC0415
 
     out = dict(channels)
     spectral = sorted((lam, n) for n in channels if (lam := parse_s0_wavelength_nm(n)) is not None)
     report: dict = {"n_spectral_buckets": len(spectral)}
+    lum_names = [n for _, n in spectral] or [c for c in "RGB" if c in channels]
+    keep = None
+    if lum_names:
+        lum = sum(np.maximum(channels[n], 0) for n in lum_names)
+        keep = bypass_keep(lum, bypass)
+        report |= {
+            "bypass": bypass,
+            "bypass_pixels": int((keep < 1).sum()),
+            "bypass_energy_fraction": float((lum * (1 - keep[..., 0])).sum() / max(float(lum.sum()), 1e-30)),
+        }
     if spectral:
         names = [n for _, n in spectral]
         cube = np.stack([channels[n] for n in names], axis=2)
-        den, neg = denoise_stack(cube, denoise, max_firefly_ratio)
+        den, neg = denoise_stack(cube, denoise, max_firefly_ratio, keep)
         den = blend_planes(cube, den, blend)
         for j, n in enumerate(names):
             out[n] = den[..., j]
@@ -229,7 +261,7 @@ def denoise_channels(
         report["spectral_negative_fraction_clipped"] = neg
     if all(c in channels for c in "RGB"):
         rgb = np.stack([channels[c] for c in "RGB"], axis=2)
-        den, neg = denoise_stack(rgb, denoise, max_firefly_ratio)
+        den, neg = denoise_stack(rgb, denoise, max_firefly_ratio, keep)
         den = blend_planes(rgb, den, blend)
         for j, c in enumerate("RGB"):
             out[c] = den[..., j]
@@ -258,6 +290,7 @@ def denoise_exr(
     oidn: Path | None = None,
     blend: float = 0.0,
     firefly_ratio: float = 20.0,
+    bypass: float = 2.0,
 ) -> dict:
     """Denoise ``exr_in`` into ``exr_out`` (default ``<stem>_denoised.exr``) and write the sidecar report.
 
@@ -281,7 +314,7 @@ def denoise_exr(
             normal = None
     runner = OidnRunner(binary, albedo, normal, quality=quality, device=device)
     try:
-        out, report = denoise_channels(channels, runner, blend, firefly_ratio)
+        out, report = denoise_channels(channels, runner, blend, firefly_ratio, bypass)
     finally:
         runner.close()
     noisy = None
@@ -324,6 +357,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--oidn", type=Path, default=None, help="oidnDenoise binary (default: auto-detect)")
     ap.add_argument("--blend", type=float, default=0.0, help="0 = full denoise, 1 = noisy render; mixes the noisy render back in")
     ap.add_argument("--firefly-ratio", type=float, default=20.0, help="pre-OIDN single-pixel spike clamp (0 = off)")
+    ap.add_argument("--bypass", type=float, default=2.0, help="light above this x the 99th percentile skips OIDN (lamps; 0 = off)")
     a = ap.parse_args(argv)
     report = denoise_exr(
         a.exr_in,
@@ -337,6 +371,7 @@ def main(argv: list[str] | None = None) -> int:
         oidn=a.oidn,
         blend=a.blend,
         firefly_ratio=a.firefly_ratio,
+        bypass=a.bypass,
     )
     print(json.dumps(report, indent=2))
     print(f"warning: {METRICS_WARNING}", file=sys.stderr)

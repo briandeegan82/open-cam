@@ -56,6 +56,7 @@ render:
     device: cpu
     blend: 0.0             # 0 = full denoise .. 1 = noisy render; mixes the noisy render back in (less blur, more noise)
     firefly_ratio: 20.0    # pre-OIDN single-pixel spike clamp, x brightest neighbour (0 = off)
+    bypass: 2.0            # light above this x the 99th percentile (lamps) skips OIDN and is added back (0 = off)
 validate:
   enabled: true
 validate_emva:

@@ -25,3 +25,4 @@ node_modules/
 # Open Cam Studio frontend sources (the bare src/ rule above is for build trees)
 !gui/studio_web/src/
 third_party/openpgl/
+tools/optix_denoise/build/

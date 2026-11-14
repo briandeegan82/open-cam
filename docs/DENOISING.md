@@ -35,6 +35,7 @@ render:
     guide_spp: 16
     quality: high          # high | balanced | fast
     device: cpu
+    bypass: 2.0            # lamps above 2x the 99th percentile skip the denoiser (0 = off)
 ```
 
 The stage denoises `exr_out` in place, keeps the noisy render as `<stem>_noisy.exr` and writes
@@ -53,6 +54,9 @@ venv/bin/python tools/denoise_spectral_exr.py --exr-in out/x.exr --scene scenes/
 - **Spectral buckets.** The `S0.<λ>nm` buckets are denoised three at a time, sorted by wavelength. OIDN sees
   each triplet as one colour image. `R,G,B` are denoised as one image; other channels are copied unchanged.
   Negative samples are clipped to zero first (the fraction is in the report).
+- **Lamp bypass.** Light above `bypass` x the 99th percentile of the bucket sum (default 2) skips the denoiser and
+  is added back unchanged, the same fraction in every channel of the pixel. Lamps of 1-3 px are converged, and
+  a learned denoiser treats them as fireflies (see "Bright lamps" below). `bypass: 0` hands everything to OIDN.
 - **Device.** `oidnDenoise -d cpu --affinity 0`. Thread pinning raised SIGFPE at device init on a cloud Xeon VM,
   so it is turned off.
 
@@ -102,6 +106,59 @@ A stricter cap (`--ratio 2 --sigma 3`) looks cleaner but starts to move ordinary
 lamps (error 0.185 on the first row). Like the denoiser, this is for figures: the merged image's noise is
 correlated between neighbouring pixels, so it is not a render to measure noise or texture on.
 `paper/ei2027/scripts/render_driving.sh` renders the night panel this way (`NIGHT_SEEDS`, default 4).
+
+## Bright lamps: the bypass
+
+At night the lamps carry most of the light in very few pixels: in the 480x270 wet highway, 458 pixels (0.35 %)
+hold 83 % of the image energy, and a lamp is 1-3 px wide. OIDN spread them into their surroundings (frame total
++0.5 %). OptiX (below) keeps 2-7 % of a 1 px spot and dims 2-3 px spots by 10-25 % at lamp brightness, so it lost
+44 % of the frame. With the bypass the frame total is 0.999 for both, and the lamp-free error does not change
+(table below). Isolated fireflies are clamped before the bypass (`firefly_ratio`), so it does not let them through.
+
+## OptiX (opt-in, NVIDIA GPU)
+
+`tools/denoise_optix.py` runs the same stage (guides, spike clamp, lamp bypass, `<exr>.denoise.json`) with the
+NVIDIA OptiX denoiser, through a small CUDA program, `tools/optix_denoise/optix_denoise.cpp`, built against the
+OptiX 7.7 SDK (`$OPTIX_SDK`, default `~/NVIDIA-OptiX-SDK-7.7.0-linux64-x86_64`; needs `nvcc` and an NVIDIA driver).
+It is not wired into the pipeline config.
+
+```bash
+venv/bin/python tools/denoise_optix.py --build
+venv/bin/python tools/denoise_optix.py --exr-in out/x.exr --scene x.pbrt     # -> out/x_optix.exr (--mode hdr)
+```
+
+`--mode hdr` (default) denoises R,G,B and the buckets three at a time, like the OIDN stage. `--mode aov` predicts
+one filter from R,G,B and the guides and applies it to every bucket (OptiX 7.7 takes 3-channel AOV layers only, so
+the buckets are packed in threes); it was expected to keep the spectrum better and did not.
+
+Night wet highway, 480x270: four renders of 256 spp merged (`merge_seeds.py`), against the mean of 124 other
+renders (seeds 5-128, 31744 spp). Error = mean squared relative error over four colour bands on the road rows,
+lamps excluded; spectral shape = median L1 distance between a pixel's normalised bucket spectrum and the reference's.
+
+| | error | spectral shape | frame total | road behind the lead car | near road |
+|---|---:|---:|---:|---:|---:|
+| merged input | 0.0065 | 0.059 | 0.999 | 1.001 | 1.000 |
+| OIDN, no bypass | 0.0028 | 0.028 | 1.005 | 0.995 | 0.997 |
+| OIDN | 0.0028 | 0.029 | 0.9985 | 0.996 | 0.997 |
+| OptiX hdr, no bypass | 0.0024 | 0.019 | 0.557 | 0.995 | 0.998 |
+| OptiX hdr | 0.0023 | 0.019 | 0.9987 | 0.995 | 0.999 |
+| OptiX aov | 0.0031 | 0.021 | 0.9990 | 0.997 | 0.998 |
+
+IQ-lab diorama (`tools/denoise_sweep.py` scores, R,G,B, against its 2048 spp reference). Detail and edge gains are
+regression slopes of the 1-3 px band on the reference's; the reference's own noise holds the noisy render below 1,
+so the column "of input" divides by the noisy render's value.
+
+| | dead-leaves detail | of input | slanted edge | flat-wall noise | texture error | 99.9 % error |
+|---|---:|---:|---:|---:|---:|---:|
+| 64 spp, OIDN | 0.796 | 0.86 | 0.977 | 0.0070 | 0.088 | 0.65 |
+| 64 spp, OptiX hdr | 0.799 | 0.87 | 0.998 | 0.0040 | 0.099 | 0.66 |
+| 256 spp, OIDN | 0.833 | 0.93 | 0.979 | 0.0054 | 0.085 | 0.52 |
+| 256 spp, OptiX hdr | 0.861 | 0.96 | 0.995 | 0.0035 | 0.093 | 0.53 |
+
+OptiX keeps edges intact, leaves less noise on flat areas and the spectrum closer to the reference; it removes
+about as much fine texture as OIDN and leaves a few more isolated bright pixels (hence the higher texture
+error). The same rule holds: never compute IQ metrics on its output. Both take about 7 s on the night frame, most
+of it the guide render.
 
 ## Limits
 

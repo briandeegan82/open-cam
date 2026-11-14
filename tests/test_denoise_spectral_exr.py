@@ -208,3 +208,34 @@ def test_blend_planes_endpoints_and_range():
     assert np.allclose(dn.blend_planes(noisy, den, 0.25), 2.5)
     with pytest.raises(ValueError):
         dn.blend_planes(noisy, den, 1.5)
+
+
+def test_bypass_keep_shares():
+    lum = np.ones((20, 20), np.float32)
+    lum[0, 0] = 100.0
+    keep = dn.bypass_keep(lum, 2.0)  # threshold 2 x p99 (= 1) = 2
+    assert keep.shape == (20, 20, 1)
+    assert keep[0, 0, 0] == pytest.approx(0.02) and np.all(keep.ravel()[1:] == 1)
+    assert np.all(dn.bypass_keep(lum, 0.0) == 1)
+
+
+def test_bypass_keeps_a_lamp_the_denoiser_would_remove():
+    # a 1 px lamp on a flat background; the "denoiser" caps everything at 3, as learned denoisers flatten such spots
+    stack = np.ones((20, 20, 3), np.float32)
+    stack[6, 6] = 500.0
+    def cap(trip):
+        return np.minimum(trip, 3.0)
+    off, _ = dn.denoise_stack(stack, cap, 0.0)
+    on, _ = dn.denoise_stack(stack, cap, 0.0, dn.bypass_keep(stack.sum(-1), 2.0))
+    assert off[6, 6, 0] == pytest.approx(3.0)
+    assert on.sum() == pytest.approx(stack.sum(), rel=1e-6)
+
+
+def test_channels_report_bypass():
+    ch = {f"S0.{lam}nm": np.ones((20, 20), np.float32) for lam in (400, 500, 600)}
+    ch["S0.500nm"][2, 2] = 1000.0
+    out, rep = dn.denoise_channels(ch, lambda t: t, 0.0, 0.0)
+    # lamp pixel sum 1002, threshold 2 x 3 = 6: (1002 - 6) of 1200 - 3 + 1002
+    assert rep["bypass"] == 2.0 and rep["bypass_pixels"] == 1
+    assert rep["bypass_energy_fraction"] == pytest.approx(996 / 2199, rel=1e-4)
+    assert out["S0.500nm"][2, 2] == pytest.approx(1000.0)
