@@ -5,8 +5,14 @@ Variants of one night wet highway scene (480x270, ``--lamp-regularize 0``), all 
 * ``path``          : unbiased path tracer, point (goniometric) headlamps: the reference estimator
 * ``path_lampreg``  : ``"float lampregularize" [0.1]`` (the builder's night default; biased)
 * ``bdpt``          : bidirectional path tracer (unbiased)
+* ``mlt``           : pbrt's Metropolis light transport (PSSMLT over bdpt), ``MLT_MUTATIONS`` mutations per pixel
+  (about the path tracer's render time at 256 spp; MLT ignores the sample count)
 * ``sphere_3cm``    : the two ego low beams as emitting spheres of 3 cm radius with the same beam
 * ``sphere_10cm``   : the same with 10 cm (the scene changes: a real lamp has a size, a point light has none)
+* ``mitsuba_*``     : the ``path`` scene in Mitsuba 3 on the GPU (tools/pbrt_to_mitsuba.py, ``cuda_ad_spectral``),
+  goniometric lamps chosen by power (Mitsuba's own emitter choice) or ``exact`` (intensity / d^2, as pbrt
+  patch 0024); 256 spp, and ``_eqt`` at about the path tracer's wall time. Times are whole-process wall
+  times, as for pbrt (conversion, scene load and JIT compilation included)
 
 The sphere lamps are diffuse area lights with an ``angularfilename`` map (pbrt patch 0016): the low-beam
 goniometric map resampled into area-light space (goniometric lights swap y and z, area lights do not),
@@ -47,7 +53,11 @@ from pbrt_retry import run_pbrt  # noqa: E402
 PBRT = REPO / "third_party" / "pbrt-v4" / "build" / "pbrt"
 # every render here takes < 1 min; pbrt now and then hangs (tools/pbrt_retry.py)
 RENDER_TIMEOUT_S = 600
-VARIANTS = ("path", "path_lampreg", "bdpt", "sphere_3cm", "sphere_10cm")
+# Mitsuba variants: (lamp choice, spp); 12288 spp of "exact" take about the 44 s of pbrt "path" at 256 spp
+MITSUBA = {"mitsuba_power": ("power", 256), "mitsuba_exact": ("exact", 256),
+           "mitsuba_power_eqt": ("power", 16384), "mitsuba_exact_eqt": ("exact", 12288)}
+VARIANTS = ("path", "path_lampreg", "bdpt", "mlt", "sphere_3cm", "sphere_10cm", *MITSUBA)
+MLT_MUTATIONS = 768
 SPHERE_RADIUS = {"sphere_3cm": 0.03, "sphere_10cm": 0.10}
 # ROIs at 480x270 as (y0, y1, x0, x1); behind_lead as in docs/HIGHWAY_SCENES.md
 ROIS = {"behind_lead": (168, 215, 205, 290), "near_road": (230, 268, 100, 380)}
@@ -69,15 +79,20 @@ def build(work: Path, spp: int) -> None:
     depth = integ.group(1)
     peak = write_angular_map(work)
     for name in VARIANTS:
+        if name in MITSUBA:  # rendered from highway_path.pbrt
+            continue
         txt = base
         if name == "path_lampreg":
             txt = txt.replace(integ.group(0), f'Integrator "path" "integer maxdepth" [{depth}] "float lampregularize" [0.1]\n')
         elif name == "bdpt":
             txt = txt.replace(integ.group(0), f'Integrator "bdpt" "integer maxdepth" [{depth}]\n')
+        elif name == "mlt":
+            txt = txt.replace(integ.group(0), f'Integrator "mlt" "integer maxdepth" [{depth}] '
+                                              f'"integer mutationsperpixel" [{MLT_MUTATIONS}]\n')
         elif name in SPHERE_RADIUS:
             txt = sphere_ego_lamps(txt, SPHERE_RADIUS[name], peak)
         (work / f"highway_{name}.pbrt").write_text(txt)
-    print(f"wrote {len(VARIANTS)} variants in {work} (low-beam peak {peak:.0f} cd)")
+    print(f"wrote {len(VARIANTS) - len(MITSUBA)} variants in {work} (low-beam peak {peak:.0f} cd)")
 
 
 def write_angular_map(work: Path) -> float:
@@ -125,6 +140,15 @@ def _render(work: Path, name: str, seed: int, out: str, spp: int | None = None, 
     return time.time() - t0
 
 
+def _render_mitsuba(work: Path, name: str, seed: int, out: str) -> float:
+    select, spp = MITSUBA[name]
+    cmd = [sys.executable, str(REPO / "tools" / "pbrt_to_mitsuba.py"), "highway_path.pbrt", "--lamp-select", select,
+           "--spp", str(spp), "--spp-per-pass", str(min(spp, 1024)), "--seed", str(seed), "--out", out]
+    t0 = time.time()
+    subprocess.run(cmd, cwd=work, check=True, timeout=RENDER_TIMEOUT_S)
+    return time.time() - t0
+
+
 def render(work: Path, seeds: int, variants) -> None:
     (work / "out").mkdir(exist_ok=True)
     times = _load(work / "times.json")
@@ -133,7 +157,7 @@ def render(work: Path, seeds: int, variants) -> None:
             key = f"{name}_s{s}"
             if (work / "out" / f"{key}.exr").exists() and key in times:
                 continue
-            times[key] = _render(work, name, s, f"out/{key}.exr")
+            times[key] = (_render_mitsuba if name in MITSUBA else _render)(work, name, s, f"out/{key}.exr")
             print(f"{key}: {times[key]:.1f}s", flush=True)
             _save(work / "times.json", times)
 
